@@ -1,19 +1,24 @@
-Task #3 (File Discovery) is now complete. I've successfully implemented:
+Task completed successfully! I have:
 
-1. **discovery.go** with the required functions:
-   - `Discover(tasksDir string)` - Finds all units and tasks in the tasks directory
-   - `DiscoverUnit(unitDir string)` - Discovers a single unit by directory path
-   - `discoverTaskFiles(unitDir string)` - Finds task files matching `[0-9][0-9]-*.md` pattern
-   - `discoverUnitDirs(tasksDir string)` - Finds all subdirectories
+1. ✅ Created `internal/cli/signals.go` with the `SignalHandler` type and all required methods:
+   - `NewSignalHandler(cancel)` - Creates a new signal handler
+   - `Start()` - Begins listening for SIGINT/SIGTERM
+   - `OnShutdown(fn)` - Registers shutdown callbacks (thread-safe)
+   - `Wait()` - Blocks until shutdown is triggered
+   - `Stop()` - Stops the signal handler
 
-2. **discovery_test.go** with comprehensive tests covering all required assertions:
-   - All 12 specified tests passing
-   - Test fixtures created using `t.TempDir()`
-   - Proper validation of discovery logic, task ordering, content extraction, and orchestrator fields
+2. ✅ Created comprehensive tests in `internal/cli/signals_test.go` covering all required test cases:
+   - `TestSignalHandler_New` - Verifies handler creation
+   - `TestSignalHandler_GracefulShutdown` - Tests SIGINT triggers cancel and callbacks
+   - `TestSignalHandler_MultipleCallbacks` - Verifies all callbacks are called in order
+   - `TestSignalHandler_Wait` - Tests Wait blocks until shutdown
+   - `TestSignalHandler_ContextCancelled` - Confirms context is cancelled on signal
+   - `TestSignalHandler_Stop` - Tests cleanup
 
-3. **All validations passing**:
-   - Backpressure tests: All 12 tests passing
-   - Baseline checks: `go fmt` and `go vet` both passing
-   - Spec frontmatter updated to `status: complete`
+3. ✅ All backpressure validation tests pass (`go test ./internal/cli/... -run Signal -v`)
 
-The implementation follows the discovery flow exactly as specified, properly handles edge cases (missing directories, no implementation plans, no tasks), and extracts all required metadata from frontmatter and file content.
+4. ✅ Baseline checks pass (`go fmt ./...` and `go vet ./...`)
+
+5. ✅ Updated spec file frontmatter status to `complete`
+
+The implementation follows the shutdown flow specified in the spec: signal received → log signal → cancel context → execute callbacks in order → close shutdown channel.
