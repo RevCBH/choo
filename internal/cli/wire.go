@@ -81,9 +81,7 @@ func (o *Orchestrator) Close() error {
 
 	// Close event bus
 	if o.Events != nil {
-		if err := o.Events.Close(); err != nil {
-			return fmt.Errorf("failed to close event bus: %w", err)
-		}
+		o.Events.Close()
 	}
 
 	return nil
