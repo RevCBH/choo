@@ -72,5 +72,6 @@ managing git worktrees and the full PR lifecycle.`,
 	a.rootCmd.AddCommand(
 		NewVersionCmd(a),
 		NewStatusCmd(a),
+		NewRunCmd(a),
 	)
 }
