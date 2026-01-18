@@ -1,6 +1,6 @@
 ---
 task: 2
-status: pending
+status: complete
 backpressure: "go test ./internal/config/... -run TestDefault"
 depends_on: [1]
 ---
