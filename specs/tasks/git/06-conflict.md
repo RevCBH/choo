@@ -1,14 +1,13 @@
 ---
 task: 6
-status: pending
+status: complete
 backpressure: "go test ./internal/git/..."
 depends_on: [5]
 ---
 
 # Conflict Resolution with Claude
 
-**Parent spec**: `/specs/GIT.md`
-**Task**: #6 of 6 in implementation plan
+**Parent spec**: `/specs/GIT.md` **Task**: #6 of 6 in implementation plan
 
 ## Objective
 
@@ -17,12 +16,16 @@ Implement conflict resolution using Claude CLI with up to 3 retry attempts.
 ## Dependencies
 
 ### External Specs (must be implemented)
+
 - CLAUDE - provides `*claude.Client` for conflict resolution
 
 ### Task Dependencies (within this unit)
-- Task #5 must be complete (provides: `MergeManager`, `getConflictedFiles`, `continueRebase`)
+
+- Task #5 must be complete (provides: `MergeManager`, `getConflictedFiles`,
+  `continueRebase`)
 
 ### Package Dependencies
+
 - `internal/claude`
 - Standard library
 
@@ -101,21 +104,21 @@ go test ./internal/git/... -v -run TestConflict
 
 ### Must Pass
 
-| Test | Assertion |
-|------|-----------|
-| `TestResolveConflicts_Success` | Resolves conflicts and continues rebase |
-| `TestResolveConflicts_Retry` | Retries up to MaxConflictAttempts times |
-| `TestResolveConflicts_MaxAttempts` | Fails after MaxConflictAttempts |
-| `TestResolveConflicts_NoConflicts` | Returns immediately if no conflicts |
-| `TestBuildConflictPrompt` | Includes all conflicted files in prompt |
-| `TestBuildConflictPrompt_Content` | Includes file contents with markers |
+| Test                               | Assertion                               |
+| ---------------------------------- | --------------------------------------- |
+| `TestResolveConflicts_Success`     | Resolves conflicts and continues rebase |
+| `TestResolveConflicts_Retry`       | Retries up to MaxConflictAttempts times |
+| `TestResolveConflicts_MaxAttempts` | Fails after MaxConflictAttempts         |
+| `TestResolveConflicts_NoConflicts` | Returns immediately if no conflicts     |
+| `TestBuildConflictPrompt`          | Includes all conflicted files in prompt |
+| `TestBuildConflictPrompt_Content`  | Includes file contents with markers     |
 
 ### Test Fixtures
 
-| Fixture | Location | Purpose |
-|---------|----------|---------|
-| Mock Claude client | In test | Test resolution without API |
-| Conflicted files | Created in test | Files with conflict markers |
+| Fixture            | Location        | Purpose                     |
+| ------------------ | --------------- | --------------------------- |
+| Mock Claude client | In test         | Test resolution without API |
+| Conflicted files   | Created in test | Files with conflict markers |
 
 ### CI Compatibility
 
