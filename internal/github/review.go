@@ -60,11 +60,6 @@ func (c *PRClient) getReactions(ctx context.Context, prNumber int) ([]Reaction, 
 	return reactions, nil
 }
 
-// GetPRComments is a stub for Task #5
-func (c *PRClient) GetPRComments(ctx context.Context, prNumber int) ([]PRComment, error) {
-	return []PRComment{}, nil
-}
-
 // GetReviewStatus fetches the current review status from reactions
 func (c *PRClient) GetReviewStatus(ctx context.Context, prNumber int) (*ReviewState, error) {
 	reactions, err := c.getReactions(ctx, prNumber)

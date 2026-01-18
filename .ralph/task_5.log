@@ -1,22 +1,35 @@
-Task #5 (GitHub Auto-Detection) is now complete! 
+Excellent! Task #5 (PR Comments) is now complete. Here's a summary of what was implemented:
 
-Here's what was implemented:
+## Summary
 
-**Files Created:**
-- `internal/config/github.go` - GitHub detection logic with `detectGitHubRepo()` and `parseGitHubURL()` functions
-- `internal/config/github_test.go` - Comprehensive test suite with all 7 required tests
+I successfully implemented PR comment fetching functionality as specified in task #5:
 
-**All Tests Passing:**
-- TestParseGitHubURL_HTTPS_WithGit ✓
-- TestParseGitHubURL_HTTPS_NoGit ✓
-- TestParseGitHubURL_SSH_WithGit ✓
-- TestParseGitHubURL_SSH_NoGit ✓
-- TestParseGitHubURL_GitLab ✓ (correctly returns error)
-- TestParseGitHubURL_Invalid ✓ (correctly returns error)
-- TestDetectGitHubRepo_Integration ✓
+### Files Modified/Created:
 
-**Baseline Checks:**
+1. **internal/github/comments.go** - Added:
+   - `ghReviewComment` and `ghUser` types for GitHub API response parsing
+   - `GetPRComments()` - Fetches all review comments on a PR via GitHub API
+   - `GetUnaddressedComments()` - Filters comments created after a given timestamp
+
+2. **internal/github/review.go** - Removed:
+   - Stub implementation of `GetPRComments()` (moved to comments.go with full implementation)
+
+3. **internal/github/comments_test.go** - Created with 8 tests:
+   - `TestGetPRComments_Empty` - Handles PR with no comments
+   - `TestGetPRComments_Multiple` - Parses multiple comments correctly
+   - `TestGetPRComments_ParsesPath` - Extracts file path correctly
+   - `TestGetPRComments_ParsesLine` - Handles line numbers including null values
+   - `TestGetPRComments_ParsesAuthor` - Extracts author login correctly
+   - `TestGetUnaddressedComments_FiltersBySince` - Filters by timestamp
+   - `TestGetUnaddressedComments_AllNew` - Returns all when all are new
+   - `TestGetUnaddressedComments_NoneNew` - Returns empty when none are new
+
+4. **specs/tasks/github/05-comments.md** - Updated:
+   - Status changed from `in_progress` to `complete`
+
+### Validation Results:
+- All 8 required tests pass
 - `go fmt ./...` - passed
 - `go vet ./...` - passed
 
-The spec frontmatter has been updated to `status: complete`.
+The implementation correctly handles the GitHub API's review comments endpoint, including proper handling of null line numbers for general comments, and integrates with the existing review polling functionality from task #3.
