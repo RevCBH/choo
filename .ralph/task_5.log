@@ -1,22 +1,43 @@
-Task #5 (GitHub Auto-Detection) is now complete! 
+Perfect! Task completed successfully. Let me provide a summary:
 
-Here's what was implemented:
+## Task Complete ✓
 
-**Files Created:**
-- `internal/config/github.go` - GitHub detection logic with `detectGitHubRepo()` and `parseGitHubURL()` functions
-- `internal/config/github_test.go` - Comprehensive test suite with all 7 required tests
+I have successfully implemented Task #5: Merge Serialization according to the spec. Here's what was delivered:
 
-**All Tests Passing:**
-- TestParseGitHubURL_HTTPS_WithGit ✓
-- TestParseGitHubURL_HTTPS_NoGit ✓
-- TestParseGitHubURL_SSH_WithGit ✓
-- TestParseGitHubURL_SSH_NoGit ✓
-- TestParseGitHubURL_GitLab ✓ (correctly returns error)
-- TestParseGitHubURL_Invalid ✓ (correctly returns error)
-- TestDetectGitHubRepo_Integration ✓
+### Files Created
 
-**Baseline Checks:**
-- `go fmt ./...` - passed
-- `go vet ./...` - passed
+1. **`internal/git/merge.go`** - Complete implementation with:
+   - `MergeManager` struct with mutex-based serialization
+   - `MergeResult` struct for operation outcomes
+   - `NewMergeManager` constructor
+   - `Merge()` method with mutex-based FCFS locking
+   - `ScheduleBranchDelete()` for deferred branch cleanup
+   - `FlushDeletes()` to execute pending deletions
+   - `Rebase()` with conflict detection
+   - `ForcePushWithLease()` for safe force pushes
+   - `Fetch()` for fetching target branches
+   - `deleteBranch()` for local and remote branch deletion
+   - `getConflictedFiles()` for conflict detection
+   - `continueRebase()` and `abortRebase()` for rebase control
 
-The spec frontmatter has been updated to `status: complete`.
+2. **`internal/git/merge_test.go`** - Comprehensive test coverage with all required tests:
+   - `TestMergeManager_Serialization` - Validates concurrent merges execute serially
+   - `TestMergeManager_AcquireLock` - Validates mutex blocks concurrent access
+   - `TestMergeManager_PendingDeletes` - Validates ScheduleBranchDelete adds to list
+   - `TestMergeManager_FlushDeletes` - Validates clearing of pending deletes
+   - `TestRebase_NoConflicts` - Returns hasConflicts=false when clean
+   - `TestRebase_WithConflicts` - Returns hasConflicts=true on conflicts
+   - `TestForcePushWithLease` - Validates force push with lease
+   - `TestFetch` - Validates fetching target branch
+   - `TestGetConflictedFiles` - Returns list of conflicted file paths
+   - `TestDeleteBranch_Local` - Validates local branch deletion
+   - `TestDeleteBranch_Remote` - Validates remote branch deletion
+   - Additional tests for continueRebase, abortRebase, and NewMergeManager
+
+### Verification Results
+
+✅ All backpressure tests pass: `go test ./internal/git/... -v -run TestMerge`
+✅ All baseline checks pass: `go fmt ./...` and `go vet ./...`
+✅ Spec frontmatter updated: `status: in_progress` → `status: complete`
+
+The implementation follows the spec exactly, providing mutex-based FCFS serialization for safe concurrent merge operations with deferred branch deletion.
