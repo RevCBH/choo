@@ -118,13 +118,14 @@ func detectOwnerRepo() (owner, repo string, err error) {
 
 // doRequest executes an HTTP request with rate limit handling
 func (c *PRClient) doRequest(ctx context.Context, method, url string, body any) (*http.Response, error) {
-	var reqBody io.Reader
+	// Marshal body once, create fresh reader for each attempt
+	var jsonData []byte
 	if body != nil {
-		jsonData, err := json.Marshal(body)
+		var err error
+		jsonData, err = json.Marshal(body)
 		if err != nil {
 			return nil, fmt.Errorf("failed to marshal request body: %w", err)
 		}
-		reqBody = bytes.NewReader(jsonData)
 	}
 
 	maxRetries := 5
@@ -132,6 +133,12 @@ func (c *PRClient) doRequest(ctx context.Context, method, url string, body any) 
 	backoff := initialBackoff
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		// Create fresh reader for each attempt (bytes.Reader is at EOF after first use)
+		var reqBody io.Reader
+		if jsonData != nil {
+			reqBody = bytes.NewReader(jsonData)
+		}
+
 		req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create request: %w", err)
