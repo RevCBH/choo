@@ -67,10 +67,10 @@ func (a *App) ResumeOrchestrator(ctx context.Context, opts RunOptions) error {
 		return err
 	}
 
-	// TODO: Load existing state from frontmatter
-	// For now, create a placeholder discovery to validate the pattern
-	disc := &discovery.Discovery{
-		Units: []*discovery.Unit{},
+	// Load existing state from frontmatter
+	disc, err := loadResumeState(opts.TasksDir)
+	if err != nil {
+		return fmt.Errorf("failed to load resume state: %w", err)
 	}
 
 	// Validate state is resumable
@@ -80,6 +80,74 @@ func (a *App) ResumeOrchestrator(ctx context.Context, opts RunOptions) error {
 
 	// Continue with RunOrchestrator from saved state
 	return a.RunOrchestrator(ctx, opts)
+}
+
+// loadResumeState loads discovery state from task spec frontmatter
+func loadResumeState(tasksDir string) (*discovery.Discovery, error) {
+	// TODO: Implement full frontmatter parsing
+	// For now, use discovery package to scan for units
+	disc := &discovery.Discovery{
+		Units: []*discovery.Unit{},
+	}
+
+	// Scan tasks directory for units (subdirectories with task specs)
+	entries, err := os.ReadDir(tasksDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read tasks directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		unitPath := fmt.Sprintf("%s/%s", tasksDir, entry.Name())
+		unit := &discovery.Unit{
+			ID:     entry.Name(),
+			Path:   unitPath,
+			Status: discovery.UnitStatusPending,
+			Tasks:  []*discovery.Task{},
+		}
+
+		// Scan for task specs in this unit
+		taskFiles, err := os.ReadDir(unitPath)
+		if err != nil {
+			continue
+		}
+
+		taskNum := 0
+		for _, tf := range taskFiles {
+			if tf.IsDir() || !isTaskSpec(tf.Name()) {
+				continue
+			}
+			taskNum++
+
+			task := &discovery.Task{
+				Number:   taskNum,
+				FilePath: tf.Name(),
+				Status:   discovery.TaskStatusPending,
+			}
+			unit.Tasks = append(unit.Tasks, task)
+		}
+
+		if len(unit.Tasks) > 0 {
+			disc.Units = append(disc.Units, unit)
+		}
+	}
+
+	return disc, nil
+}
+
+// isTaskSpec checks if filename matches task spec pattern (NN-*.md)
+func isTaskSpec(name string) bool {
+	if len(name) < 6 { // minimum: "01-.md"
+		return false
+	}
+	// Check for digit-digit-dash prefix and .md suffix
+	return name[0] >= '0' && name[0] <= '9' &&
+		name[1] >= '0' && name[1] <= '9' &&
+		name[2] == '-' &&
+		len(name) > 5 && name[len(name)-3:] == ".md"
 }
 
 // validateResumeState checks if state can be resumed

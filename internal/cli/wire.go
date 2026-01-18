@@ -41,7 +41,17 @@ func WireOrchestrator(cfg *config.Config) (*Orchestrator, error) {
 	gitManager := git.NewWorktreeManager(cfg)
 
 	// Create GitHub PRClient
-	ghClient := github.NewPRClient(cfg, eventBus)
+	pollInterval, _ := cfg.ReviewPollIntervalDuration()
+	reviewTimeout, _ := cfg.ReviewTimeoutDuration()
+	ghClient, err := github.NewPRClient(github.PRClientConfig{
+		Owner:         cfg.GitHub.Owner,
+		Repo:          cfg.GitHub.Repo,
+		PollInterval:  pollInterval,
+		ReviewTimeout: reviewTimeout,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create GitHub client: %w", err)
+	}
 
 	// Create Scheduler (depends on event bus and discovery)
 	sched := scheduler.New(cfg, eventBus, disc)
