@@ -6,6 +6,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// VersionInfo holds version metadata
+type VersionInfo struct {
+	Version string
+	Commit  string
+	Date    string
+}
+
 // App represents the CLI application with all wired dependencies
 type App struct {
 	// Root command
@@ -20,9 +27,7 @@ type App struct {
 	shutdown chan struct{}
 
 	// Version information
-	version string
-	commit  string
-	date    string
+	versionInfo VersionInfo
 }
 
 // New creates a new CLI application
@@ -41,9 +46,11 @@ func (a *App) Execute() error {
 
 // SetVersion sets the version string for the version command
 func (a *App) SetVersion(version, commit, date string) {
-	a.version = version
-	a.commit = commit
-	a.date = date
+	a.versionInfo = VersionInfo{
+		Version: version,
+		Commit:  commit,
+		Date:    date,
+	}
 }
 
 // setupRootCmd configures the root Cobra command
@@ -60,4 +67,7 @@ managing git worktrees and the full PR lifecycle.`,
 	// Add persistent flags
 	a.rootCmd.PersistentFlags().BoolVarP(&a.verbose, "verbose", "v", false,
 		"Verbose output")
+
+	// Add subcommands
+	a.rootCmd.AddCommand(NewVersionCmd(a))
 }
