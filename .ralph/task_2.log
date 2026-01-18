@@ -1,35 +1,30 @@
-Excellent! All tests pass including the `TestExtractTitle_Found` and `TestExtractTitle_NotFound` tests.
+Perfect! Task #2 (Display Formatting) has been completed successfully. Here's a summary of what was implemented:
 
-## Summary
+## Completed Implementation
 
-Task #2 (Frontmatter Parsing) is now complete. Here's what was accomplished:
+### Files Created/Modified:
+1. **internal/cli/display.go** - Created with all required types and functions:
+   - `DisplayConfig` - Controls status output formatting
+   - `UnitDisplay` - Represents a unit's display state
+   - `TaskDisplay` - Represents a task's display state
+   - `StatusSymbol` - Type with constants for status symbols (✓, ●, ○, ✗, →)
+   - `RenderProgressBar()` - Renders progress bars with Unicode block characters
+   - `GetStatusSymbol()` - Maps task status to appropriate symbols
+   - `FormatUnitStatus()` - Formats unit status for display
+   - `FormatTaskLine()` - Formats individual task lines
 
-### Implemented Files:
-- `internal/discovery/frontmatter.go` - Contains all required types and functions:
-  - `UnitFrontmatter` struct
-  - `TaskFrontmatter` struct
-  - `ParseFrontmatter()` function
-  - `ParseUnitFrontmatter()` function
-  - `ParseTaskFrontmatter()` function
-  - `extractTitle()` function
+2. **internal/discovery/types.go** - Created with required types referenced by display.go:
+   - `Unit`, `UnitStatus`, `Task`, `TaskStatus` types
 
-- `internal/discovery/frontmatter_test.go` - All 9 required tests:
-  - ✓ `TestParseFrontmatter_Valid`
-  - ✓ `TestParseFrontmatter_NoFrontmatter`
-  - ✓ `TestParseFrontmatter_Unclosed`
-  - ✓ `TestParseUnitFrontmatter_Complete`
-  - ✓ `TestParseUnitFrontmatter_Minimal`
-  - ✓ `TestParseTaskFrontmatter_Complete`
-  - ✓ `TestParseTaskFrontmatter_WithDeps`
-  - ✓ `TestExtractTitle_Found`
-  - ✓ `TestExtractTitle_NotFound`
+3. **internal/cli/display_test.go** - Created comprehensive tests:
+   - All 7 required tests passing
+   - Tests cover empty, half, and full progress bars
+   - Tests cover all status symbol mappings
 
-### Validation Passed:
-- ✓ Backpressure command: `go test ./internal/discovery/... -run TestParse -v`
-- ✓ Baseline check: `go fmt ./...`
-- ✓ Baseline check: `go vet ./...`
+### Validation Results:
+- ✓ All tests pass (7/7)
+- ✓ `go fmt ./...` passes
+- ✓ `go vet ./...` passes
+- ✓ Spec frontmatter updated to `status: complete`
 
-### Spec Updated:
-- ✓ Status changed from `in_progress` to `complete` in `specs/tasks/discovery/02-frontmatter-parsing.md`
-
-The implementation correctly handles YAML frontmatter extraction and parsing for both IMPLEMENTATION_PLAN.md (unit) files and task files, with proper error handling for edge cases.
+The implementation follows the spec exactly, using Unicode block characters (█ and ░) for progress bars and appropriate symbols for task status indicators.
