@@ -1,6 +1,13 @@
 package config
 
-import "time"
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
 
 // Config holds all configuration for the Ralph Orchestrator.
 // It is immutable after creation via LoadConfig().
@@ -109,4 +116,54 @@ func (c *Config) ReviewTimeoutDuration() (time.Duration, error) {
 // ReviewPollIntervalDuration returns the poll interval as a Duration.
 func (c *Config) ReviewPollIntervalDuration() (time.Duration, error) {
 	return time.ParseDuration(c.Review.PollInterval)
+}
+
+// LoadConfig loads configuration from the repository root.
+// It applies defaults, then file values, then environment overrides,
+// then validates and auto-detects values.
+//
+// Parameters:
+//   - repoRoot: absolute path to the repository root directory
+//
+// Returns the validated Config or an error if validation fails.
+func LoadConfig(repoRoot string) (*Config, error) {
+	cfg := DefaultConfig()
+
+	// Try to load config file (optional)
+	configPath := filepath.Join(repoRoot, ".choo.yaml")
+	if data, err := os.ReadFile(configPath); err == nil {
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return nil, fmt.Errorf("parse config: %w", err)
+		}
+	}
+	// Note: missing config file is not an error (use defaults)
+
+	// Apply environment variable overrides
+	applyEnvOverrides(cfg)
+
+	// Resolve relative paths
+	if !filepath.IsAbs(cfg.Worktree.BasePath) {
+		cfg.Worktree.BasePath = filepath.Join(repoRoot, cfg.Worktree.BasePath)
+	}
+
+	// Auto-detect GitHub owner/repo if set to "auto"
+	if cfg.GitHub.Owner == "auto" || cfg.GitHub.Repo == "auto" {
+		owner, repo, err := detectGitHubRepo(repoRoot)
+		if err != nil {
+			return nil, fmt.Errorf("auto-detect github: %w", err)
+		}
+		if cfg.GitHub.Owner == "auto" {
+			cfg.GitHub.Owner = owner
+		}
+		if cfg.GitHub.Repo == "auto" {
+			cfg.GitHub.Repo = repo
+		}
+	}
+
+	// Validate
+	if err := validateConfig(cfg); err != nil {
+		return nil, fmt.Errorf("validate config: %w", err)
+	}
+
+	return cfg, nil
 }
