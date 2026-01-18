@@ -95,19 +95,15 @@ func loadConfig(tasksDir string) (*config.Config, error) {
 			return nil, fmt.Errorf("failed to parse config file: %w", err)
 		}
 
-		// Override tasks_dir if provided
-		if tasksDir != "" {
-			cfg.TasksDir = tasksDir
-		}
-
 		return &cfg, nil
 	}
 
 	// Fall back to defaults
 	return &config.Config{
-		TasksDir:     tasksDir,
 		Parallelism:  4,
 		TargetBranch: "main",
-		WorktreeDir:  ".worktrees",
+		Worktree: config.WorktreeConfig{
+			BasePath: ".worktrees",
+		},
 	}, nil
 }

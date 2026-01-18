@@ -10,10 +10,11 @@ import (
 
 func TestWireOrchestrator_AllComponents(t *testing.T) {
 	cfg := &config.Config{
-		TasksDir:     "specs/tasks",
 		Parallelism:  4,
 		TargetBranch: "main",
-		WorktreeDir:  ".worktrees",
+		Worktree: config.WorktreeConfig{
+			BasePath: ".worktrees",
+		},
 	}
 
 	orch, err := WireOrchestrator(cfg)
@@ -48,10 +49,11 @@ func TestWireOrchestrator_AllComponents(t *testing.T) {
 
 func TestWireOrchestrator_EventBus(t *testing.T) {
 	cfg := &config.Config{
-		TasksDir:     "specs/tasks",
 		Parallelism:  4,
 		TargetBranch: "main",
-		WorktreeDir:  ".worktrees",
+		Worktree: config.WorktreeConfig{
+			BasePath: ".worktrees",
+		},
 	}
 
 	orch, err := WireOrchestrator(cfg)
@@ -74,10 +76,11 @@ func TestWireOrchestrator_EventBus(t *testing.T) {
 
 func TestOrchestrator_Close(t *testing.T) {
 	cfg := &config.Config{
-		TasksDir:     "specs/tasks",
 		Parallelism:  4,
 		TargetBranch: "main",
-		WorktreeDir:  ".worktrees",
+		Worktree: config.WorktreeConfig{
+			BasePath: ".worktrees",
+		},
 	}
 
 	orch, err := WireOrchestrator(cfg)
@@ -110,17 +113,14 @@ func TestLoadConfig_Default(t *testing.T) {
 	}
 
 	// Verify defaults
-	if cfg.TasksDir != "specs/tasks" {
-		t.Errorf("Expected TasksDir 'specs/tasks', got '%s'", cfg.TasksDir)
-	}
 	if cfg.Parallelism != 4 {
 		t.Errorf("Expected Parallelism 4, got %d", cfg.Parallelism)
 	}
 	if cfg.TargetBranch != "main" {
 		t.Errorf("Expected TargetBranch 'main', got '%s'", cfg.TargetBranch)
 	}
-	if cfg.WorktreeDir != ".worktrees" {
-		t.Errorf("Expected WorktreeDir '.worktrees', got '%s'", cfg.WorktreeDir)
+	if cfg.Worktree.BasePath != ".worktrees" {
+		t.Errorf("Expected Worktree.BasePath '.worktrees', got '%s'", cfg.Worktree.BasePath)
 	}
 }
 
@@ -133,10 +133,10 @@ func TestLoadConfig_FromFile(t *testing.T) {
 	defer os.Chdir(originalWd)
 
 	// Create a test .choo.yaml file
-	configContent := `tasks_dir: custom/tasks
-parallelism: 8
+	configContent := `parallelism: 8
 target_branch: develop
-worktree_dir: .custom-worktrees
+worktree:
+  base_path: .custom-worktrees
 `
 	configPath := filepath.Join(tmpDir, ".choo.yaml")
 	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
@@ -153,16 +153,13 @@ worktree_dir: .custom-worktrees
 	}
 
 	// Verify config loaded from file
-	if cfg.TasksDir != "custom/tasks" {
-		t.Errorf("Expected TasksDir 'custom/tasks', got '%s'", cfg.TasksDir)
-	}
 	if cfg.Parallelism != 8 {
 		t.Errorf("Expected Parallelism 8, got %d", cfg.Parallelism)
 	}
 	if cfg.TargetBranch != "develop" {
 		t.Errorf("Expected TargetBranch 'develop', got '%s'", cfg.TargetBranch)
 	}
-	if cfg.WorktreeDir != ".custom-worktrees" {
-		t.Errorf("Expected WorktreeDir '.custom-worktrees', got '%s'", cfg.WorktreeDir)
+	if cfg.Worktree.BasePath != ".custom-worktrees" {
+		t.Errorf("Expected Worktree.BasePath '.custom-worktrees', got '%s'", cfg.Worktree.BasePath)
 	}
 }
