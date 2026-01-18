@@ -1,6 +1,6 @@
 ---
 task: 9
-status: pending
+status: complete
 backpressure: "go test ./internal/cli/... -run Wire"
 depends_on: [1, 6]
 ---
