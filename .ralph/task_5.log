@@ -1,0 +1,22 @@
+Task #5 (GitHub Auto-Detection) is now complete! 
+
+Here's what was implemented:
+
+**Files Created:**
+- `internal/config/github.go` - GitHub detection logic with `detectGitHubRepo()` and `parseGitHubURL()` functions
+- `internal/config/github_test.go` - Comprehensive test suite with all 7 required tests
+
+**All Tests Passing:**
+- TestParseGitHubURL_HTTPS_WithGit ✓
+- TestParseGitHubURL_HTTPS_NoGit ✓
+- TestParseGitHubURL_SSH_WithGit ✓
+- TestParseGitHubURL_SSH_NoGit ✓
+- TestParseGitHubURL_GitLab ✓ (correctly returns error)
+- TestParseGitHubURL_Invalid ✓ (correctly returns error)
+- TestDetectGitHubRepo_Integration ✓
+
+**Baseline Checks:**
+- `go fmt ./...` - passed
+- `go vet ./...` - passed
+
+The spec frontmatter has been updated to `status: complete`.

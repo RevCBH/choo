@@ -1,0 +1,4 @@
+tasks_dir: test/tasks
+parallelism: 8
+target_branch: develop
+worktree_dir: .test-worktrees

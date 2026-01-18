@@ -1,0 +1,33 @@
+Task #4 (Config Validation) has been completed successfully! Here's what was implemented:
+
+## Summary
+
+I created the config validation logic as specified in the task spec:
+
+### Files Created
+
+1. **internal/config/validate.go**
+   - `ValidationError` type with structured error details (Field, Value, Message)
+   - `validateConfig` function that validates all config fields according to the rules
+   - Uses `errors.Join()` to collect and return multiple validation errors
+
+2. **internal/config/validate_test.go**
+   - All 19 required test cases covering:
+     - Parallelism validation (zero, negative, valid)
+     - GitHub owner/repo validation (empty, "auto", valid)
+     - Claude command and max_turns validation
+     - Merge max_conflict_retries validation
+     - Review timeout and poll_interval duration validation
+     - LogLevel validation (including case-sensitivity)
+     - BaselineCheck validation (name and command)
+     - Worktree setup/teardown command validation
+     - Multiple errors joined together
+     - Valid config with no errors
+
+### Validation Results
+
+- ✅ Backpressure command passed: `go test ./internal/config/... -run TestValidat`
+- ✅ Baseline checks passed: `go fmt ./...` and `go vet ./...`
+- ✅ Spec frontmatter status updated to `complete`
+
+All validation rules from the spec have been implemented correctly, including proper error messages with field names and values.
