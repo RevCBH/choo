@@ -2,7 +2,7 @@
 
 ## Overview
 
-The GIT package provides git operations for ralph-orch, including worktree management, branch operations, commits, and merge serialization. It enables parallel unit execution through isolated worktrees and ensures safe merging of concurrent PRs through mutex-based serialization.
+The GIT package provides git operations for choo, including worktree management, branch operations, commits, and merge serialization. It enables parallel unit execution through isolated worktrees and ensures safe merging of concurrent PRs through mutex-based serialization.
 
 The package consists of four main components: WorktreeManager (creates/removes worktrees in `.ralph/worktrees/`), Branch (naming and creation via Claude CLI), Commit (staging and committing with `--no-verify`), and Merge (mutex-based FCFS serialization with conflict resolution).
 
@@ -818,7 +818,7 @@ The PRD (Open Question #5) asks about worktree location. Using `.ralph/worktrees
 - Survives system reboots (unlike `/tmp`)
 - Keeps worktrees close to main repo for easy inspection
 - Avoids permission issues across filesystem boundaries
-- Naturally cleaned up with `ralph-orch cleanup`
+- Naturally cleaned up with `choo cleanup`
 
 ### Why Claude for Branch Names?
 

@@ -247,11 +247,11 @@ type BackpressureResult struct {
 
 ```go
 import (
-    "github.com/ralph-orch/internal/discovery"  // Unit, Task, UnitStatus, TaskStatus
-    "github.com/ralph-orch/internal/events"     // Bus, Event, EventType
-    "github.com/ralph-orch/internal/git"        // WorktreeManager
-    "github.com/ralph-orch/internal/github"     // PRClient
-    "github.com/ralph-orch/internal/claude"     // Client
+    "github.com/choo/internal/discovery"  // Unit, Task, UnitStatus, TaskStatus
+    "github.com/choo/internal/events"     // Bus, Event, EventType
+    "github.com/choo/internal/git"        // WorktreeManager
+    "github.com/choo/internal/github"     // PRClient
+    "github.com/choo/internal/claude"     // Client
 )
 ```
 

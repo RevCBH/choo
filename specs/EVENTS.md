@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Events package provides a decoupled communication mechanism for ralph-orch through an event bus architecture. It enables loose coupling between components (scheduler, workers, CLI, logging) by allowing publishers to emit events without knowing their consumers, and subscribers to react to events without knowing their sources.
+The Events package provides a decoupled communication mechanism for choo through an event bus architecture. It enables loose coupling between components (scheduler, workers, CLI, logging) by allowing publishers to emit events without knowing their consumers, and subscribers to react to events without knowing their sources.
 
 The event bus uses a buffered channel for asynchronous delivery, supports multiple handlers per event type (fan-out), and provides built-in handlers for logging and state persistence. This architecture is the foundation for future extensibility to TUI, MCP, and web dashboard interfaces.
 

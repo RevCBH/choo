@@ -2,14 +2,14 @@
 
 ## Overview
 
-The CLI package provides the command-line interface for ralph-orch using the Cobra framework. It serves as the entry point that wires together all other components: discovery, scheduler, workers, git, github, events, and config.
+The CLI package provides the command-line interface for choo using the Cobra framework. It serves as the entry point that wires together all other components: discovery, scheduler, workers, git, github, events, and config.
 
 The CLI supports five commands: `run` (primary orchestration), `status` (progress display), `resume` (continue from last state), `cleanup` (remove worktrees and reset), and `version`. It handles signal interrupts for graceful shutdown and provides rich status output with progress bars and task status symbols.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                              CLI (cobra)                                │
-│                         ralph-orch <command>                            │
+│                         choo <command>                            │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
 │   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐  │
@@ -290,7 +290,7 @@ type Orchestrator struct {
 ### Command Structure
 
 ```
-ralph-orch
+choo
 ├── run [tasks-dir]           # Execute units in parallel
 │   ├── -p, --parallelism     # Max concurrent units (default: 4)
 │   ├── -t, --target          # Target branch for PRs (default: main)
@@ -384,7 +384,7 @@ The root command is configured with persistent flags that apply to all subcomman
 ```go
 func (a *App) setupRootCmd() {
     a.rootCmd = &cobra.Command{
-        Use:   "ralph-orch",
+        Use:   "choo",
         Short: "Parallel development task orchestrator",
         Long: `Ralph Orchestrator executes development units in parallel,
 managing git worktrees and the full PR lifecycle.`,
@@ -651,12 +651,12 @@ func TestRunOptions_Validation(t *testing.T) {
 
 ### Manual Testing
 
-- [ ] `ralph-orch run -n` shows correct execution plan
-- [ ] `ralph-orch status` displays progress bars correctly at various widths
-- [ ] `ralph-orch run --unit foo` runs only the specified unit
+- [ ] `choo run -n` shows correct execution plan
+- [ ] `choo status` displays progress bars correctly at various widths
+- [ ] `choo run --unit foo` runs only the specified unit
 - [ ] Ctrl+C during execution triggers graceful shutdown
-- [ ] `ralph-orch version` displays version information
-- [ ] `ralph-orch cleanup` removes all worktrees
+- [ ] `choo version` displays version information
+- [ ] `choo cleanup` removes all worktrees
 - [ ] Invalid flags produce helpful error messages
 
 ## Design Decisions
@@ -686,10 +686,10 @@ This is the Unix convention: 128 + signal number. SIGINT is signal 2, so 128 + 2
 
 ## Future Enhancements
 
-1. Shell completion generation (`ralph-orch completion bash/zsh/fish`)
+1. Shell completion generation (`choo completion bash/zsh/fish`)
 2. JSON output mode for all commands (machine-readable)
 3. Interactive mode with live-updating status display
-4. Configuration wizard (`ralph-orch init`)
+4. Configuration wizard (`choo init`)
 5. Log file output with rotation
 
 ## References

@@ -63,7 +63,7 @@ Ralph Orchestrator is a Go application that:
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                              CLI (cobra)                                │
-│                         ralph-orch <command>                            │
+│                         choo <command>                            │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
@@ -100,9 +100,9 @@ Ralph Orchestrator is a Go application that:
 ### 2.2 Package Structure
 
 ```
-ralph-orch/
+choo/
 ├── cmd/
-│   └── ralph-orch/
+│   └── choo/
 │       └── main.go                 # Entry point
 │
 ├── internal/
@@ -904,10 +904,10 @@ func (c *GitHubClient) GetReviewStatus(prNumber int) (ReviewStatus, error) {
 ### 8.1 Commands
 
 ```
-ralph-orch - Parallel development task orchestrator
+choo - Parallel development task orchestrator
 
 Usage:
-  ralph-orch [command]
+  choo [command]
 
 Commands:
   run       Execute units in parallel
@@ -924,7 +924,7 @@ Flags:
 ### 8.2 Run Command
 
 ```
-ralph-orch run [tasks-dir]
+choo run [tasks-dir]
 
 Execute development units in parallel with PR lifecycle management.
 
@@ -941,22 +941,22 @@ Flags:
 
 Examples:
   # Run all units with default parallelism
-  ralph-orch run specs/tasks/
+  choo run specs/tasks/
 
   # Run with 2 parallel workers
-  ralph-orch run -p 2 specs/tasks/
+  choo run -p 2 specs/tasks/
 
   # Run single unit (like ralph.sh)
-  ralph-orch run --unit app-shell specs/tasks/
+  choo run --unit app-shell specs/tasks/
 
   # Dry run to see execution plan
-  ralph-orch run -n specs/tasks/
+  choo run -n specs/tasks/
 ```
 
 ### 8.3 Status Output
 
 ```
-$ ralph-orch status specs/tasks/
+$ choo status specs/tasks/
 
 ═══════════════════════════════════════════════════════════════
 Ralph Orchestrator Status
@@ -1051,7 +1051,7 @@ baseline_checks:
 | Unit dependency fails    | Mark dependents as blocked                                           |
 | All units blocked/failed | Exit with error                                                      |
 | Interrupt (SIGINT)       | Graceful shutdown: finish current Claude turn, commit progress, exit |
-| Worktree left behind     | `ralph-orch cleanup` removes orphans                                 |
+| Worktree left behind     | `choo cleanup` removes orphans                                 |
 
 ### 10.3 Recovery
 
@@ -1059,7 +1059,7 @@ State is persisted in frontmatter after each task completion. To resume:
 
 ```bash
 # Resumes from last committed state
-ralph-orch resume specs/tasks/
+choo resume specs/tasks/
 ```
 
 ---
@@ -1218,7 +1218,7 @@ Run against real repos with `--dry-run` and `--no-pr` flags.
 
 ## 15. Appendix: Comparison with ralph.sh
 
-| Feature               | ralph.sh | ralph-orch |
+| Feature               | ralph.sh | choo |
 | --------------------- | -------- | ---------- |
 | Single unit execution | ✓        | ✓          |
 | Multi-unit sequential | ✓        | ✓          |

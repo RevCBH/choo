@@ -2,7 +2,7 @@
 
 ## Overview
 
-The GITHUB package manages the complete PR lifecycle for ralph-orch: creating pull requests, polling for review status via emoji reactions (Codex convention), addressing feedback, and executing squash merges. PR creation is delegated to Claude via the `gh` CLI, while review polling and merge operations are handled programmatically.
+The GITHUB package manages the complete PR lifecycle for choo: creating pull requests, polling for review status via emoji reactions (Codex convention), addressing feedback, and executing squash merges. PR creation is delegated to Claude via the `gh` CLI, while review polling and merge operations are handled programmatically.
 
 The review process uses an emoji-based state machine on the PR body (Codex workflow):
 - No reaction: pending review

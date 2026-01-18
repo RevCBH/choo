@@ -116,7 +116,7 @@ type GitHubConfig struct {
     // Owner is the GitHub organization or user (e.g., "anthropics")
     Owner string `yaml:"owner"`
 
-    // Repo is the repository name (e.g., "ralph-orch")
+    // Repo is the repository name (e.g., "choo")
     Repo string `yaml:"repo"`
 }
 
@@ -859,24 +859,24 @@ func TestParseGitHubURL(t *testing.T) {
         wantErr   bool
     }{
         {
-            url:       "https://github.com/anthropics/ralph-orch.git",
+            url:       "https://github.com/anthropics/choo.git",
             wantOwner: "anthropics",
-            wantRepo:  "ralph-orch",
+            wantRepo:  "choo",
         },
         {
-            url:       "https://github.com/anthropics/ralph-orch",
+            url:       "https://github.com/anthropics/choo",
             wantOwner: "anthropics",
-            wantRepo:  "ralph-orch",
+            wantRepo:  "choo",
         },
         {
-            url:       "git@github.com:anthropics/ralph-orch.git",
+            url:       "git@github.com:anthropics/choo.git",
             wantOwner: "anthropics",
-            wantRepo:  "ralph-orch",
+            wantRepo:  "choo",
         },
         {
-            url:       "git@github.com:anthropics/ralph-orch",
+            url:       "git@github.com:anthropics/choo",
             wantOwner: "anthropics",
-            wantRepo:  "ralph-orch",
+            wantRepo:  "choo",
         },
         {
             url:     "https://gitlab.com/owner/repo.git",
@@ -916,7 +916,7 @@ func TestParseGitHubURL(t *testing.T) {
 
 ### Manual Testing
 
-- [ ] Create `.choo.yaml` with all fields, run `ralph-orch status`
+- [ ] Create `.choo.yaml` with all fields, run `choo status`
 - [ ] Remove config file, verify defaults work
 - [ ] Set `RALPH_CLAUDE_CMD` to invalid path, verify error message
 - [ ] Set invalid `review.timeout` value, verify validation error
@@ -968,8 +968,8 @@ The Config struct is immutable after loading because:
 
 ## Future Enhancements
 
-1. **Config validation CLI command**: `ralph-orch config validate` to check config without running
-2. **Config generation**: `ralph-orch config init` to generate a starter config file
+1. **Config validation CLI command**: `choo config validate` to check config without running
+2. **Config generation**: `choo config init` to generate a starter config file
 3. **Per-unit overrides**: Allow units to override global config (e.g., different baseline checks)
 4. **Profile support**: Named configuration profiles for different environments
 5. **Remote config**: Support loading config from a URL or gist
