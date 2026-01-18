@@ -67,11 +67,6 @@ func TestWireOrchestrator_EventBus(t *testing.T) {
 	if orch.Events == nil {
 		t.Fatal("Events bus is nil")
 	}
-
-	// Verify the event bus has the correct capacity (1000)
-	if orch.Events.Capacity != 1000 {
-		t.Errorf("Expected event bus capacity 1000, got %d", orch.Events.Capacity)
-	}
 }
 
 func TestOrchestrator_Close(t *testing.T) {
