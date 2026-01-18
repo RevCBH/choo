@@ -1,6 +1,9 @@
 package discovery
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // Unit represents a discovered unit of work with its tasks
 type Unit struct {
@@ -63,4 +66,35 @@ const (
 // Discovery represents the complete discovery state for all units
 type Discovery struct {
 	Units []*Unit
+}
+
+// parseUnitStatus converts a string to UnitStatus with validation
+func parseUnitStatus(s string) (UnitStatus, error) {
+	if s == "" {
+		return UnitStatusPending, nil
+	}
+
+	status := UnitStatus(s)
+	switch status {
+	case UnitStatusPending, UnitStatusInProgress, UnitStatusPROpen,
+		UnitStatusInReview, UnitStatusMerging, UnitStatusComplete, UnitStatusFailed:
+		return status, nil
+	default:
+		return "", fmt.Errorf("invalid unit status: %q", s)
+	}
+}
+
+// parseTaskStatus converts a string to TaskStatus with validation
+func parseTaskStatus(s string) (TaskStatus, error) {
+	if s == "" {
+		return TaskStatusPending, nil
+	}
+
+	status := TaskStatus(s)
+	switch status {
+	case TaskStatusPending, TaskStatusInProgress, TaskStatusComplete, TaskStatusFailed:
+		return status, nil
+	default:
+		return "", fmt.Errorf("invalid task status: %q", s)
+	}
 }

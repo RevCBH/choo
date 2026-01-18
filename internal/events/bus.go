@@ -1,11 +1,5 @@
 package events
 
-// Event represents a system event
-type Event struct {
-	Type string
-	Data interface{}
-}
-
 // Bus provides event distribution across components
 type Bus struct {
 	Capacity int

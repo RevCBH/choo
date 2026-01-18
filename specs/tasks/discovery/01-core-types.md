@@ -1,6 +1,6 @@
 ---
 task: 1
-status: pending
+status: in_progress
 backpressure: "go build ./internal/discovery/..."
 depends_on: []
 ---
