@@ -991,7 +991,7 @@ Target: main | Parallelism: 4
 ### 9.1 Configuration File (Optional)
 
 ```yaml
-# .ralph-orch.yaml (optional, in repo root)
+# .choo.yaml (optional, in repo root)
 
 target_branch: main
 parallelism: 4
