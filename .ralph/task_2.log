@@ -1,24 +1,43 @@
-Task completed successfully! Here's what was implemented:
+Excellent! Task #2 is now complete. Let me provide a summary:
 
-## Summary
+## Task Complete
 
-I've successfully implemented Task #2 - Config Defaults according to the spec:
+I've successfully implemented the Worktree Management functionality for Ralph as specified in task #2:
 
-### Files Created:
-1. **internal/config/defaults.go** - Contains all default constants and the DefaultConfig() factory function
-2. **internal/config/defaults_test.go** - Contains all 8 required test cases
+### What was implemented:
 
-### Validation Results:
-- Backpressure validation: `go test ./internal/config/... -run TestDefault` - PASSED
-- Baseline checks: `go fmt ./...` and `go vet ./...` - PASSED
-- Spec frontmatter status updated to `complete`
+1. **Created `/internal/git/worktree.go`** with the following types and functions:
+   - `WorktreeManager` struct with fields for RepoRoot, WorktreeBase, SetupCommands, and Claude client
+   - `Worktree` struct representing an active worktree
+   - `ConditionalCommand` struct for conditional setup commands
+   - `NewWorktreeManager()` - creates a new worktree manager
+   - `CreateWorktree()` - creates worktrees at `.ralph/worktrees/<unitID>/`
+   - `RemoveWorktree()` - removes worktrees and their directories
+   - `ListWorktrees()` - lists all ralph-managed worktrees
+   - `CleanupOrphans()` - removes orphaned worktree references
+   - `DefaultSetupCommands()` - returns default setup commands for npm, pnpm, yarn, cargo, and go
+   - `runSetupCommands()` - executes conditional setup commands
 
-All deliverables match the spec exactly, with default values for:
-- TargetBranch: "main"
-- Parallelism: 4
-- GitHub: "auto"/"auto" (for detection)
-- Worktree BasePath: ".ralph/worktrees/"
-- Claude Command: "claude" with MaxTurns: 0
-- Merge MaxConflictRetries: 3
-- Review Timeout: "2h", PollInterval: "30s"
-- LogLevel: "info"
+2. **Created `/internal/git/worktree_test.go`** with comprehensive tests:
+   - TestWorktreeManager_Create
+   - TestWorktreeManager_CreateBranch
+   - TestWorktreeManager_Remove
+   - TestWorktreeManager_List
+   - TestConditionalCommand_Matching
+   - TestConditionalCommand_NoMatch
+   - TestDefaultSetupCommands
+
+3. **Updated `/internal/cli/wire.go`** to use the new WorktreeManager signature
+
+### All validations passed:
+- ✅ All worktree tests pass
+- ✅ `go fmt ./...` - no formatting issues
+- ✅ `go vet ./...` - no vet issues
+- ✅ Spec frontmatter updated to `status: complete`
+
+### Key implementation details:
+- Worktrees are created at `.ralph/worktrees/<unitID>/`
+- Branch naming uses simple `ralph/<unitID>` pattern (Task #3 will handle proper branch naming)
+- Only the first matching setup command runs
+- Setup command failures cause worktree creation to fail
+- Handles macOS symlink resolution (`/var` vs `/private/var`)
