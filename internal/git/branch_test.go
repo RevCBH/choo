@@ -8,11 +8,17 @@ import (
 
 // mockClaudeClient implements ClaudeClient for testing
 type mockClaudeClient struct {
-	response string
-	err      error
+	response    string
+	err         error
+	resolveFunc func(ctx context.Context, opts InvokeOptions) (string, error)
+	callCount   int
 }
 
 func (m *mockClaudeClient) Invoke(ctx context.Context, opts InvokeOptions) (string, error) {
+	m.callCount++
+	if m.resolveFunc != nil {
+		return m.resolveFunc(ctx, opts)
+	}
 	return m.response, m.err
 }
 

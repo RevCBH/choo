@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -762,5 +763,401 @@ func TestMergeManager_Merge(t *testing.T) {
 
 	if !result.Success {
 		t.Error("expected successful merge result")
+	}
+}
+
+func TestResolveConflicts_Success(t *testing.T) {
+	repoPath, _ := setupTestRepoWithRemote(t)
+	ctx := context.Background()
+
+	// Create a conflict scenario
+	testFile := filepath.Join(repoPath, "conflict.txt")
+	if err := os.WriteFile(testFile, []byte("main content"), 0644); err != nil {
+		t.Fatalf("failed to create conflict file: %v", err)
+	}
+
+	cmd := exec.Command("git", "add", "conflict.txt")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to add conflict file: %v", err)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "Add conflict file on main")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to commit on main: %v", err)
+	}
+
+	// Create feature branch from before the main commit
+	cmd = exec.Command("git", "checkout", "-b", "feature-resolve", "HEAD~1")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to create feature branch: %v", err)
+	}
+
+	// Create conflicting content
+	if err := os.WriteFile(testFile, []byte("feature content"), 0644); err != nil {
+		t.Fatalf("failed to modify conflict file: %v", err)
+	}
+
+	cmd = exec.Command("git", "add", "conflict.txt")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to add modified file: %v", err)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "Add conflict file on feature")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to commit on feature: %v", err)
+	}
+
+	// Start rebase to create conflict
+	cmd = exec.Command("git", "rebase", "main")
+	cmd.Dir = repoPath
+	_ = cmd.Run() // Expected to fail with conflict
+
+	// Mock Claude client that resolves conflicts
+	mock := &mockClaudeClient{
+		resolveFunc: func(ctx context.Context, opts InvokeOptions) (string, error) {
+			// Resolve conflict by keeping "ours" side
+			conflicts, _ := getConflictedFiles(ctx, repoPath)
+			for _, f := range conflicts {
+				filePath := filepath.Join(repoPath, f)
+				// Write resolved content (remove markers)
+				if err := os.WriteFile(filePath, []byte("resolved content"), 0644); err != nil {
+					return "", err
+				}
+				// Stage the resolved file
+				cmd := exec.Command("git", "add", f)
+				cmd.Dir = repoPath
+				if err := cmd.Run(); err != nil {
+					return "", err
+				}
+			}
+			return "", nil
+		},
+	}
+
+	manager := NewMergeManager(repoPath, mock)
+
+	// Resolve conflicts
+	err := manager.ResolveConflicts(ctx, repoPath)
+	if err != nil {
+		t.Fatalf("ResolveConflicts failed: %v", err)
+	}
+
+	// Verify conflicts are resolved
+	conflicts, _ := getConflictedFiles(ctx, repoPath)
+	if len(conflicts) != 0 {
+		t.Errorf("expected no conflicts after resolution, got %d", len(conflicts))
+	}
+
+	// Verify Claude was called once
+	if mock.callCount != 1 {
+		t.Errorf("expected Claude to be called 1 time, got %d", mock.callCount)
+	}
+}
+
+func TestResolveConflicts_Retry(t *testing.T) {
+	repoPath, _ := setupTestRepoWithRemote(t)
+	ctx := context.Background()
+
+	// Create a conflict scenario
+	testFile := filepath.Join(repoPath, "conflict.txt")
+	if err := os.WriteFile(testFile, []byte("main content"), 0644); err != nil {
+		t.Fatalf("failed to create conflict file: %v", err)
+	}
+
+	cmd := exec.Command("git", "add", "conflict.txt")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to add conflict file: %v", err)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "Add conflict file on main")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to commit on main: %v", err)
+	}
+
+	// Create feature branch from before the main commit
+	cmd = exec.Command("git", "checkout", "-b", "feature-retry", "HEAD~1")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to create feature branch: %v", err)
+	}
+
+	// Create conflicting content
+	if err := os.WriteFile(testFile, []byte("feature content"), 0644); err != nil {
+		t.Fatalf("failed to modify conflict file: %v", err)
+	}
+
+	cmd = exec.Command("git", "add", "conflict.txt")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to add modified file: %v", err)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "Add conflict file on feature")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to commit on feature: %v", err)
+	}
+
+	// Start rebase to create conflict
+	cmd = exec.Command("git", "rebase", "main")
+	cmd.Dir = repoPath
+	_ = cmd.Run() // Expected to fail with conflict
+
+	// Mock Claude client that fails first, then succeeds
+	attemptCount := 0
+	mock := &mockClaudeClient{
+		resolveFunc: func(ctx context.Context, opts InvokeOptions) (string, error) {
+			attemptCount++
+			if attemptCount == 1 {
+				// First attempt: fail
+				return "", fmt.Errorf("first attempt fails")
+			}
+			// Second attempt: resolve
+			conflicts, _ := getConflictedFiles(ctx, repoPath)
+			for _, f := range conflicts {
+				filePath := filepath.Join(repoPath, f)
+				if err := os.WriteFile(filePath, []byte("resolved content"), 0644); err != nil {
+					return "", err
+				}
+				cmd := exec.Command("git", "add", f)
+				cmd.Dir = repoPath
+				if err := cmd.Run(); err != nil {
+					return "", err
+				}
+			}
+			return "", nil
+		},
+	}
+
+	manager := NewMergeManager(repoPath, mock)
+
+	// Resolve conflicts (should retry and succeed on second attempt)
+	err := manager.ResolveConflicts(ctx, repoPath)
+	if err != nil {
+		t.Fatalf("ResolveConflicts failed: %v", err)
+	}
+
+	// Verify Claude was called twice
+	if mock.callCount != 2 {
+		t.Errorf("expected Claude to be called 2 times, got %d", mock.callCount)
+	}
+}
+
+func TestResolveConflicts_MaxAttempts(t *testing.T) {
+	repoPath, _ := setupTestRepoWithRemote(t)
+	ctx := context.Background()
+
+	// Create a conflict scenario
+	testFile := filepath.Join(repoPath, "conflict.txt")
+	if err := os.WriteFile(testFile, []byte("main content"), 0644); err != nil {
+		t.Fatalf("failed to create conflict file: %v", err)
+	}
+
+	cmd := exec.Command("git", "add", "conflict.txt")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to add conflict file: %v", err)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "Add conflict file on main")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to commit on main: %v", err)
+	}
+
+	// Create feature branch from before the main commit
+	cmd = exec.Command("git", "checkout", "-b", "feature-maxattempts", "HEAD~1")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to create feature branch: %v", err)
+	}
+
+	// Create conflicting content
+	if err := os.WriteFile(testFile, []byte("feature content"), 0644); err != nil {
+		t.Fatalf("failed to modify conflict file: %v", err)
+	}
+
+	cmd = exec.Command("git", "add", "conflict.txt")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to add modified file: %v", err)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", "Add conflict file on feature")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to commit on feature: %v", err)
+	}
+
+	// Start rebase to create conflict
+	cmd = exec.Command("git", "rebase", "main")
+	cmd.Dir = repoPath
+	_ = cmd.Run() // Expected to fail with conflict
+
+	// Mock Claude client that always fails
+	mock := &mockClaudeClient{
+		resolveFunc: func(ctx context.Context, opts InvokeOptions) (string, error) {
+			return "", fmt.Errorf("resolution always fails")
+		},
+	}
+
+	manager := NewMergeManager(repoPath, mock)
+
+	// Resolve conflicts (should fail after MaxConflictAttempts)
+	err := manager.ResolveConflicts(ctx, repoPath)
+	if err == nil {
+		t.Fatal("expected ResolveConflicts to fail after max attempts")
+	}
+
+	// Verify error message mentions max attempts
+	if !strings.Contains(err.Error(), "3 attempts") {
+		t.Errorf("expected error to mention 3 attempts, got: %v", err)
+	}
+
+	// Verify Claude was called 3 times (MaxConflictAttempts)
+	if mock.callCount != 3 {
+		t.Errorf("expected Claude to be called 3 times, got %d", mock.callCount)
+	}
+
+	// Clean up: abort the rebase
+	if err := abortRebase(ctx, repoPath); err != nil {
+		t.Fatalf("failed to abort rebase: %v", err)
+	}
+}
+
+func TestResolveConflicts_NoConflicts(t *testing.T) {
+	repoPath := setupTestRepo(t)
+	ctx := context.Background()
+
+	// Mock Claude client (should not be called)
+	mock := &mockClaudeClient{
+		resolveFunc: func(ctx context.Context, opts InvokeOptions) (string, error) {
+			t.Error("Claude should not be called when there are no conflicts")
+			return "", nil
+		},
+	}
+
+	manager := NewMergeManager(repoPath, mock)
+
+	// Resolve conflicts when there are no conflicts
+	err := manager.ResolveConflicts(ctx, repoPath)
+	if err != nil {
+		t.Fatalf("ResolveConflicts failed: %v", err)
+	}
+
+	// Verify Claude was never called
+	if mock.callCount != 0 {
+		t.Errorf("expected Claude to be called 0 times, got %d", mock.callCount)
+	}
+}
+
+func TestBuildConflictPrompt(t *testing.T) {
+	conflicts := []string{"file1.txt", "file2.go", "file3.md"}
+	worktreePath := "/tmp/test-worktree"
+
+	prompt := buildConflictPrompt(conflicts, worktreePath)
+
+	// Verify prompt includes worktree path
+	if !strings.Contains(prompt, worktreePath) {
+		t.Error("expected prompt to contain worktree path")
+	}
+
+	// Verify prompt includes all conflicted files
+	for _, file := range conflicts {
+		if !strings.Contains(prompt, file) {
+			t.Errorf("expected prompt to contain file %s", file)
+		}
+	}
+
+	// Verify prompt includes instructions
+	if !strings.Contains(prompt, "conflict markers") {
+		t.Error("expected prompt to mention conflict markers")
+	}
+
+	if !strings.Contains(prompt, "git add") {
+		t.Error("expected prompt to mention git add")
+	}
+}
+
+func TestBuildConflictPrompt_Content(t *testing.T) {
+	conflicts := []string{"test.txt"}
+	worktreePath := "/path/to/worktree"
+
+	prompt := buildConflictPrompt(conflicts, worktreePath)
+
+	// Verify prompt includes conflict marker symbols
+	expectedMarkers := []string{"<<<<<<<", "=======", ">>>>>>>"}
+	for _, marker := range expectedMarkers {
+		if !strings.Contains(prompt, marker) {
+			t.Errorf("expected prompt to contain conflict marker %s", marker)
+		}
+	}
+
+	// Verify prompt has all the required steps
+	requiredSteps := []string{
+		"Reading the file",
+		"Choosing the correct resolution",
+		"Removing all conflict markers",
+		"Saving the resolved file",
+		"Staging the file with git add",
+	}
+
+	for _, step := range requiredSteps {
+		if !strings.Contains(prompt, step) {
+			t.Errorf("expected prompt to contain step: %s", step)
+		}
+	}
+}
+
+func TestReadConflictFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	testFile := filepath.Join(tmpDir, "conflict.txt")
+
+	conflictContent := `line 1
+<<<<<<< HEAD
+main content
+=======
+feature content
+>>>>>>> feature-branch
+line 2`
+
+	if err := os.WriteFile(testFile, []byte(conflictContent), 0644); err != nil {
+		t.Fatalf("failed to create conflict file: %v", err)
+	}
+
+	content, err := readConflictFile(testFile)
+	if err != nil {
+		t.Fatalf("readConflictFile failed: %v", err)
+	}
+
+	if content != conflictContent {
+		t.Errorf("expected content to match, got:\n%s", content)
+	}
+
+	// Verify conflict markers are present
+	if !strings.Contains(content, "<<<<<<<") {
+		t.Error("expected content to contain <<<<<<< marker")
+	}
+
+	if !strings.Contains(content, "=======") {
+		t.Error("expected content to contain ======= marker")
+	}
+
+	if !strings.Contains(content, ">>>>>>>") {
+		t.Error("expected content to contain >>>>>>> marker")
+	}
+}
+
+func TestReadConflictFile_NonExistent(t *testing.T) {
+	_, err := readConflictFile("/nonexistent/file.txt")
+	if err == nil {
+		t.Error("expected readConflictFile to fail for nonexistent file")
 	}
 }

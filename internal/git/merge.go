@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 )
@@ -167,4 +168,83 @@ func continueRebase(ctx context.Context, worktreePath string) error {
 func abortRebase(ctx context.Context, worktreePath string) error {
 	_, err := gitExec(ctx, worktreePath, "rebase", "--abort")
 	return err
+}
+
+// ResolveConflicts uses Claude to resolve merge conflicts
+// Called by Merge when rebase detects conflicts
+func (m *MergeManager) ResolveConflicts(ctx context.Context, worktreePath string) error {
+	return m.resolveConflictsWithClaude(ctx, worktreePath)
+}
+
+// resolveConflictsWithClaude is the internal implementation with retry logic
+func (m *MergeManager) resolveConflictsWithClaude(ctx context.Context, worktreePath string) error {
+	for attempt := 1; attempt <= m.MaxConflictAttempts; attempt++ {
+		// Get list of conflicted files
+		conflicts, err := getConflictedFiles(ctx, worktreePath)
+		if err != nil {
+			return err
+		}
+		if len(conflicts) == 0 {
+			return nil // All resolved
+		}
+
+		// Build conflict resolution prompt
+		prompt := buildConflictPrompt(conflicts, worktreePath)
+
+		// Invoke Claude to resolve
+		_, err = m.Claude.Invoke(ctx, InvokeOptions{
+			Prompt:   prompt,
+			Model:    "",
+			MaxTurns: 0,
+		})
+		if err != nil {
+			if attempt == m.MaxConflictAttempts {
+				return fmt.Errorf("conflict resolution failed after %d attempts: %w",
+					attempt, err)
+			}
+			continue
+		}
+
+		// Check if conflicts remain
+		remaining, _ := getConflictedFiles(ctx, worktreePath)
+		if len(remaining) == 0 {
+			// Continue rebase
+			if err := continueRebase(ctx, worktreePath); err != nil {
+				return err
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("failed to resolve conflicts after %d attempts", m.MaxConflictAttempts)
+}
+
+// buildConflictPrompt creates the prompt for Claude to resolve conflicts
+func buildConflictPrompt(conflicts []string, worktreePath string) string {
+	// Include:
+	// - List of conflicted files
+	// - File contents with conflict markers
+	// - Instructions to resolve and stage
+	return fmt.Sprintf(`You are resolving git merge conflicts in %s.
+
+The following files have conflicts:
+%s
+
+Please resolve each conflict by:
+1. Reading the file with conflict markers
+2. Choosing the correct resolution
+3. Removing all conflict markers (<<<<<<<, =======, >>>>>>>)
+4. Saving the resolved file
+5. Staging the file with git add
+
+Resolve all conflicts now.`, worktreePath, strings.Join(conflicts, "\n"))
+}
+
+// readConflictFile reads a file with conflict markers
+func readConflictFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
