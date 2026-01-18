@@ -1,25 +1,33 @@
-Perfect! Task #4 (Version Command) has been completed successfully. Here's a summary of what was implemented:
+Task #4 (Config Validation) has been completed successfully! Here's what was implemented:
 
 ## Summary
 
-Successfully implemented the version command according to the task spec:
+I created the config validation logic as specified in the task spec:
 
-### Files Created:
-1. `internal/cli/version.go` - Contains `NewVersionCmd` function that creates the version command
-2. `internal/cli/version_test.go` - Contains comprehensive tests for the version command
+### Files Created
 
-### Files Modified:
-1. `internal/cli/cli.go` - Added `VersionInfo` struct, updated `App` struct to use `versionInfo`, updated `SetVersion` method, and added version command to `setupRootCmd`
+1. **internal/config/validate.go**
+   - `ValidationError` type with structured error details (Field, Value, Message)
+   - `validateConfig` function that validates all config fields according to the rules
+   - Uses `errors.Join()` to collect and return multiple validation errors
 
-### Implementation Details:
-- Created `VersionInfo` struct with Version, Commit, and Date fields
-- Implemented `NewVersionCmd` function that displays version information in the format:
-  ```
-  choo version X.Y.Z
-  commit: abc1234
-  built: 2024-01-15T10:30:00Z
-  ```
-- Default values are used when version info is not set: "dev" for version, "unknown" for commit and date
-- All tests pass (TestVersionCmd_Output, TestVersionCmd_Format, TestSetVersion, TestVersionCmd_DefaultValues)
-- Baseline checks (go fmt, go vet) pass
-- Spec frontmatter status updated to `complete`
+2. **internal/config/validate_test.go**
+   - All 19 required test cases covering:
+     - Parallelism validation (zero, negative, valid)
+     - GitHub owner/repo validation (empty, "auto", valid)
+     - Claude command and max_turns validation
+     - Merge max_conflict_retries validation
+     - Review timeout and poll_interval duration validation
+     - LogLevel validation (including case-sensitivity)
+     - BaselineCheck validation (name and command)
+     - Worktree setup/teardown command validation
+     - Multiple errors joined together
+     - Valid config with no errors
+
+### Validation Results
+
+- ✅ Backpressure command passed: `go test ./internal/config/... -run TestValidat`
+- ✅ Baseline checks passed: `go fmt ./...` and `go vet ./...`
+- ✅ Spec frontmatter status updated to `complete`
+
+All validation rules from the spec have been implemented correctly, including proper error messages with field names and values.
