@@ -74,5 +74,6 @@ managing git worktrees and the full PR lifecycle.`,
 		NewStatusCmd(a),
 		NewRunCmd(a),
 		NewResumeCmd(a),
+		NewCleanupCmd(a),
 	)
 }

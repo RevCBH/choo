@@ -1,6 +1,6 @@
 ---
 task: 8
-status: pending
+status: complete
 backpressure: "go test ./internal/cli/... -run Cleanup"
 depends_on: [1]
 ---
