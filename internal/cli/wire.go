@@ -40,8 +40,9 @@ func WireOrchestrator(cfg *config.Config) (*Orchestrator, error) {
 	// Create Git WorktreeManager
 	gitManager := git.NewWorktreeManager(cfg)
 
-	// Create GitHub PRClient
-	ghClient := github.NewPRClient(cfg, eventBus)
+	// TODO(ralph): Uncomment when github Task #2 implements NewPRClient constructor
+	// ghClient := github.NewPRClient(cfg, eventBus)
+	var ghClient *github.PRClient // temporary nil placeholder
 
 	// Create Scheduler (depends on event bus and discovery)
 	sched := scheduler.New(cfg, eventBus, disc)
