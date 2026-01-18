@@ -1,23 +1,25 @@
-Perfect! Task #4 - Validation is now complete. Here's a summary of what was implemented:
+Perfect! Task #4 (Version Command) has been completed successfully. Here's a summary of what was implemented:
 
-## Completed Implementation
+## Summary
 
-### Files Created
-1. **internal/discovery/validation.go** - Complete validation logic with:
-   - `ValidationError` and `ValidationResult` types
-   - `ValidateUnit()` - validates single unit structure
-   - `ValidateUnits()` - validates all units including cross-unit dependencies
-   - `ValidateTaskSequence()` - ensures task numbers are sequential from 1
-   - `ValidateTaskDependencies()` - validates task dependency references
-   - `ValidateUnitDependencies()` - validates unit dependency references
-   - `DetectCycles()` - detects circular dependencies using DFS with three-color marking
+Successfully implemented the version command according to the task spec:
 
-2. **internal/discovery/validation_test.go** - Comprehensive test suite with all 18 required tests
+### Files Created:
+1. `internal/cli/version.go` - Contains `NewVersionCmd` function that creates the version command
+2. `internal/cli/version_test.go` - Contains comprehensive tests for the version command
 
-### All Tests Passing
-- ✅ All 12 validation test cases pass
-- ✅ `go fmt ./...` passes
-- ✅ `go vet ./...` passes
-- ✅ Spec frontmatter updated to `status: complete`
+### Files Modified:
+1. `internal/cli/cli.go` - Added `VersionInfo` struct, updated `App` struct to use `versionInfo`, updated `SetVersion` method, and added version command to `setupRootCmd`
 
-The implementation follows the spec exactly, with proper error aggregation, cycle detection using the specified DFS algorithm, and formatted error messages that clearly communicate validation failures.
+### Implementation Details:
+- Created `VersionInfo` struct with Version, Commit, and Date fields
+- Implemented `NewVersionCmd` function that displays version information in the format:
+  ```
+  choo version X.Y.Z
+  commit: abc1234
+  built: 2024-01-15T10:30:00Z
+  ```
+- Default values are used when version info is not set: "dev" for version, "unknown" for commit and date
+- All tests pass (TestVersionCmd_Output, TestVersionCmd_Format, TestSetVersion, TestVersionCmd_DefaultValues)
+- Baseline checks (go fmt, go vet) pass
+- Spec frontmatter status updated to `complete`
