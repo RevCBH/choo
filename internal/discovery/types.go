@@ -59,3 +59,8 @@ const (
 	TaskStatusComplete   TaskStatus = "complete"
 	TaskStatusFailed     TaskStatus = "failed"
 )
+
+// Discovery represents the complete discovery state for all units
+type Discovery struct {
+	Units []*Unit
+}

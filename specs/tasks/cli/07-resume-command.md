@@ -1,6 +1,6 @@
 ---
 task: 7
-status: pending
+status: complete
 backpressure: "go test ./internal/cli/... -run Resume"
 depends_on: [1, 6]
 ---
