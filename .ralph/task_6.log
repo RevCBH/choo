@@ -1,54 +1,48 @@
 ## Task Complete
 
-Task #6 (Run Command) has been successfully implemented. Here's what was delivered:
+I've successfully implemented the LoadConfig function according to task spec #6. Here's a summary of what was delivered:
 
-### Implementation Summary
-
-**Created Files:**
-- `internal/cli/run.go` - Run command implementation with RunOptions type, validation, and orchestration loop
-- `internal/cli/run_test.go` - Comprehensive test suite
+### Implementation
 
 **Modified Files:**
-- `internal/cli/cli.go` - Added NewRunCmd to the root command
+- `internal/config/config.go` - Added LoadConfig function with necessary imports
 
-### Key Features Implemented
+**Created Files:**
+- `internal/config/config_test.go` - Comprehensive test suite with 12 test cases
 
-1. **RunOptions struct** with all required flags:
-   - Parallelism (default: 4)
-   - TargetBranch (default: main)
-   - DryRun, NoPR, Unit, SkipReview, TasksDir
+### LoadConfig Function
 
-2. **Validation** that ensures:
-   - Parallelism > 0
-   - TasksDir is not empty
+The function orchestrates configuration loading with the following sequence:
+1. Starts with DefaultConfig()
+2. Parses `.choo.yaml` if it exists (YAML errors are returned)
+3. Applies environment variable overrides
+4. Resolves relative worktree paths to absolute
+5. Auto-detects GitHub owner/repo if set to "auto"
+6. Validates the final configuration
+7. Returns the immutable config
 
-3. **NewRunCmd** function that:
-   - Creates cobra command with proper usage
-   - Adds all required flags with correct defaults
-   - Handles positional args for tasks-dir
-   - Calls RunOrchestrator with validated options
+### Test Coverage
 
-4. **RunOrchestrator** method that:
-   - Validates options
-   - Sets up signal handler for graceful shutdown
-   - Implements dry-run mode with execution plan output
-   - Includes placeholders for task #9 (orchestrator wiring)
+All 12 required tests pass:
+- `TestLoadConfig_Defaults` - Uses all defaults with no config file
+- `TestLoadConfig_FileOverrides` - Config file values override defaults
+- `TestLoadConfig_EnvOverrides` - Env vars override file values
+- `TestLoadConfig_PathResolution` - Relative paths become absolute
+- `TestLoadConfig_GitHubAutoDetect` - GitHub detection from git remote
+- `TestLoadConfig_GitHubExplicit` - Explicit values not overwritten
+- `TestLoadConfig_InvalidYAML` - Returns parse error for malformed YAML
+- `TestLoadConfig_ValidationError` - Returns validation error for invalid values
+- `TestLoadConfig_NoGitRemote` - Returns error when auto-detect fails
+- `TestLoadConfig_PartialConfig` - Partial config merges with defaults
+- `TestLoadConfig_BaselineChecks` - Baseline checks parsed from YAML
+- `TestLoadConfig_ConditionalCommands` - Setup/teardown commands with "if" conditions parsed
 
-### Test Results
+### Verification
 
-All 7 required tests pass:
-- ✓ TestRunCmd_DefaultFlags
-- ✓ TestRunCmd_CustomFlags
-- ✓ TestRunOptions_Validate_Valid
-- ✓ TestRunOptions_Validate_ZeroParallelism
-- ✓ TestRunOptions_Validate_EmptyTasksDir
-- ✓ TestRunOrchestrator_DryRun
-- ✓ TestRunOrchestrator_SingleUnit
+All checks passed:
+- Backpressure command: `go test ./internal/config/... -v` ✓
+- Baseline checks: `go fmt ./...` ✓
+- Baseline checks: `go vet ./...` ✓
+- Spec frontmatter updated to `status: complete` ✓
 
-### Validation Complete
-- ✓ Backpressure tests: `go test ./internal/cli/... -run Run` - PASS
-- ✓ go fmt ./... - PASS
-- ✓ go vet ./... - PASS
-- ✓ Spec frontmatter updated to `status: complete`
-
-The implementation follows the exact specifications and is ready for task #9 to wire in the actual orchestration components.
+The implementation is complete and ready.
