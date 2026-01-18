@@ -1,0 +1,24 @@
+Task completed successfully! I have:
+
+1. ✅ Created `internal/cli/signals.go` with the `SignalHandler` type and all required methods:
+   - `NewSignalHandler(cancel)` - Creates a new signal handler
+   - `Start()` - Begins listening for SIGINT/SIGTERM
+   - `OnShutdown(fn)` - Registers shutdown callbacks (thread-safe)
+   - `Wait()` - Blocks until shutdown is triggered
+   - `Stop()` - Stops the signal handler
+
+2. ✅ Created comprehensive tests in `internal/cli/signals_test.go` covering all required test cases:
+   - `TestSignalHandler_New` - Verifies handler creation
+   - `TestSignalHandler_GracefulShutdown` - Tests SIGINT triggers cancel and callbacks
+   - `TestSignalHandler_MultipleCallbacks` - Verifies all callbacks are called in order
+   - `TestSignalHandler_Wait` - Tests Wait blocks until shutdown
+   - `TestSignalHandler_ContextCancelled` - Confirms context is cancelled on signal
+   - `TestSignalHandler_Stop` - Tests cleanup
+
+3. ✅ All backpressure validation tests pass (`go test ./internal/cli/... -run Signal -v`)
+
+4. ✅ Baseline checks pass (`go fmt ./...` and `go vet ./...`)
+
+5. ✅ Updated spec file frontmatter status to `complete`
+
+The implementation follows the shutdown flow specified in the spec: signal received → log signal → cancel context → execute callbacks in order → close shutdown channel.
