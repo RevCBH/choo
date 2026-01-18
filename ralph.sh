@@ -26,7 +26,7 @@ set -euo pipefail
 RALPH_BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RALPH_LOG_DIR="$RALPH_BASE_DIR/.ralph"
 RALPH_LOG_FILE="$RALPH_LOG_DIR/ralph.log"
-RALPH_AGENT_CMD="${RALPH_AGENT_CMD:-claude}"
+RALPH_CLAUDE_CMD="${RALPH_CLAUDE_CMD:-claude}"
 
 # Colors
 RED='\033[0;31m'
@@ -88,7 +88,8 @@ get_frontmatter_field() {
     local field="$2"
     local fm
     fm=$(get_frontmatter "$file")
-    echo "$fm" | grep "^${field}:" | sed "s/^${field}:[[:space:]]*//" | tr -d '"'
+    # Strip inline comments (# ...) and quotes
+    echo "$fm" | grep "^${field}:" | sed "s/^${field}:[[:space:]]*//" | sed 's/#.*//' | tr -d '"' | xargs
 }
 
 # Get array field from frontmatter (e.g., depends_on: [1, 2])
@@ -250,7 +251,7 @@ $(cat "$spec_file")
 1. Read the task spec completely
 2. Implement ONLY what is specified - nothing more, nothing less
 3. Run the backpressure validation command from the frontmatter
-4. Also run baseline checks: \`cargo fmt --check\` and \`cargo clippy -- -D warnings\`
+4. Also run baseline checks: \`go fmt ./...\` and \`go vet ./...\`
 5. If any validation fails, fix the issues and re-run until all pass
 6. When ALL checks pass, UPDATE THE FRONTMATTER STATUS to complete:
    - Edit the spec file ($spec_file)
@@ -259,7 +260,7 @@ $(cat "$spec_file")
 
 ## Critical
 - You MUST update the spec file's frontmatter status to \`complete\` when done
-- The backpressure command AND baseline checks (fmt, clippy) MUST pass before marking complete
+- The backpressure command AND baseline checks (go fmt, go vet) MUST pass before marking complete
 - Stay focused on this single task
 - Do not refactor unrelated code
 - Do not add features not in the spec
@@ -280,31 +281,26 @@ run_backpressure() {
     (eval "$backpressure")
 }
 
-# Baseline checks that all tasks must pass (fmt, clippy)
+# Baseline checks that all tasks must pass (fmt, vet)
 # This ensures commits won't fail pre-commit hooks
 run_baseline_checks() {
-    info "Running baseline checks (fmt, clippy)..."
+    info "Running baseline checks (go fmt, go vet)..."
 
-    # Check if we're in a Rust project
-    if [[ -f "koe/src-tauri/Cargo.toml" ]]; then
-        info "Checking Rust formatting..."
-        if ! (cd koe/src-tauri && cargo fmt --check); then
-            error "Rust formatting check failed. Run: cd koe/src-tauri && cargo fmt"
+    # Check if we're in a Go project
+    if [[ -f "go.mod" ]]; then
+        info "Checking Go formatting..."
+        local unformatted
+        unformatted=$(gofmt -l . 2>/dev/null | grep -v vendor || true)
+        if [[ -n "$unformatted" ]]; then
+            error "Go formatting check failed. Unformatted files:"
+            echo "$unformatted"
+            error "Run: go fmt ./..."
             return 1
         fi
 
-        info "Running Clippy..."
-        if ! (cd koe/src-tauri && cargo clippy -- -D warnings); then
-            error "Clippy check failed"
-            return 1
-        fi
-    fi
-
-    # Check frontend if present
-    if [[ -f "koe/package.json" ]]; then
-        info "Checking TypeScript..."
-        if ! (cd koe && pnpm typecheck 2>/dev/null); then
-            error "TypeScript check failed"
+        info "Running go vet..."
+        if ! go vet ./...; then
+            error "go vet check failed"
             return 1
         fi
     fi
@@ -380,7 +376,7 @@ execute_task() {
     printf '%s' "$prompt" > "$prompt_file"
 
     info "Invoking agent..."
-    "$RALPH_AGENT_CMD" --dangerously-skip-permissions -p "$(cat "$prompt_file")" 2>&1 | tee "$task_log"
+    "$RALPH_CLAUDE_CMD" --dangerously-skip-permissions -p "$(cat "$prompt_file")" 2>&1 | tee "$task_log"
     local exit_code=${PIPESTATUS[0]}
 
     rm -f "$prompt_file"
@@ -513,7 +509,7 @@ main() {
                 echo "  --help               Show this help"
                 echo ""
                 echo "Environment:"
-                echo "  RALPH_AGENT_CMD      Agent command (default: claude)"
+                echo "  RALPH_CLAUDE_CMD      Agent command (default: claude)"
                 echo ""
                 echo "Each iteration invokes the agent once. Tasks are retried until"
                 echo "the agent updates the spec's frontmatter status to 'complete'."
@@ -560,7 +556,7 @@ main() {
         info "Mode: single workset"
     fi
     info "Max iterations: ${max_iterations:-unlimited}"
-    info "Agent: $RALPH_AGENT_CMD"
+    info "Agent: $RALPH_CLAUDE_CMD"
     info "Found $spec_count task specs"
     info "════════════════════════════════════════════════════════════════"
 
