@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/anthropics/choo/internal/config"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -53,8 +54,18 @@ func (a *App) Cleanup(opts CleanupOptions) error {
 	removedWorktrees := []string{}
 	var unitCount, taskCount int
 
+	// Load config to get worktree base path
+	repoRoot, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	worktreeBase := ".ralph/worktrees" // fallback default
+	if cfg, err := config.LoadConfig(repoRoot); err == nil {
+		worktreeBase = cfg.Worktree.BasePath
+	}
+
 	// Find and remove all orchestrator worktrees
-	worktreeBase := ".ralph/worktrees"
 	if _, err := os.Stat(worktreeBase); err == nil {
 		// Worktree directory exists, list and remove worktrees
 		entries, err := os.ReadDir(worktreeBase)

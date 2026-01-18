@@ -111,7 +111,8 @@ func (b *Bus) loop() {
 // dispatch calls all handlers with the event (recovers from panics)
 func (b *Bus) dispatch(e Event) {
 	b.mu.RLock()
-	handlers := b.handlers
+	// Copy handlers slice to avoid data race if Subscribe is called during dispatch
+	handlers := append([]Handler(nil), b.handlers...)
 	b.mu.RUnlock()
 
 	for _, h := range handlers {
