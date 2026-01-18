@@ -69,5 +69,8 @@ managing git worktrees and the full PR lifecycle.`,
 		"Verbose output")
 
 	// Add subcommands
-	a.rootCmd.AddCommand(NewVersionCmd(a))
+	a.rootCmd.AddCommand(
+		NewVersionCmd(a),
+		NewStatusCmd(a),
+	)
 }
