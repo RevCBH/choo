@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthropics/choo/internal/discovery"
+	"github.com/anthropics/choo/internal/escalate"
 	"github.com/anthropics/choo/internal/events"
 	"github.com/anthropics/choo/internal/git"
 	"github.com/anthropics/choo/internal/github"
@@ -26,6 +27,7 @@ type Worker struct {
 	git          *git.WorktreeManager
 	github       *github.PRClient
 	claude       *ClaudeClient
+	escalator    escalate.Escalator
 	worktreePath string
 	branch       string
 	currentTask  *discovery.Task
@@ -53,10 +55,11 @@ type BaselineCheck struct {
 
 // WorkerDeps bundles worker dependencies for injection
 type WorkerDeps struct {
-	Events *events.Bus
-	Git    *git.WorktreeManager
-	GitHub *github.PRClient
-	Claude *ClaudeClient
+	Events    *events.Bus
+	Git       *git.WorktreeManager
+	GitHub    *github.PRClient
+	Claude    *ClaudeClient
+	Escalator escalate.Escalator
 }
 
 // ClaudeClient is a placeholder interface for the Claude client
@@ -66,12 +69,13 @@ type ClaudeClient interface{}
 // NewWorker creates a worker for executing a unit
 func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker {
 	return &Worker{
-		unit:   unit,
-		config: cfg,
-		events: deps.Events,
-		git:    deps.Git,
-		github: deps.GitHub,
-		claude: deps.Claude,
+		unit:      unit,
+		config:    cfg,
+		events:    deps.Events,
+		git:       deps.Git,
+		github:    deps.GitHub,
+		claude:    deps.Claude,
+		escalator: deps.Escalator,
 	}
 }
 

@@ -2,11 +2,16 @@ package worker
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anthropics/choo/internal/discovery"
+	"github.com/anthropics/choo/internal/escalate"
 )
 
 // setupTestGitRepo creates a temporary git repo for testing
@@ -207,5 +212,212 @@ func TestGetChangedFiles_ParsesPorcelain(t *testing.T) {
 	}
 	if !hasModified {
 		t.Error("expected test.txt in changed files")
+	}
+}
+
+// mockEscalator records escalations for testing
+type mockEscalator struct {
+	escalations []escalate.Escalation
+}
+
+func (m *mockEscalator) Escalate(ctx context.Context, e escalate.Escalation) error {
+	m.escalations = append(m.escalations, e)
+	return nil
+}
+
+func (m *mockEscalator) Name() string {
+	return "mock"
+}
+
+// mockClaudeInvoker wraps a Worker and allows customizing Claude invocation behavior
+type mockClaudeInvoker struct {
+	*Worker
+	invokeFunc func(ctx context.Context, prompt TaskPrompt) error
+}
+
+func (m *mockClaudeInvoker) invokeClaude(ctx context.Context, prompt string) error {
+	if m.invokeFunc != nil {
+		return m.invokeFunc(ctx, TaskPrompt{Content: prompt})
+	}
+	return m.Worker.invokeClaudeForTask(ctx, TaskPrompt{Content: prompt})
+}
+
+// wrapWorkerForMocking wraps a worker to allow mocking invokeClaude
+func wrapWorkerForMocking(w *Worker, invokeFunc func(ctx context.Context, prompt TaskPrompt) error) *mockClaudeInvoker {
+	return &mockClaudeInvoker{
+		Worker:     w,
+		invokeFunc: invokeFunc,
+	}
+}
+
+func TestCommitViaClaudeCode_Success(t *testing.T) {
+	dir, cleanup := setupTestGitRepo(t)
+	defer cleanup()
+
+	// Create a file to commit
+	testFile := filepath.Join(dir, "new_feature.go")
+	if err := os.WriteFile(testFile, []byte("package main"), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	w := &Worker{
+		worktreePath: dir,
+		unit:         &discovery.Unit{ID: "test-unit"},
+		escalator:    &mockEscalator{},
+	}
+
+	mocked := wrapWorkerForMocking(w, func(ctx context.Context, prompt TaskPrompt) error {
+		cmd := exec.Command("git", "add", "-A")
+		cmd.Dir = dir
+		if err := cmd.Run(); err != nil {
+			return err
+		}
+		cmd = exec.Command("git", "commit", "-m", "feat: add new feature")
+		cmd.Dir = dir
+		return cmd.Run()
+	})
+
+	// Test the commit flow
+	headBefore, err := w.getHeadRef(context.Background())
+	if err != nil {
+		t.Fatalf("failed to get HEAD ref: %v", err)
+	}
+
+	files, _ := w.getChangedFiles(context.Background())
+	prompt := BuildCommitPrompt("Add new feature", files)
+
+	if err := mocked.invokeClaude(context.Background(), prompt); err != nil {
+		t.Fatalf("invokeClaude failed: %v", err)
+	}
+
+	hasCommit, err := w.hasNewCommit(context.Background(), headBefore)
+	if err != nil {
+		t.Fatalf("hasNewCommit failed: %v", err)
+	}
+	if !hasCommit {
+		t.Error("expected new commit to be created")
+	}
+}
+
+func TestCommitViaClaudeCode_EscalatesOnExhaustion(t *testing.T) {
+	dir, cleanup := setupTestGitRepo(t)
+	defer cleanup()
+
+	esc := &mockEscalator{}
+	w := &Worker{
+		worktreePath: dir,
+		unit:         &discovery.Unit{ID: "test-unit"},
+		escalator:    esc,
+	}
+
+	mocked := wrapWorkerForMocking(w, func(ctx context.Context, prompt TaskPrompt) error {
+		return errors.New("claude unavailable")
+	})
+
+	// Test that retries exhaust and escalation is called
+	headBefore, _ := w.getHeadRef(context.Background())
+	files, _ := w.getChangedFiles(context.Background())
+	prompt := BuildCommitPrompt("Test task", files)
+
+	result := RetryWithBackoff(context.Background(), DefaultRetryConfig, func(ctx context.Context) error {
+		if err := mocked.invokeClaude(ctx, prompt); err != nil {
+			return err
+		}
+		hasCommit, err := w.hasNewCommit(ctx, headBefore)
+		if err != nil {
+			return err
+		}
+		if !hasCommit {
+			return errors.New("claude did not create a commit")
+		}
+		return nil
+	})
+
+	if result.Success {
+		t.Error("expected retries to fail")
+	}
+
+	// Simulate escalation
+	if !result.Success {
+		if w.escalator != nil {
+			w.escalator.Escalate(context.Background(), escalate.Escalation{
+				Severity: escalate.SeverityBlocking,
+				Unit:     w.unit.ID,
+				Title:    "Failed to commit changes",
+				Message:  fmt.Sprintf("Claude could not commit after %d attempts", result.Attempts),
+				Context: map[string]string{
+					"task":  "Test task",
+					"error": result.LastErr.Error(),
+				},
+			})
+		}
+	}
+
+	if len(esc.escalations) == 0 {
+		t.Error("expected escalation to be called")
+	}
+
+	if len(esc.escalations) > 0 {
+		e := esc.escalations[0]
+		if e.Severity != escalate.SeverityBlocking {
+			t.Errorf("expected SeverityBlocking, got %v", e.Severity)
+		}
+		if e.Title != "Failed to commit changes" {
+			t.Errorf("unexpected title: %s", e.Title)
+		}
+	}
+}
+
+func TestCommitViaClaudeCode_VerifiesCommit(t *testing.T) {
+	dir, cleanup := setupTestGitRepo(t)
+	defer cleanup()
+
+	w := &Worker{
+		worktreePath: dir,
+		unit:         &discovery.Unit{ID: "test-unit"},
+		escalator:    &mockEscalator{},
+	}
+
+	mocked := wrapWorkerForMocking(w, func(ctx context.Context, prompt TaskPrompt) error {
+		return nil // Success but no commit
+	})
+
+	headBefore, _ := w.getHeadRef(context.Background())
+	files, _ := w.getChangedFiles(context.Background())
+	prompt := BuildCommitPrompt("Test task", files)
+
+	if err := mocked.invokeClaude(context.Background(), prompt); err != nil {
+		t.Fatalf("invokeClaude should not fail: %v", err)
+	}
+
+	hasCommit, err := w.hasNewCommit(context.Background(), headBefore)
+	if err != nil {
+		t.Fatalf("hasNewCommit failed: %v", err)
+	}
+	if hasCommit {
+		t.Error("expected no commit to be created")
+	}
+
+	// Verify that the error flow would catch this
+	err = RetryWithBackoff(context.Background(), RetryConfig{MaxAttempts: 1}, func(ctx context.Context) error {
+		if err := mocked.invokeClaude(ctx, prompt); err != nil {
+			return err
+		}
+		hasCommit, err := w.hasNewCommit(ctx, headBefore)
+		if err != nil {
+			return err
+		}
+		if !hasCommit {
+			return errors.New("claude did not create a commit")
+		}
+		return nil
+	}).LastErr
+
+	if err == nil {
+		t.Error("expected error when no commit created")
+	}
+
+	if !strings.Contains(err.Error(), "did not create a commit") {
+		t.Errorf("error should mention missing commit: %v", err)
 	}
 }

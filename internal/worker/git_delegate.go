@@ -2,8 +2,11 @@ package worker
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/anthropics/choo/internal/escalate"
 )
 
 // getHeadRef returns the current HEAD commit SHA
@@ -55,4 +58,56 @@ func (w *Worker) getChangedFiles(ctx context.Context) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// commitViaClaudeCode invokes Claude to stage and commit changes
+func (w *Worker) commitViaClaudeCode(ctx context.Context, taskTitle string) error {
+	// Get the HEAD ref before invoking Claude
+	headBefore, err := w.getHeadRef(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get HEAD ref: %w", err)
+	}
+
+	files, _ := w.getChangedFiles(ctx)
+	prompt := BuildCommitPrompt(taskTitle, files)
+
+	result := RetryWithBackoff(ctx, DefaultRetryConfig, func(ctx context.Context) error {
+		if err := w.invokeClaude(ctx, prompt); err != nil {
+			return err
+		}
+
+		// Verify commit was created
+		hasCommit, err := w.hasNewCommit(ctx, headBefore)
+		if err != nil {
+			return err
+		}
+		if !hasCommit {
+			return fmt.Errorf("claude did not create a commit")
+		}
+		return nil
+	})
+
+	if !result.Success {
+		if w.escalator != nil {
+			w.escalator.Escalate(ctx, escalate.Escalation{
+				Severity: escalate.SeverityBlocking,
+				Unit:     w.unit.ID,
+				Title:    "Failed to commit changes",
+				Message:  fmt.Sprintf("Claude could not commit after %d attempts", result.Attempts),
+				Context: map[string]string{
+					"task":  taskTitle,
+					"error": result.LastErr.Error(),
+				},
+			})
+		}
+		return result.LastErr
+	}
+
+	return nil
+}
+
+// invokeClaude invokes Claude CLI with the given prompt (no output capture)
+func (w *Worker) invokeClaude(ctx context.Context, prompt string) error {
+	taskPrompt := TaskPrompt{Content: prompt}
+	return w.invokeClaudeForTask(ctx, taskPrompt)
 }
