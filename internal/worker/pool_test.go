@@ -38,8 +38,12 @@ func setupGitRepo(t *testing.T) (repoDir string, cleanup func()) {
 	}
 
 	// Configure git
-	exec.Command("git", "config", "user.email", "test@test.com").Run()
-	exec.Command("git", "config", "user.name", "Test User").Run()
+	cmd = exec.Command("git", "config", "user.email", "test@test.com")
+	cmd.Dir = repoDir
+	cmd.Run()
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = repoDir
+	cmd.Run()
 
 	// Create initial commit
 	readmePath := filepath.Join(repoDir, "README.md")
