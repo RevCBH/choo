@@ -222,6 +222,10 @@ depends_on: []
 }
 
 func TestRunOrchestrator_ContextCancellation(t *testing.T) {
+	if os.Getenv("GITHUB_TOKEN") == "" {
+		t.Skip("Skipping test: GITHUB_TOKEN not set")
+	}
+
 	tmpDir := t.TempDir()
 	tasksDir := filepath.Join(tmpDir, "tasks")
 	unitDir := filepath.Join(tasksDir, "test-unit")
