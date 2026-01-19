@@ -2,12 +2,16 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/anthropics/choo/internal/discovery"
+	"github.com/anthropics/choo/internal/escalate"
 	"github.com/anthropics/choo/internal/events"
+	"github.com/anthropics/choo/internal/scheduler"
 )
 
 func TestOrchestrator_Run_Discovery(t *testing.T) {
@@ -152,4 +156,175 @@ func TestOrchestrator_Run_UnitNotFound(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for nonexistent unit")
 	}
+}
+
+func TestOrchestrator_HandleEvent_UnitCompleted(t *testing.T) {
+	bus := events.NewBus(100)
+	defer bus.Close()
+
+	sched := scheduler.New(bus, 2)
+
+	// Create a minimal unit for scheduling
+	units := []*discovery.Unit{
+		{ID: "unit-a", DependsOn: []string{}},
+	}
+	sched.Schedule(units)
+
+	// Dispatch the unit
+	result := sched.Dispatch()
+	if result.Unit != "unit-a" {
+		t.Fatalf("expected unit-a to be dispatched")
+	}
+
+	orch := &Orchestrator{
+		bus:       bus,
+		scheduler: sched,
+		unitMap:   buildUnitMap(units),
+	}
+
+	// Subscribe to events
+	bus.Subscribe(orch.handleEvent)
+
+	// Emit completion event
+	bus.Emit(events.NewEvent(events.UnitCompleted, "unit-a"))
+
+	// Give event time to process
+	time.Sleep(50 * time.Millisecond)
+
+	// Check scheduler state
+	state, ok := sched.GetState("unit-a")
+	if !ok {
+		t.Fatal("unit-a state not found")
+	}
+	if state.Status != scheduler.StatusComplete {
+		t.Errorf("expected StatusComplete, got %v", state.Status)
+	}
+}
+
+func TestOrchestrator_HandleEvent_UnitFailed(t *testing.T) {
+	bus := events.NewBus(100)
+	defer bus.Close()
+
+	sched := scheduler.New(bus, 2)
+
+	units := []*discovery.Unit{
+		{ID: "unit-a", DependsOn: []string{}},
+		{ID: "unit-b", DependsOn: []string{"unit-a"}},
+	}
+	sched.Schedule(units)
+
+	// Dispatch unit-a
+	sched.Dispatch()
+
+	orch := &Orchestrator{
+		bus:       bus,
+		scheduler: sched,
+		unitMap:   buildUnitMap(units),
+	}
+
+	bus.Subscribe(orch.handleEvent)
+
+	// Emit failure event
+	bus.Emit(events.NewEvent(events.UnitFailed, "unit-a").WithError(fmt.Errorf("test error")))
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Check unit-a is failed
+	stateA, _ := sched.GetState("unit-a")
+	if stateA.Status != scheduler.StatusFailed {
+		t.Errorf("expected unit-a StatusFailed, got %v", stateA.Status)
+	}
+
+	// Check unit-b is blocked
+	stateB, _ := sched.GetState("unit-b")
+	if stateB.Status != scheduler.StatusBlocked {
+		t.Errorf("expected unit-b StatusBlocked, got %v", stateB.Status)
+	}
+}
+
+func TestOrchestrator_HandleEvent_WithEscalator(t *testing.T) {
+	bus := events.NewBus(100)
+	defer bus.Close()
+
+	sched := scheduler.New(bus, 2)
+
+	units := []*discovery.Unit{
+		{ID: "unit-a", DependsOn: []string{}},
+	}
+	sched.Schedule(units)
+	sched.Dispatch()
+
+	// Track escalations
+	escalated := make(chan escalate.Escalation, 1)
+	mockEscalator := &mockEscalator{
+		escalateFn: func(ctx context.Context, e escalate.Escalation) error {
+			escalated <- e
+			return nil
+		},
+	}
+
+	orch := &Orchestrator{
+		bus:       bus,
+		scheduler: sched,
+		escalator: mockEscalator,
+		unitMap:   buildUnitMap(units),
+	}
+
+	bus.Subscribe(orch.handleEvent)
+
+	// Emit failure with specific error type
+	bus.Emit(events.NewEvent(events.UnitFailed, "unit-a").
+		WithError(fmt.Errorf("merge conflict detected")))
+
+	// Wait for escalation
+	select {
+	case e := <-escalated:
+		if e.Unit != "unit-a" {
+			t.Errorf("expected unit-a, got %s", e.Unit)
+		}
+		if e.Severity != escalate.SeverityBlocking {
+			t.Errorf("expected blocking severity for merge conflict")
+		}
+		if e.Context["error_type"] != "merge_conflict" {
+			t.Errorf("expected merge_conflict error type")
+		}
+	case <-time.After(time.Second):
+		t.Error("escalation not received")
+	}
+}
+
+func TestCategorizeErrorSeverity(t *testing.T) {
+	tests := []struct {
+		err      error
+		expected escalate.Severity
+	}{
+		{nil, escalate.SeverityInfo},
+		{fmt.Errorf("merge conflict"), escalate.SeverityBlocking},
+		{fmt.Errorf("review timeout"), escalate.SeverityWarning},
+		{fmt.Errorf("baseline checks failed"), escalate.SeverityCritical},
+		{fmt.Errorf("unknown error"), escalate.SeverityCritical},
+	}
+
+	for _, tc := range tests {
+		got := categorizeErrorSeverity(tc.err)
+		if got != tc.expected {
+			t.Errorf("categorizeErrorSeverity(%v) = %v, want %v", tc.err, got, tc.expected)
+		}
+	}
+}
+
+// mockEscalator for testing
+type mockEscalator struct {
+	escalateFn func(ctx context.Context, e escalate.Escalation) error
+}
+
+func (m *mockEscalator) Escalate(ctx context.Context, e escalate.Escalation) error {
+	if m.escalateFn != nil {
+		return m.escalateFn(ctx, e)
+	}
+	return nil
+}
+
+func (m *mockEscalator) Name() string {
+	return "mock"
 }

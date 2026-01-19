@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/anthropics/choo/internal/discovery"
@@ -278,9 +279,79 @@ func (o *Orchestrator) buildResult(startTime time.Time, err error) *Result {
 	return result
 }
 
-// handleEvent is a stub for event handling (task #3)
-func (o *Orchestrator) handleEvent(evt events.Event) {
-	// Event handling implementation will be added in task #3
+// handleEvent processes events from the event bus
+func (o *Orchestrator) handleEvent(e events.Event) {
+	switch e.Type {
+	case events.UnitCompleted:
+		o.scheduler.Complete(e.Unit)
+
+	case events.UnitFailed:
+		var err error
+		if e.Error != "" {
+			err = fmt.Errorf("%s", e.Error)
+		}
+		o.scheduler.Fail(e.Unit, err)
+
+		// Check if escalation is needed
+		if o.escalator != nil {
+			issue := escalate.Escalation{
+				Severity: categorizeErrorSeverity(err),
+				Unit:     e.Unit,
+				Title:    fmt.Sprintf("Unit %s failed", e.Unit),
+				Message:  e.Error,
+				Context:  make(map[string]string),
+			}
+
+			// Add error type to context
+			errType := categorizeErrorType(err)
+			if errType != "" {
+				issue.Context["error_type"] = errType
+			}
+
+			// Escalate asynchronously to avoid blocking event dispatch
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				_ = o.escalator.Escalate(ctx, issue)
+			}()
+		}
+	}
+}
+
+// categorizeErrorSeverity determines escalation severity from error
+func categorizeErrorSeverity(err error) escalate.Severity {
+	if err == nil {
+		return escalate.SeverityInfo
+	}
+	errStr := err.Error()
+	switch {
+	case strings.Contains(errStr, "merge conflict"):
+		return escalate.SeverityBlocking
+	case strings.Contains(errStr, "review timeout"):
+		return escalate.SeverityWarning
+	case strings.Contains(errStr, "baseline"):
+		return escalate.SeverityCritical
+	default:
+		return escalate.SeverityCritical
+	}
+}
+
+// categorizeErrorType returns a short error type string for context
+func categorizeErrorType(err error) string {
+	if err == nil {
+		return ""
+	}
+	errStr := err.Error()
+	switch {
+	case strings.Contains(errStr, "merge conflict"):
+		return "merge_conflict"
+	case strings.Contains(errStr, "review timeout"):
+		return "review_timeout"
+	case strings.Contains(errStr, "baseline"):
+		return "baseline_failure"
+	default:
+		return "claude_failure"
+	}
 }
 
 // dryRun is a stub for dry-run mode (task #5)
