@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/anthropics/choo/internal/discovery"
@@ -28,6 +29,13 @@ type Orchestrator struct {
 	// Runtime state
 	units   []*discovery.Unit
 	unitMap map[string]*discovery.Unit // unitID -> Unit for quick lookup
+
+	// Synchronization for background goroutines
+	escalateMu     sync.Mutex
+	escalateWg     sync.WaitGroup
+	escalateCtx    context.Context
+	escalateCancel context.CancelFunc
+	closing        bool
 }
 
 // Config holds orchestrator-specific configuration
@@ -89,23 +97,39 @@ func New(cfg Config, deps Dependencies) *Orchestrator {
 	if cfg.ShutdownTimeout == 0 {
 		cfg.ShutdownTimeout = DefaultShutdownTimeout
 	}
+	escalateCtx, escalateCancel := context.WithCancel(context.Background())
 	return &Orchestrator{
-		cfg:       cfg,
-		bus:       deps.Bus,
-		escalator: deps.Escalator,
-		git:       deps.Git,
-		github:    deps.GitHub,
-		unitMap:   make(map[string]*discovery.Unit),
+		cfg:            cfg,
+		bus:            deps.Bus,
+		escalator:      deps.Escalator,
+		git:            deps.Git,
+		github:         deps.GitHub,
+		unitMap:        make(map[string]*discovery.Unit),
+		escalateCtx:    escalateCtx,
+		escalateCancel: escalateCancel,
 	}
 }
 
 // Close releases all resources held by the orchestrator
 // Note: Does not close the event bus as it is owned by the caller
 func (o *Orchestrator) Close() error {
+	// Mark as closing to prevent new escalations
+	o.escalateMu.Lock()
+	o.closing = true
+	o.escalateMu.Unlock()
+
 	// Stop worker pool if initialized
 	if o.pool != nil {
-		o.pool.Stop()
+		if err := o.pool.Stop(); err != nil {
+			return fmt.Errorf("stopping worker pool: %w", err)
+		}
 	}
+
+	// Cancel escalation context and wait for pending escalation goroutines
+	if o.escalateCancel != nil {
+		o.escalateCancel()
+	}
+	o.escalateWg.Wait()
 
 	return nil
 }
@@ -342,8 +366,21 @@ func (o *Orchestrator) handleEvent(e events.Event) {
 			}
 
 			// Escalate asynchronously to avoid blocking event dispatch
+			o.escalateMu.Lock()
+			if o.closing {
+				o.escalateMu.Unlock()
+				return
+			}
+			o.escalateWg.Add(1)
+			o.escalateMu.Unlock()
 			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer o.escalateWg.Done()
+				// Use escalateCtx if available, otherwise background context
+				parentCtx := o.escalateCtx
+				if parentCtx == nil {
+					parentCtx = context.Background()
+				}
+				ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
 				defer cancel()
 				_ = o.escalator.Escalate(ctx, issue)
 			}()
