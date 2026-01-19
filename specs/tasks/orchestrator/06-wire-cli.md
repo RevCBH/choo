@@ -1,6 +1,6 @@
 ---
 task: 6
-status: pending
+status: complete
 backpressure: "go build ./cmd/choo/... && go test ./internal/cli/... -run TestRun"
 depends_on: [1, 2, 3, 4, 5]
 ---
@@ -181,7 +181,7 @@ depends_on: []
 
 	os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(`---
 task: 1
-status: pending
+status: in_progress
 backpressure: "echo ok"
 depends_on: []
 ---
@@ -239,7 +239,7 @@ depends_on: []
 
 	os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(`---
 task: 1
-status: pending
+status: in_progress
 backpressure: "sleep 60"
 depends_on: []
 ---
@@ -301,7 +301,7 @@ depends_on: []
 
 	os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(`---
 task: 1
-status: pending
+status: in_progress
 backpressure: "echo ok"
 depends_on: []
 ---

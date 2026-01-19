@@ -1,6 +1,6 @@
 ---
 task: 2
-status: pending
+status: complete
 backpressure: "go test ./internal/orchestrator/... -run TestOrchestrator_Run"
 depends_on: [1]
 ---
@@ -201,7 +201,7 @@ depends_on: []
 	// Create a task file
 	taskFile := `---
 task: 1
-status: pending
+status: in_progress
 backpressure: "echo ok"
 depends_on: []
 ---
@@ -250,7 +250,7 @@ depends_on: []
 `), 0644)
 	os.WriteFile(filepath.Join(unitADir, "01-task.md"), []byte(`---
 task: 1
-status: pending
+status: in_progress
 backpressure: "echo ok"
 depends_on: []
 ---
@@ -268,7 +268,7 @@ depends_on: [unit-a]
 `), 0644)
 	os.WriteFile(filepath.Join(unitBDir, "01-task.md"), []byte(`---
 task: 1
-status: pending
+status: in_progress
 backpressure: "echo ok"
 depends_on: []
 ---

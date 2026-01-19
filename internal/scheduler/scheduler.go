@@ -121,13 +121,24 @@ func (s *Scheduler) Transition(unitID string, to UnitStatus) error {
 	return nil
 }
 
-// GetState returns the current state of a unit
+// GetState returns a snapshot of a unit's current state
+// Returns a copy to prevent data races with concurrent modifications
 func (s *Scheduler) GetState(unitID string) (*UnitState, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	state, ok := s.states[unitID]
-	return state, ok
+	if !ok {
+		return nil, false
+	}
+
+	// Return a copy to prevent external mutation and data races
+	stateCopy := *state
+	if state.BlockedBy != nil {
+		stateCopy.BlockedBy = make([]string, len(state.BlockedBy))
+		copy(stateCopy.BlockedBy, state.BlockedBy)
+	}
+	return &stateCopy, true
 }
 
 // GetAllStates returns a snapshot of all unit states

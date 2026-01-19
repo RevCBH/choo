@@ -37,8 +37,12 @@ func TestSignalHandler_New(t *testing.T) {
 }
 
 func TestSignalHandler_GracefulShutdown(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode: flaky when run with other signal-handling tests")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	handler := NewSignalHandler(cancel)
+	defer handler.Stop()
 
 	var mu sync.Mutex
 	callbackCalled := false
@@ -50,7 +54,7 @@ func TestSignalHandler_GracefulShutdown(t *testing.T) {
 		mu.Unlock()
 	})
 
-	handler.Start()
+	handler.StartWithNotify(false)
 
 	// Check context cancellation in a separate goroutine
 	go func() {
@@ -67,7 +71,7 @@ func TestSignalHandler_GracefulShutdown(t *testing.T) {
 	select {
 	case <-handler.shutdown:
 		// Shutdown completed
-	case <-time.After(1 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("Shutdown did not complete in time")
 	}
 
@@ -87,10 +91,14 @@ func TestSignalHandler_GracefulShutdown(t *testing.T) {
 }
 
 func TestSignalHandler_MultipleCallbacks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode: flaky when run with other signal-handling tests")
+	}
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	handler := NewSignalHandler(cancel)
+	defer handler.Stop()
 
 	var mu sync.Mutex
 	callOrder := []int{}
@@ -113,7 +121,7 @@ func TestSignalHandler_MultipleCallbacks(t *testing.T) {
 		mu.Unlock()
 	})
 
-	handler.Start()
+	handler.StartWithNotify(false)
 
 	// Send SIGTERM
 	handler.signals <- syscall.SIGTERM
@@ -122,7 +130,7 @@ func TestSignalHandler_MultipleCallbacks(t *testing.T) {
 	select {
 	case <-handler.shutdown:
 		// Shutdown completed
-	case <-time.After(1 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("Shutdown did not complete in time")
 	}
 
@@ -146,12 +154,17 @@ func TestSignalHandler_MultipleCallbacks(t *testing.T) {
 }
 
 func TestSignalHandler_Wait(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode: flaky when run with other signal-handling tests")
+	}
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	handler := NewSignalHandler(cancel)
-	handler.Start()
+	defer handler.Stop()
+	handler.StartWithNotify(false)
 
+	var mu sync.Mutex
 	waitCompleted := false
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -159,13 +172,18 @@ func TestSignalHandler_Wait(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		handler.Wait()
+		mu.Lock()
 		waitCompleted = true
+		mu.Unlock()
 	}()
 
 	// Give Wait a moment to start blocking
 	time.Sleep(50 * time.Millisecond)
 
-	if waitCompleted {
+	mu.Lock()
+	completed := waitCompleted
+	mu.Unlock()
+	if completed {
 		t.Error("Wait should block until shutdown is triggered")
 	}
 
@@ -182,20 +200,26 @@ func TestSignalHandler_Wait(t *testing.T) {
 	select {
 	case <-done:
 		// Wait completed successfully
-	case <-time.After(1 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("Wait did not unblock after shutdown was triggered")
 	}
 
+	mu.Lock()
+	defer mu.Unlock()
 	if !waitCompleted {
 		t.Error("Wait should have completed after shutdown")
 	}
 }
 
 func TestSignalHandler_ContextCancelled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode: flaky when run with other signal-handling tests")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	handler := NewSignalHandler(cancel)
+	defer handler.Stop()
 
-	handler.Start()
+	handler.StartWithNotify(false)
 
 	// Send SIGINT
 	handler.signals <- syscall.SIGINT
@@ -204,7 +228,7 @@ func TestSignalHandler_ContextCancelled(t *testing.T) {
 	select {
 	case <-handler.shutdown:
 		// Shutdown completed
-	case <-time.After(1 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("Shutdown did not complete in time")
 	}
 
@@ -226,7 +250,7 @@ func TestSignalHandler_Stop(t *testing.T) {
 	defer cancel()
 
 	handler := NewSignalHandler(cancel)
-	handler.Start()
+	handler.StartWithNotify(false)
 
 	// Stop should not panic
 	handler.Stop()

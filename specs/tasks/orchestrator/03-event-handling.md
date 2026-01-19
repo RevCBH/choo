@@ -1,6 +1,6 @@
 ---
 task: 3
-status: pending
+status: complete
 backpressure: "go test ./internal/orchestrator/... -run TestOrchestrator_HandleEvent"
 depends_on: [1, 2]
 ---
