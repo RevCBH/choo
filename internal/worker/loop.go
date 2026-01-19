@@ -123,7 +123,8 @@ func (w *Worker) invokeClaudeForTask(ctx context.Context, prompt TaskPrompt) err
 // verifyTaskComplete re-parses task file to check if status was updated
 func (w *Worker) verifyTaskComplete(task *discovery.Task) (bool, error) {
 	// 1. Call discovery.ParseTaskFile(task.FilePath)
-	taskPath := filepath.Join(w.unit.Path, task.FilePath)
+	// Use worktreePath since Claude edits files in the worktree, not the main repo
+	taskPath := filepath.Join(w.worktreePath, task.FilePath)
 	updated, err := discovery.ParseTaskFile(taskPath)
 	if err != nil {
 		return false, err

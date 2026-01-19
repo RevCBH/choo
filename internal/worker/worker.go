@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/anthropics/choo/internal/events"
 	"github.com/anthropics/choo/internal/git"
 	"github.com/anthropics/choo/internal/github"
+	"gopkg.in/yaml.v3"
 )
 
 // Worker executes a single unit in an isolated worktree
@@ -284,9 +286,51 @@ func (w *Worker) cleanup(ctx context.Context) error {
 // updateUnitStatus updates the unit frontmatter status in the IMPLEMENTATION_PLAN.md
 func (w *Worker) updateUnitStatus(status discovery.UnitStatus) error {
 	implPlanPath := filepath.Join(w.worktreePath, "specs", "units", w.unit.ID, "IMPLEMENTATION_PLAN.md")
-	// For now, this is a placeholder - the actual implementation would read, modify, and write the frontmatter
-	// This will be implemented when needed
-	_ = implPlanPath
-	_ = status
+
+	// Read the file
+	content, err := os.ReadFile(implPlanPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// File doesn't exist yet, skip status update
+			return nil
+		}
+		return fmt.Errorf("failed to read IMPLEMENTATION_PLAN.md: %w", err)
+	}
+
+	// Parse frontmatter and body
+	frontmatterBytes, body, err := discovery.ParseFrontmatter(content)
+	if err != nil {
+		return fmt.Errorf("failed to parse frontmatter: %w", err)
+	}
+
+	// Parse the frontmatter YAML
+	var fm discovery.UnitFrontmatter
+	if frontmatterBytes != nil {
+		if err := yaml.Unmarshal(frontmatterBytes, &fm); err != nil {
+			return fmt.Errorf("failed to unmarshal frontmatter: %w", err)
+		}
+	}
+
+	// Update the status
+	fm.OrchStatus = string(status)
+
+	// Re-serialize the frontmatter
+	updatedFM, err := yaml.Marshal(&fm)
+	if err != nil {
+		return fmt.Errorf("failed to marshal frontmatter: %w", err)
+	}
+
+	// Reconstruct the file content
+	var buf strings.Builder
+	buf.WriteString("---\n")
+	buf.Write(updatedFM)
+	buf.WriteString("---\n")
+	buf.Write(body)
+
+	// Write the file back
+	if err := os.WriteFile(implPlanPath, []byte(buf.String()), 0644); err != nil {
+		return fmt.Errorf("failed to write IMPLEMENTATION_PLAN.md: %w", err)
+	}
+
 	return nil
 }
