@@ -147,41 +147,54 @@ func (c *PRClient) PollReview(ctx context.Context, prNumber int) (*PollResult, e
 	startTime := time.Now()
 	var previousState *ReviewState
 
+	// checkStatus performs a single poll and returns result if terminal condition met
+	checkStatus := func() (*PollResult, bool) {
+		state, err := c.GetReviewStatus(ctx, prNumber)
+		if err != nil {
+			// Log and continue - transient errors shouldn't stop polling
+			// Rate limits are handled in doRequest with retry
+			return nil, false
+		}
+
+		result := &PollResult{
+			State:   *state,
+			Changed: previousState != nil && previousState.Status != state.Status,
+		}
+
+		// Check timeout
+		if time.Since(startTime) >= c.reviewTimeout {
+			result.TimedOut = true
+			return result, true
+		}
+
+		// Check terminal conditions
+		if state.Status == ReviewApproved {
+			result.ShouldMerge = true
+			return result, true
+		}
+
+		if state.Status == ReviewChangesRequested {
+			result.HasFeedback = true
+			return result, true
+		}
+
+		previousState = state
+		return nil, false
+	}
+
+	// Immediate first check before waiting for ticker
+	if result, done := checkStatus(); done {
+		return result, nil
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-ticker.C:
-			state, err := c.GetReviewStatus(ctx, prNumber)
-			if err != nil {
-				// Log and continue - transient errors shouldn't stop polling
-				// Rate limits are handled in doRequest with retry
-				continue
-			}
-
-			result := &PollResult{
-				State:   *state,
-				Changed: previousState != nil && previousState.Status != state.Status,
-			}
-
-			// Check timeout
-			if time.Since(startTime) >= c.reviewTimeout {
-				result.TimedOut = true
+			if result, done := checkStatus(); done {
 				return result, nil
 			}
-
-			// Check terminal conditions
-			if state.Status == ReviewApproved {
-				result.ShouldMerge = true
-				return result, nil
-			}
-
-			if state.Status == ReviewChangesRequested {
-				result.HasFeedback = true
-				return result, nil
-			}
-
-			previousState = state
 		}
 	}
 }
