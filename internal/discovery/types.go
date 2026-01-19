@@ -37,6 +37,7 @@ const (
 	UnitStatusMerging    UnitStatus = "merging"
 	UnitStatusComplete   UnitStatus = "complete"
 	UnitStatusFailed     UnitStatus = "failed"
+	UnitStatusBlocked    UnitStatus = "blocked"
 )
 
 // Task represents a single task within a unit
@@ -77,7 +78,7 @@ func parseUnitStatus(s string) (UnitStatus, error) {
 	status := UnitStatus(s)
 	switch status {
 	case UnitStatusPending, UnitStatusInProgress, UnitStatusPROpen,
-		UnitStatusInReview, UnitStatusMerging, UnitStatusComplete, UnitStatusFailed:
+		UnitStatusInReview, UnitStatusMerging, UnitStatusComplete, UnitStatusFailed, UnitStatusBlocked:
 		return status, nil
 	default:
 		return "", fmt.Errorf("invalid unit status: %q", s)

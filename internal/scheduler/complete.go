@@ -48,6 +48,9 @@ func (s *Scheduler) Fail(unitID string, err error) {
 	state.CompletedAt = &now
 	state.Error = err
 
+	// Remove from ready queue if present (unit may fail before dispatch)
+	s.ready.Remove(unitID)
+
 	// Emit UnitFailed event
 	s.events.Emit(events.NewEvent(events.UnitFailed, unitID).WithError(err))
 
