@@ -1,48 +1,3 @@
----
-task: 1
-status: complete
-backpressure: "go build ./internal/orchestrator/..."
-depends_on: []
----
-
-# Orchestrator Core Types
-
-**Parent spec**: `/specs/ORCHESTRATOR.md`
-**Task**: #1 of 6 in implementation plan
-
-## Objective
-
-Define the core types for the orchestrator: the Orchestrator struct, Config, Dependencies, and Result types.
-
-## Dependencies
-
-### External Specs (must be implemented)
-- ESCALATION - provides Escalator interface (from `internal/escalate`)
-
-### Task Dependencies (within this unit)
-- None
-
-### Package Dependencies
-- `github.com/anthropics/choo/internal/config`
-- `github.com/anthropics/choo/internal/discovery`
-- `github.com/anthropics/choo/internal/events`
-- `github.com/anthropics/choo/internal/git`
-- `github.com/anthropics/choo/internal/github`
-- `github.com/anthropics/choo/internal/scheduler`
-- `github.com/anthropics/choo/internal/worker`
-- `github.com/anthropics/choo/internal/escalate`
-
-## Deliverables
-
-### Files to Create/Modify
-```
-internal/orchestrator/
-└── orchestrator.go    # CREATE: Core types and constructor
-```
-
-### Types to Implement
-
-```go
 package orchestrator
 
 import (
@@ -122,11 +77,7 @@ type Result struct {
 	Duration       time.Duration
 	Error          error
 }
-```
 
-### Functions to Implement
-
-```go
 // New creates an orchestrator with the given configuration and dependencies
 func New(cfg Config, deps Dependencies) *Orchestrator {
 	return &Orchestrator{
@@ -200,24 +151,3 @@ func filterToUnit(units []*discovery.Unit, targetID string) []*discovery.Unit {
 	}
 	return result
 }
-```
-
-## Backpressure
-
-### Validation Command
-```bash
-go build ./internal/orchestrator/...
-```
-
-### Must Pass
-| Test | Assertion |
-|------|-----------|
-| Package compiles | No build errors |
-| Types are exported | Orchestrator, Config, Dependencies, Result accessible |
-
-## NOT In Scope
-- Run() method implementation (task #2)
-- Event handling (task #3)
-- Shutdown logic (task #4)
-- Dry-run mode (task #5)
-- CLI integration (task #6)
