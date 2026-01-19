@@ -1,4 +1,4 @@
-module github.com/anthropics/choo
+module github.com/RevCBH/choo
 
 go 1.23.0
 

@@ -12,12 +12,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/choo/internal/discovery"
-	"github.com/anthropics/choo/internal/escalate"
-	"github.com/anthropics/choo/internal/events"
-	"github.com/anthropics/choo/internal/git"
-	"github.com/anthropics/choo/internal/scheduler"
-	"github.com/anthropics/choo/internal/worker"
+	"github.com/RevCBH/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/escalate"
+	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/git"
+	"github.com/RevCBH/choo/internal/scheduler"
+	"github.com/RevCBH/choo/internal/worker"
 )
 
 func TestOrchestrator_Run_Discovery(t *testing.T) {

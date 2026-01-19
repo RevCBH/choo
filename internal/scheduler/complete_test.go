@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/choo/internal/discovery"
-	"github.com/anthropics/choo/internal/events"
+	"github.com/RevCBH/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/events"
 )
 
 func TestComplete_SetsStatus(t *testing.T) {

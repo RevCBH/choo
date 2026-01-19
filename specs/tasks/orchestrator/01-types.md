@@ -23,14 +23,14 @@ Define the core types for the orchestrator: the Orchestrator struct, Config, Dep
 - None
 
 ### Package Dependencies
-- `github.com/anthropics/choo/internal/config`
-- `github.com/anthropics/choo/internal/discovery`
-- `github.com/anthropics/choo/internal/events`
-- `github.com/anthropics/choo/internal/git`
-- `github.com/anthropics/choo/internal/github`
-- `github.com/anthropics/choo/internal/scheduler`
-- `github.com/anthropics/choo/internal/worker`
-- `github.com/anthropics/choo/internal/escalate`
+- `github.com/RevCBH/choo/internal/config`
+- `github.com/RevCBH/choo/internal/discovery`
+- `github.com/RevCBH/choo/internal/events`
+- `github.com/RevCBH/choo/internal/git`
+- `github.com/RevCBH/choo/internal/github`
+- `github.com/RevCBH/choo/internal/scheduler`
+- `github.com/RevCBH/choo/internal/worker`
+- `github.com/RevCBH/choo/internal/escalate`
 
 ## Deliverables
 
@@ -48,13 +48,13 @@ package orchestrator
 import (
 	"time"
 
-	"github.com/anthropics/choo/internal/discovery"
-	"github.com/anthropics/choo/internal/escalate"
-	"github.com/anthropics/choo/internal/events"
-	"github.com/anthropics/choo/internal/git"
-	"github.com/anthropics/choo/internal/github"
-	"github.com/anthropics/choo/internal/scheduler"
-	"github.com/anthropics/choo/internal/worker"
+	"github.com/RevCBH/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/escalate"
+	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/git"
+	"github.com/RevCBH/choo/internal/github"
+	"github.com/RevCBH/choo/internal/scheduler"
+	"github.com/RevCBH/choo/internal/worker"
 )
 
 // Orchestrator coordinates unit execution across all subsystems

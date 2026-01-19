@@ -26,9 +26,9 @@ Implement event subscription and the handleEvent() method that updates scheduler
 - Task #2 - Run() method must exist for integration
 
 ### Package Dependencies
-- `github.com/anthropics/choo/internal/events`
-- `github.com/anthropics/choo/internal/scheduler`
-- `github.com/anthropics/choo/internal/escalate`
+- `github.com/RevCBH/choo/internal/events`
+- `github.com/RevCBH/choo/internal/scheduler`
+- `github.com/RevCBH/choo/internal/escalate`
 
 ## Deliverables
 

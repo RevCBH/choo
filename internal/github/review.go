@@ -36,6 +36,22 @@ type PollResult struct {
 	TimedOut    bool
 }
 
+// ReviewPollerConfig holds configuration for the review poller
+type ReviewPollerConfig struct {
+	PollInterval  time.Duration // Time between polls (default 30s)
+	ReviewTimeout time.Duration // Max time to wait for approval (default 2h)
+	RequireCI     bool          // Whether to require CI pass before merge
+}
+
+// DefaultReviewPollerConfig returns the default polling configuration
+func DefaultReviewPollerConfig() ReviewPollerConfig {
+	return ReviewPollerConfig{
+		PollInterval:  30 * time.Second,
+		ReviewTimeout: 2 * time.Hour,
+		RequireCI:     false,
+	}
+}
+
 // Reaction represents a GitHub reaction on a PR/issue
 type Reaction struct {
 	ID        int64     `json:"id"`

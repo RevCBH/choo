@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/anthropics/choo/internal/events"
-	"github.com/anthropics/choo/internal/github"
+	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/github"
 )
 
 func TestMergeConflictResolution_NoConflicts(t *testing.T) {

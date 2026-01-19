@@ -47,8 +47,8 @@ import (
     "context"
     "fmt"
 
-    "github.com/anthropics/choo/internal/escalate"
-    "github.com/anthropics/choo/internal/events"
+    "github.com/RevCBH/choo/internal/escalate"
+    "github.com/RevCBH/choo/internal/events"
 )
 
 // pushViaClaudeCode invokes Claude to push the branch to remote
@@ -128,9 +128,9 @@ import (
     "errors"
     "testing"
 
-    "github.com/anthropics/choo/internal/discovery"
-    "github.com/anthropics/choo/internal/escalate"
-    "github.com/anthropics/choo/internal/events"
+    "github.com/RevCBH/choo/internal/discovery"
+    "github.com/RevCBH/choo/internal/escalate"
+    "github.com/RevCBH/choo/internal/events"
 )
 
 // mockEventBus records emitted events for testing

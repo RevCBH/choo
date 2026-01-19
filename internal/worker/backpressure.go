@@ -5,7 +5,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/anthropics/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/discovery"
 )
 
 // BackpressureResult holds the result of a backpressure command

@@ -31,7 +31,7 @@ choo is a parallel development orchestrator that executes LLM-driven tasks auton
 
 ```bash
 # Clone the repository
-git clone https://github.com/anthropics/choo.git
+git clone https://github.com/RevCBH/choo.git
 cd choo
 
 # Build the binary

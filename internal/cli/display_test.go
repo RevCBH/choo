@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anthropics/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/discovery"
 )
 
 func TestRenderProgressBar_Empty(t *testing.T) {

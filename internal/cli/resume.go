@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/anthropics/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/discovery"
 	"github.com/spf13/cobra"
 )
 

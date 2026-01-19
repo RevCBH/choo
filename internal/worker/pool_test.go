@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/choo/internal/discovery"
-	"github.com/anthropics/choo/internal/events"
-	"github.com/anthropics/choo/internal/git"
+	"github.com/RevCBH/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/git"
 )
 
 // setupGitRepo creates a real git repository for testing

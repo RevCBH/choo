@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/discovery"
 )
 
 func TestExecute_Success(t *testing.T) {
