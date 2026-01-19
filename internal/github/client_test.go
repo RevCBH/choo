@@ -35,6 +35,12 @@ func TestGetToken_EnvVariable(t *testing.T) {
 }
 
 func TestGetToken_NoToken(t *testing.T) {
+	// Skip in CI environments where gh is authenticated
+	// In CI (GitHub Actions), gh auth token works even without GITHUB_TOKEN env
+	if os.Getenv("CI") == "true" || os.Getenv("GITHUB_ACTIONS") == "true" {
+		t.Skip("Skipping test: gh CLI is authenticated in CI environment")
+	}
+
 	originalToken := os.Getenv("GITHUB_TOKEN")
 	defer func() {
 		if originalToken != "" {
