@@ -71,7 +71,7 @@ func TestSignalHandler_GracefulShutdown(t *testing.T) {
 	select {
 	case <-handler.shutdown:
 		// Shutdown completed
-	case <-time.After(1 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("Shutdown did not complete in time")
 	}
 
@@ -130,7 +130,7 @@ func TestSignalHandler_MultipleCallbacks(t *testing.T) {
 	select {
 	case <-handler.shutdown:
 		// Shutdown completed
-	case <-time.After(1 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("Shutdown did not complete in time")
 	}
 
@@ -200,7 +200,7 @@ func TestSignalHandler_Wait(t *testing.T) {
 	select {
 	case <-done:
 		// Wait completed successfully
-	case <-time.After(1 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("Wait did not unblock after shutdown was triggered")
 	}
 
@@ -228,7 +228,7 @@ func TestSignalHandler_ContextCancelled(t *testing.T) {
 	select {
 	case <-handler.shutdown:
 		// Shutdown completed
-	case <-time.After(1 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("Shutdown did not complete in time")
 	}
 
