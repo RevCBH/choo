@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -235,8 +236,8 @@ depends_on: []
 
 	os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(`---
 task: 1
-status: in_progress
-backpressure: "sleep 60"
+status: pending
+backpressure: "echo ok"
 depends_on: []
 ---
 # Long Task
@@ -255,11 +256,15 @@ depends_on: []
 	// Initialize git repo (required for worktree operations)
 	initGitRepo(t, tmpDir)
 
+	claudeBin := setupFakeClaude(t, tmpDir)
+	t.Setenv("PATH", claudeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
 	app := New()
 	opts := RunOptions{
 		TasksDir:     tasksDir,
 		Parallelism:  1,
 		TargetBranch: "main",
+		NoPR:         true,
 	}
 
 	// Cancel after short delay
@@ -359,4 +364,24 @@ func initGitRepo(t *testing.T, dir string) {
 			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
 		}
 	}
+}
+
+func setupFakeClaude(t *testing.T, dir string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake claude helper requires a POSIX shell")
+	}
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("failed to create fake claude dir: %v", err)
+	}
+
+	claudePath := filepath.Join(binDir, "claude")
+	script := "#!/bin/sh\nsleep 5\nexit 0\n"
+	if err := os.WriteFile(claudePath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to write fake claude: %v", err)
+	}
+
+	return binDir
 }

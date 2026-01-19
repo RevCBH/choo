@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -459,25 +460,6 @@ func TestOrchestrator_Run_ContextCancellation(t *testing.T) {
 	// Create temp tasks directory
 	tmpDir := t.TempDir()
 
-	// Initialize git repo
-	cmd := exec.Command("git", "init")
-	cmd.Dir = tmpDir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to init git repo: %v", err)
-	}
-
-	cmd = exec.Command("git", "config", "user.email", "test@example.com")
-	cmd.Dir = tmpDir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to config git user.email: %v", err)
-	}
-
-	cmd = exec.Command("git", "config", "user.name", "Test")
-	cmd.Dir = tmpDir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to config git user.name: %v", err)
-	}
-
 	tasksDir := filepath.Join(tmpDir, "tasks")
 	unitDir := filepath.Join(tasksDir, "slow-unit")
 	os.MkdirAll(unitDir, 0755)
@@ -491,12 +473,16 @@ depends_on: []
 
 	os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(`---
 task: 1
-status: in_progress
-backpressure: "sleep 60"
+status: pending
+backpressure: "echo ok"
 depends_on: []
 ---
 # Slow Task
 `), 0644)
+
+	initGitRepo(t, tmpDir)
+	claudeBin := setupFakeClaude(t, tmpDir)
+	t.Setenv("PATH", claudeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	bus := events.NewBus(100)
 	gitMgr := git.NewWorktreeManager(tmpDir, nil)
@@ -508,6 +494,7 @@ depends_on: []
 		ShutdownTimeout: 100 * time.Millisecond,
 		RepoRoot:        tmpDir,
 		WorktreeBase:    worktreeBase,
+		NoPR:            true,
 	}
 
 	orch := New(cfg, Dependencies{
@@ -795,4 +782,42 @@ depends_on: []
 	if !strings.Contains(output, "Execution Plan") {
 		t.Error("expected Execution Plan header in output")
 	}
+}
+
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	cmds := [][]string{
+		{"git", "init", "-b", "main"},
+		{"git", "config", "user.email", "test@example.com"},
+		{"git", "config", "user.name", "Test"},
+		{"git", "add", "."},
+		{"git", "commit", "-m", "initial commit"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
+	}
+}
+
+func setupFakeClaude(t *testing.T, dir string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake claude helper requires a POSIX shell")
+	}
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(binDir, 0755); err != nil {
+		t.Fatalf("failed to create fake claude dir: %v", err)
+	}
+
+	claudePath := filepath.Join(binDir, "claude")
+	script := "#!/bin/sh\nsleep 5\nexit 0\n"
+	if err := os.WriteFile(claudePath, []byte(script), 0755); err != nil {
+		t.Fatalf("failed to write fake claude: %v", err)
+	}
+
+	return binDir
 }
