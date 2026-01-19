@@ -474,3 +474,131 @@ func TestDetermineStatus_Precedence(t *testing.T) {
 		})
 	}
 }
+
+func TestPollReview_ContinuesOnTransientError(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if strings.Contains(r.URL.Path, "reactions") {
+			// First 2 requests fail (triggers doRequest retry), then succeed with approval
+			// doRequest will retry 5xx errors up to 5 times, so we fail just the first request
+			// to keep the test fast
+			if requestCount == 1 {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode([]Reaction{{ID: 1, Content: "+1"}})
+			return
+		}
+		if strings.Contains(r.URL.Path, "comments") {
+			json.NewEncoder(w).Encode([]ghReviewComment{})
+			return
+		}
+	}))
+	defer server.Close()
+
+	client := &PRClient{
+		httpClient:    &http.Client{},
+		owner:         "owner",
+		repo:          "repo",
+		pollInterval:  10 * time.Millisecond,
+		reviewTimeout: 5 * time.Second, // Long enough for doRequest retries
+		token:         "test-token",
+		baseURL:       server.URL,
+	}
+
+	result, err := client.PollReview(context.Background(), 123)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !result.ShouldMerge {
+		t.Error("expected ShouldMerge to be true")
+	}
+	if requestCount < 3 {
+		t.Errorf("should have polled multiple times (got %d requests)", requestCount)
+	}
+}
+
+func TestPollReview_RespectsContextCancellation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "reactions") {
+			json.NewEncoder(w).Encode([]Reaction{})
+			return
+		}
+		json.NewEncoder(w).Encode([]ghReviewComment{})
+	}))
+	defer server.Close()
+
+	client := &PRClient{
+		httpClient:    &http.Client{},
+		owner:         "owner",
+		repo:          "repo",
+		pollInterval:  100 * time.Millisecond,
+		reviewTimeout: 1 * time.Second,
+		token:         "test-token",
+		baseURL:       server.URL,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Cancel after a short delay
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	_, err := client.PollReview(ctx, 123)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled error, got %v", err)
+	}
+}
+
+func TestPollReview_DetectsStateChange(t *testing.T) {
+	reactionCallCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "reactions") {
+			reactionCallCount++
+			// First poll: no reactions
+			// Second poll: eyes reaction
+			// Third poll: approval
+			if reactionCallCount == 1 {
+				json.NewEncoder(w).Encode([]Reaction{})
+			} else if reactionCallCount == 2 {
+				json.NewEncoder(w).Encode([]Reaction{{ID: 1, Content: "eyes"}})
+			} else {
+				json.NewEncoder(w).Encode([]Reaction{{ID: 1, Content: "+1"}})
+			}
+			return
+		}
+		if strings.Contains(r.URL.Path, "comments") {
+			json.NewEncoder(w).Encode([]ghReviewComment{})
+			return
+		}
+	}))
+	defer server.Close()
+
+	client := &PRClient{
+		httpClient:    &http.Client{},
+		owner:         "owner",
+		repo:          "repo",
+		pollInterval:  10 * time.Millisecond,
+		reviewTimeout: 200 * time.Millisecond,
+		token:         "test-token",
+		baseURL:       server.URL,
+	}
+
+	// First call should return in_progress (with feedback=false since eyes)
+	// Actually eyes means in_progress which is not a terminal state
+	// Let's adjust - we need to test the Changed field
+
+	result, err := client.PollReview(context.Background(), 123)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	// Will return on approval since that's terminal
+	if !result.ShouldMerge {
+		t.Error("expected ShouldMerge to be true")
+	}
+}

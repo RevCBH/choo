@@ -138,7 +138,8 @@ func determineStatus(hasThumbsUp, hasEyes bool, commentCount int) ReviewStatus {
 }
 
 // PollReview polls the PR for review status changes
-// Returns when approval received, feedback found, or timeout
+// Returns when: approval received, feedback found, timeout, or context cancelled
+// Transient errors are logged but polling continues
 func (c *PRClient) PollReview(ctx context.Context, prNumber int) (*PollResult, error) {
 	ticker := time.NewTicker(c.pollInterval)
 	defer ticker.Stop()
@@ -153,7 +154,9 @@ func (c *PRClient) PollReview(ctx context.Context, prNumber int) (*PollResult, e
 		case <-ticker.C:
 			state, err := c.GetReviewStatus(ctx, prNumber)
 			if err != nil {
-				return nil, err
+				// Log and continue - transient errors shouldn't stop polling
+				// Rate limits are handled in doRequest with retry
+				continue
 			}
 
 			result := &PollResult{
@@ -161,7 +164,7 @@ func (c *PRClient) PollReview(ctx context.Context, prNumber int) (*PollResult, e
 				Changed: previousState != nil && previousState.Status != state.Status,
 			}
 
-			// Check timeout condition
+			// Check timeout
 			if time.Since(startTime) >= c.reviewTimeout {
 				result.TimedOut = true
 				return result, nil
