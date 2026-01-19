@@ -41,7 +41,7 @@ internal/worker/
 ```go
 // internal/worker/worker.go (additions)
 
-import "github.com/anthropics/choo/internal/escalate"
+import "github.com/RevCBH/choo/internal/escalate"
 
 // Add to Worker struct
 type Worker struct {
@@ -75,7 +75,7 @@ import (
     "context"
     "fmt"
 
-    "github.com/anthropics/choo/internal/escalate"
+    "github.com/RevCBH/choo/internal/escalate"
 )
 
 // commitViaClaudeCode invokes Claude to stage and commit changes
@@ -160,8 +160,8 @@ import (
     "errors"
     "testing"
 
-    "github.com/anthropics/choo/internal/discovery"
-    "github.com/anthropics/choo/internal/escalate"
+    "github.com/RevCBH/choo/internal/discovery"
+    "github.com/RevCBH/choo/internal/escalate"
 )
 
 // mockEscalator records escalations for testing

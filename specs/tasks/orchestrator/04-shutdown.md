@@ -25,8 +25,8 @@ Implement graceful shutdown with configurable timeout that waits for in-progress
 - Task #2 - Run() method must initialize pool
 
 ### Package Dependencies
-- `github.com/anthropics/choo/internal/worker`
-- `github.com/anthropics/choo/internal/events`
+- `github.com/RevCBH/choo/internal/worker`
+- `github.com/RevCBH/choo/internal/events`
 
 ## Deliverables
 

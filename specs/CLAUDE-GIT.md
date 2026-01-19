@@ -409,8 +409,8 @@ import (
     "fmt"
     "regexp"
 
-    "github.com/anthropics/choo/internal/escalate"
-    "github.com/anthropics/choo/internal/events"
+    "github.com/RevCBH/choo/internal/escalate"
+    "github.com/RevCBH/choo/internal/events"
 )
 
 // commitViaClaudeCode invokes Claude to stage and commit
@@ -942,11 +942,11 @@ func TestRetryWithBackoff_BackoffIncreases(t *testing.T) {
 
 func TestExtractPRURL_ValidURL(t *testing.T) {
     output := `Creating pull request...
-https://github.com/anthropics/choo/pull/42
+https://github.com/RevCBH/choo/pull/42
 Done!`
 
     url := extractPRURL(output)
-    if url != "https://github.com/anthropics/choo/pull/42" {
+    if url != "https://github.com/RevCBH/choo/pull/42" {
         t.Errorf("expected PR URL, got %q", url)
     }
 }
@@ -962,11 +962,11 @@ func TestExtractPRURL_NoURL(t *testing.T) {
 
 func TestExtractPRURL_MultipleURLs(t *testing.T) {
     // Should return the first match
-    output := `https://github.com/anthropics/choo/pull/41
-https://github.com/anthropics/choo/pull/42`
+    output := `https://github.com/RevCBH/choo/pull/41
+https://github.com/RevCBH/choo/pull/42`
 
     url := extractPRURL(output)
-    if url != "https://github.com/anthropics/choo/pull/41" {
+    if url != "https://github.com/RevCBH/choo/pull/41" {
         t.Errorf("expected first PR URL, got %q", url)
     }
 }

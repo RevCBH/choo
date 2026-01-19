@@ -3,7 +3,7 @@ package scheduler
 import (
 	"time"
 
-	"github.com/anthropics/choo/internal/events"
+	"github.com/RevCBH/choo/internal/events"
 )
 
 // Complete marks a unit as complete and re-evaluates pending units

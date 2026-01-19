@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/anthropics/choo/internal/config"
+	"github.com/RevCBH/choo/internal/config"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )

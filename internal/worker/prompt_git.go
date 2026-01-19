@@ -3,6 +3,8 @@ package worker
 import (
 	"fmt"
 	"strings"
+
+	"github.com/RevCBH/choo/internal/github"
 )
 
 // BuildCommitPrompt creates a prompt for Claude to commit changes
@@ -73,6 +75,26 @@ Please resolve all conflicts:
 If the rebase continues successfully, do NOT push - the orchestrator will handle that.
 
 If you cannot resolve a conflict, explain why in your response.`, targetBranch, formatFileList(conflictedFiles))
+}
+
+// BuildFeedbackPrompt constructs the Claude prompt for addressing PR feedback
+func BuildFeedbackPrompt(prURL string, comments []github.PRComment) string {
+	var commentText strings.Builder
+	for _, c := range comments {
+		fmt.Fprintf(&commentText, "- @%s: %s\n", c.Author, c.Body)
+		if c.Path != "" {
+			fmt.Fprintf(&commentText, "  (on %s:%d)\n", c.Path, c.Line)
+		}
+	}
+
+	return fmt.Sprintf(`PR %s has received feedback. Please address the following comments:
+
+%s
+After making changes:
+1. Stage and commit with a message like "address review feedback"
+2. Push the changes
+
+The orchestrator will continue polling for approval.`, prURL, commentText.String())
 }
 
 // formatFileList formats a list of files for inclusion in prompts

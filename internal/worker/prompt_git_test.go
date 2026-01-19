@@ -3,6 +3,8 @@ package worker
 import (
 	"strings"
 	"testing"
+
+	"github.com/RevCBH/choo/internal/github"
 )
 
 func TestBuildCommitPrompt_IncludesTaskTitle(t *testing.T) {
@@ -170,5 +172,91 @@ func TestBuildConflictPrompt_ContainsInstructions(t *testing.T) {
 		if !strings.Contains(prompt, phrase) {
 			t.Errorf("prompt should contain %q", phrase)
 		}
+	}
+}
+
+func TestBuildFeedbackPrompt_IncludesAllComments(t *testing.T) {
+	comments := []github.PRComment{
+		{Author: "alice", Body: "Fix the null check", Path: "main.go", Line: 42},
+		{Author: "bob", Body: "Add tests"},
+	}
+
+	prompt := BuildFeedbackPrompt("https://github.com/org/repo/pull/123", comments)
+
+	if !strings.Contains(prompt, "@alice: Fix the null check") {
+		t.Error("prompt should contain @alice: Fix the null check")
+	}
+	if !strings.Contains(prompt, "(on main.go:42)") {
+		t.Error("prompt should contain (on main.go:42)")
+	}
+	if !strings.Contains(prompt, "@bob: Add tests") {
+		t.Error("prompt should contain @bob: Add tests")
+	}
+	if !strings.Contains(prompt, "pull/123") {
+		t.Error("prompt should contain pull/123")
+	}
+}
+
+func TestBuildFeedbackPrompt_HandlesNoPath(t *testing.T) {
+	comments := []github.PRComment{
+		{Author: "reviewer", Body: "General comment about the PR"},
+	}
+
+	prompt := BuildFeedbackPrompt("https://github.com/org/repo/pull/456", comments)
+
+	if !strings.Contains(prompt, "@reviewer: General comment about the PR") {
+		t.Error("prompt should contain @reviewer: General comment about the PR")
+	}
+	if strings.Contains(prompt, "(on ") {
+		t.Error("prompt should not contain '(on ' for comments without a path")
+	}
+}
+
+func TestBuildFeedbackPrompt_EmptyComments(t *testing.T) {
+	prompt := BuildFeedbackPrompt("https://github.com/org/repo/pull/789", []github.PRComment{})
+
+	if !strings.Contains(prompt, "pull/789") {
+		t.Error("prompt should contain pull/789")
+	}
+	if !strings.Contains(prompt, "address review feedback") {
+		t.Error("prompt should contain address review feedback")
+	}
+}
+
+func TestBuildFeedbackPrompt_MultipleCommentsOnSameFile(t *testing.T) {
+	comments := []github.PRComment{
+		{Author: "alice", Body: "Fix line 10", Path: "main.go", Line: 10},
+		{Author: "alice", Body: "Fix line 20", Path: "main.go", Line: 20},
+		{Author: "bob", Body: "Fix util.go", Path: "util.go", Line: 5},
+	}
+
+	prompt := BuildFeedbackPrompt("https://github.com/org/repo/pull/100", comments)
+
+	if !strings.Contains(prompt, "(on main.go:10)") {
+		t.Error("prompt should contain (on main.go:10)")
+	}
+	if !strings.Contains(prompt, "(on main.go:20)") {
+		t.Error("prompt should contain (on main.go:20)")
+	}
+	if !strings.Contains(prompt, "(on util.go:5)") {
+		t.Error("prompt should contain (on util.go:5)")
+	}
+}
+
+func TestBuildFeedbackPrompt_ContainsInstructions(t *testing.T) {
+	comments := []github.PRComment{
+		{Author: "reviewer", Body: "Please fix"},
+	}
+
+	prompt := BuildFeedbackPrompt("https://github.com/org/repo/pull/1", comments)
+
+	if !strings.Contains(prompt, "Stage and commit") {
+		t.Error("prompt should contain 'Stage and commit'")
+	}
+	if !strings.Contains(prompt, "Push the changes") {
+		t.Error("prompt should contain 'Push the changes'")
+	}
+	if !strings.Contains(prompt, "orchestrator will continue polling") {
+		t.Error("prompt should contain 'orchestrator will continue polling'")
 	}
 }

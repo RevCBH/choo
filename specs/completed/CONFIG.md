@@ -859,22 +859,22 @@ func TestParseGitHubURL(t *testing.T) {
         wantErr   bool
     }{
         {
-            url:       "https://github.com/anthropics/choo.git",
+            url:       "https://github.com/RevCBH/choo.git",
             wantOwner: "anthropics",
             wantRepo:  "choo",
         },
         {
-            url:       "https://github.com/anthropics/choo",
+            url:       "https://github.com/RevCBH/choo",
             wantOwner: "anthropics",
             wantRepo:  "choo",
         },
         {
-            url:       "git@github.com:anthropics/choo.git",
+            url:       "git@github.com:RevCBH/choo.git",
             wantOwner: "anthropics",
             wantRepo:  "choo",
         },
         {
-            url:       "git@github.com:anthropics/choo",
+            url:       "git@github.com:RevCBH/choo",
             wantOwner: "anthropics",
             wantRepo:  "choo",
         },

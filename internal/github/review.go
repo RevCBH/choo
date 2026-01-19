@@ -36,6 +36,22 @@ type PollResult struct {
 	TimedOut    bool
 }
 
+// ReviewPollerConfig holds configuration for the review poller
+type ReviewPollerConfig struct {
+	PollInterval  time.Duration // Time between polls (default 30s)
+	ReviewTimeout time.Duration // Max time to wait for approval (default 2h)
+	RequireCI     bool          // Whether to require CI pass before merge
+}
+
+// DefaultReviewPollerConfig returns the default polling configuration
+func DefaultReviewPollerConfig() ReviewPollerConfig {
+	return ReviewPollerConfig{
+		PollInterval:  30 * time.Second,
+		ReviewTimeout: 2 * time.Hour,
+		RequireCI:     false,
+	}
+}
+
 // Reaction represents a GitHub reaction on a PR/issue
 type Reaction struct {
 	ID        int64     `json:"id"`
@@ -45,7 +61,7 @@ type Reaction struct {
 
 // getReactions fetches reactions on a PR (issue endpoint)
 func (c *PRClient) getReactions(ctx context.Context, prNumber int) ([]Reaction, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/reactions", c.owner, c.repo, prNumber)
+	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d/reactions", c.baseURL, c.owner, c.repo, prNumber)
 	resp, err := c.doRequest(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -60,7 +76,7 @@ func (c *PRClient) getReactions(ctx context.Context, prNumber int) ([]Reaction, 
 	return reactions, nil
 }
 
-// GetReviewStatus fetches the current review status from reactions
+// GetReviewStatus fetches the current review status from reactions and comments
 func (c *PRClient) GetReviewStatus(ctx context.Context, prNumber int) (*ReviewState, error) {
 	reactions, err := c.getReactions(ctx, prNumber)
 	if err != nil {
@@ -74,9 +90,9 @@ func (c *PRClient) GetReviewStatus(ctx context.Context, prNumber int) (*ReviewSt
 
 	state := &ReviewState{
 		CommentCount: len(comments),
-		LastActivity: time.Now(),
 	}
 
+	// Track last activity from reactions
 	for _, reaction := range reactions {
 		if reaction.Content == "+1" {
 			state.HasThumbsUp = true
@@ -84,24 +100,46 @@ func (c *PRClient) GetReviewStatus(ctx context.Context, prNumber int) (*ReviewSt
 		if reaction.Content == "eyes" {
 			state.HasEyes = true
 		}
+		if reaction.CreatedAt.After(state.LastActivity) {
+			state.LastActivity = reaction.CreatedAt
+		}
+	}
+
+	// Track last activity from comments
+	for _, comment := range comments {
+		if comment.CreatedAt.After(state.LastActivity) {
+			state.LastActivity = comment.CreatedAt
+		}
+	}
+
+	// If no activity found, use current time
+	if state.LastActivity.IsZero() {
+		state.LastActivity = time.Now()
 	}
 
 	// Determine status with precedence: approved > in_progress > changes_requested > pending
-	if state.HasThumbsUp {
-		state.Status = ReviewApproved
-	} else if state.HasEyes {
-		state.Status = ReviewInProgress
-	} else if state.CommentCount > 0 {
-		state.Status = ReviewChangesRequested
-	} else {
-		state.Status = ReviewPending
-	}
+	state.Status = determineStatus(state.HasThumbsUp, state.HasEyes, state.CommentCount)
 
 	return state, nil
 }
 
+// determineStatus applies status precedence rules
+func determineStatus(hasThumbsUp, hasEyes bool, commentCount int) ReviewStatus {
+	if hasThumbsUp {
+		return ReviewApproved
+	}
+	if hasEyes {
+		return ReviewInProgress
+	}
+	if commentCount > 0 {
+		return ReviewChangesRequested
+	}
+	return ReviewPending
+}
+
 // PollReview polls the PR for review status changes
-// Returns when approval received, feedback found, or timeout
+// Returns when: approval received, feedback found, timeout, or context cancelled
+// Transient errors are logged but polling continues
 func (c *PRClient) PollReview(ctx context.Context, prNumber int) (*PollResult, error) {
 	ticker := time.NewTicker(c.pollInterval)
 	defer ticker.Stop()
@@ -109,39 +147,54 @@ func (c *PRClient) PollReview(ctx context.Context, prNumber int) (*PollResult, e
 	startTime := time.Now()
 	var previousState *ReviewState
 
+	// checkStatus performs a single poll and returns result if terminal condition met
+	checkStatus := func() (*PollResult, bool) {
+		state, err := c.GetReviewStatus(ctx, prNumber)
+		if err != nil {
+			// Log and continue - transient errors shouldn't stop polling
+			// Rate limits are handled in doRequest with retry
+			return nil, false
+		}
+
+		result := &PollResult{
+			State:   *state,
+			Changed: previousState != nil && previousState.Status != state.Status,
+		}
+
+		// Check timeout
+		if time.Since(startTime) >= c.reviewTimeout {
+			result.TimedOut = true
+			return result, true
+		}
+
+		// Check terminal conditions
+		if state.Status == ReviewApproved {
+			result.ShouldMerge = true
+			return result, true
+		}
+
+		if state.Status == ReviewChangesRequested {
+			result.HasFeedback = true
+			return result, true
+		}
+
+		previousState = state
+		return nil, false
+	}
+
+	// Immediate first check before waiting for ticker
+	if result, done := checkStatus(); done {
+		return result, nil
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-ticker.C:
-			state, err := c.GetReviewStatus(ctx, prNumber)
-			if err != nil {
-				return nil, err
-			}
-
-			result := &PollResult{
-				State:   *state,
-				Changed: previousState != nil && previousState.Status != state.Status,
-			}
-
-			// Check timeout condition
-			if time.Since(startTime) >= c.reviewTimeout {
-				result.TimedOut = true
+			if result, done := checkStatus(); done {
 				return result, nil
 			}
-
-			// Check terminal conditions
-			if state.Status == ReviewApproved {
-				result.ShouldMerge = true
-				return result, nil
-			}
-
-			if state.Status == ReviewChangesRequested {
-				result.HasFeedback = true
-				return result, nil
-			}
-
-			previousState = state
 		}
 	}
 }

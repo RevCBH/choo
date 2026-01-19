@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthropics/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/discovery"
 )
 
 // DisplayConfig controls status output formatting

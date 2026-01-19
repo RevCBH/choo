@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/anthropics/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/discovery"
 )
 
 // Execute runs a single unit to completion (convenience wrapper)

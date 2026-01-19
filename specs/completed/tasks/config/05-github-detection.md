@@ -98,10 +98,10 @@ go test ./internal/config/... -run TestGitHub
 
 | Test | Assertion |
 |------|-----------|
-| `TestParseGitHubURL_HTTPS_WithGit` | `parseGitHubURL("https://github.com/anthropics/choo.git")` returns `"anthropics", "choo"` |
-| `TestParseGitHubURL_HTTPS_NoGit` | `parseGitHubURL("https://github.com/anthropics/choo")` returns `"anthropics", "choo"` |
-| `TestParseGitHubURL_SSH_WithGit` | `parseGitHubURL("git@github.com:anthropics/choo.git")` returns `"anthropics", "choo"` |
-| `TestParseGitHubURL_SSH_NoGit` | `parseGitHubURL("git@github.com:anthropics/choo")` returns `"anthropics", "choo"` |
+| `TestParseGitHubURL_HTTPS_WithGit` | `parseGitHubURL("https://github.com/RevCBH/choo.git")` returns `"RevCBH", "choo"` |
+| `TestParseGitHubURL_HTTPS_NoGit` | `parseGitHubURL("https://github.com/RevCBH/choo")` returns `"RevCBH", "choo"` |
+| `TestParseGitHubURL_SSH_WithGit` | `parseGitHubURL("git@github.com:RevCBH/choo.git")` returns `"RevCBH", "choo"` |
+| `TestParseGitHubURL_SSH_NoGit` | `parseGitHubURL("git@github.com:RevCBH/choo")` returns `"RevCBH", "choo"` |
 | `TestParseGitHubURL_GitLab` | `parseGitHubURL("https://gitlab.com/owner/repo.git")` returns error |
 | `TestParseGitHubURL_Invalid` | `parseGitHubURL("not-a-url")` returns error |
 | `TestDetectGitHubRepo_Integration` | Creates temp git repo with remote, verifies detection works |

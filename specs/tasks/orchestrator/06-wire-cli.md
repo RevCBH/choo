@@ -29,10 +29,10 @@ Replace the TODO placeholders in the CLI run command with actual orchestrator in
 - Task #5 - Dry-run must be implemented
 
 ### Package Dependencies
-- `github.com/anthropics/choo/internal/cli`
-- `github.com/anthropics/choo/internal/config`
-- `github.com/anthropics/choo/internal/orchestrator`
-- `github.com/anthropics/choo/internal/escalate`
+- `github.com/RevCBH/choo/internal/cli`
+- `github.com/RevCBH/choo/internal/config`
+- `github.com/RevCBH/choo/internal/orchestrator`
+- `github.com/RevCBH/choo/internal/escalate`
 
 ## Deliverables
 
@@ -150,12 +150,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/anthropics/choo/internal/config"
-	"github.com/anthropics/choo/internal/escalate"
-	"github.com/anthropics/choo/internal/events"
-	"github.com/anthropics/choo/internal/git"
-	"github.com/anthropics/choo/internal/github"
-	"github.com/anthropics/choo/internal/orchestrator"
+	"github.com/RevCBH/choo/internal/config"
+	"github.com/RevCBH/choo/internal/escalate"
+	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/git"
+	"github.com/RevCBH/choo/internal/github"
+	"github.com/RevCBH/choo/internal/orchestrator"
 	"github.com/spf13/cobra"
 )
 ```

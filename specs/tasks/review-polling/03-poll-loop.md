@@ -1,6 +1,6 @@
 ---
 task: 3
-status: pending
+status: complete
 backpressure: "go test ./internal/github/... -run TestPollReview"
 depends_on: [2]
 ---

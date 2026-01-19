@@ -3,7 +3,7 @@ package scheduler
 import (
 	"testing"
 
-	"github.com/anthropics/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/discovery"
 )
 
 func TestGraph_NewGraph_SimpleChain(t *testing.T) {

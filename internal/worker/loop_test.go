@@ -3,7 +3,7 @@ package worker
 import (
 	"testing"
 
-	"github.com/anthropics/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/discovery"
 )
 
 func TestFindReadyTasks_NoDependencies(t *testing.T) {

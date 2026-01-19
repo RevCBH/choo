@@ -33,7 +33,7 @@ type ghUser struct {
 
 // GetPRComments fetches all review comments on a PR
 func (c *PRClient) GetPRComments(ctx context.Context, prNumber int) ([]PRComment, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/pulls/%d/comments", c.owner, c.repo, prNumber)
+	url := fmt.Sprintf("%s/repos/%s/%s/pulls/%d/comments", c.baseURL, c.owner, c.repo, prNumber)
 	resp, err := c.doRequest(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err

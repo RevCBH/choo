@@ -1,6 +1,6 @@
 ---
 task: 5
-status: pending
+status: complete
 backpressure: "go test ./internal/worker/... -run TestHandleFeedback"
 depends_on: [4]
 ---
@@ -45,8 +45,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/anthropics/choo/internal/events"
-	"github.com/anthropics/choo/internal/github"
+	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/github"
 )
 
 // FeedbackConfig holds configuration for feedback handling
@@ -193,7 +193,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anthropics/choo/internal/github"
+	"github.com/RevCBH/choo/internal/github"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

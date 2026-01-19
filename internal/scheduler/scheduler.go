@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/anthropics/choo/internal/discovery"
-	"github.com/anthropics/choo/internal/events"
+	"github.com/RevCBH/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/events"
 )
 
 // Scheduler manages unit execution order and dispatch

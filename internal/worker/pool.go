@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/anthropics/choo/internal/discovery"
-	"github.com/anthropics/choo/internal/events"
-	"github.com/anthropics/choo/internal/git"
-	"github.com/anthropics/choo/internal/github"
+	"github.com/RevCBH/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/git"
+	"github.com/RevCBH/choo/internal/github"
 )
 
 // Pool manages a collection of workers executing units in parallel

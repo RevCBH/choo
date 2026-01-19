@@ -25,8 +25,8 @@ Implement dry-run mode that shows the execution plan without actually running wo
 - Task #2 - Run() calls dryRun() when DryRun config is true
 
 ### Package Dependencies
-- `github.com/anthropics/choo/internal/discovery`
-- `github.com/anthropics/choo/internal/scheduler`
+- `github.com/RevCBH/choo/internal/discovery`
+- `github.com/RevCBH/choo/internal/scheduler`
 
 ## Deliverables
 

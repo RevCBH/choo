@@ -1,6 +1,6 @@
 ---
 task: 4
-status: pending
+status: complete
 backpressure: "go test ./internal/worker/... -run TestBuildFeedbackPrompt"
 depends_on: []
 ---
@@ -42,7 +42,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/anthropics/choo/internal/github"
+	"github.com/RevCBH/choo/internal/github"
 )
 
 // BuildFeedbackPrompt constructs the Claude prompt for addressing PR feedback
@@ -76,7 +76,7 @@ package worker
 import (
 	"testing"
 
-	"github.com/anthropics/choo/internal/github"
+	"github.com/RevCBH/choo/internal/github"
 	"github.com/stretchr/testify/assert"
 )
 

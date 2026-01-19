@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/anthropics/choo/internal/cli"
+	"github.com/RevCBH/choo/internal/cli"
 )
 
 // Build-time variables (set via ldflags)

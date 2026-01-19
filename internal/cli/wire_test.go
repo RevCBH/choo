@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/anthropics/choo/internal/config"
+	"github.com/RevCBH/choo/internal/config"
 )
 
 func TestWireOrchestrator_AllComponents(t *testing.T) {

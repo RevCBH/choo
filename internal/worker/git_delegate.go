@@ -7,8 +7,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/anthropics/choo/internal/escalate"
-	"github.com/anthropics/choo/internal/events"
+	"github.com/RevCBH/choo/internal/escalate"
+	"github.com/RevCBH/choo/internal/events"
 )
 
 // prURLPattern matches GitHub PR URLs

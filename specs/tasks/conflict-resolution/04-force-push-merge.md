@@ -65,8 +65,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/anthropics/choo/internal/events"
-	"github.com/anthropics/choo/internal/git"
+	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/git"
 )
 
 // forcePushAndMerge pushes the rebased branch and merges via GitHub API
@@ -101,7 +101,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/anthropics/choo/internal/events"
+	"github.com/RevCBH/choo/internal/events"
 )
 
 // mockGitClient mocks git operations for testing

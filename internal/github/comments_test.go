@@ -37,6 +37,7 @@ func newMockCommentsClient(comments []ghReviewComment) (*PRClient, *httptest.Ser
 		pollInterval:  10 * time.Millisecond,
 		reviewTimeout: 50 * time.Millisecond,
 		token:         "test-token",
+		baseURL:       server.URL,
 	}
 
 	// Use test transport to redirect API calls to test server

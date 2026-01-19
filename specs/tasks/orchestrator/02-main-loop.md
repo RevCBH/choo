@@ -25,10 +25,10 @@ Implement the main Run() method that executes the orchestration loop: discovery,
 - Task #1 - Core types must be defined
 
 ### Package Dependencies
-- `github.com/anthropics/choo/internal/discovery`
-- `github.com/anthropics/choo/internal/scheduler`
-- `github.com/anthropics/choo/internal/worker`
-- `github.com/anthropics/choo/internal/events`
+- `github.com/RevCBH/choo/internal/discovery`
+- `github.com/RevCBH/choo/internal/scheduler`
+- `github.com/RevCBH/choo/internal/worker`
+- `github.com/RevCBH/choo/internal/events`
 
 ## Deliverables
 
