@@ -1,7 +1,7 @@
 ---
 task: 3
-status: pending
-backpressure: "go test ./internal/worker/... -run \"Retry|MergeConflict\""
+status: complete
+backpressure: go test ./internal/worker/... -run Retry && go test ./internal/worker/... -run MergeConflict
 depends_on: [1, 2]
 ---
 

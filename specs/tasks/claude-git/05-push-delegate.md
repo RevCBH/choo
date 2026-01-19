@@ -1,6 +1,6 @@
 ---
 task: 5
-status: pending
+status: complete
 backpressure: "go test ./internal/worker/... -run PushVia"
 depends_on: [1, 2, 3]
 ---

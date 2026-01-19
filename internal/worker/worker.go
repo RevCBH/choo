@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anthropics/choo/internal/discovery"
+	"github.com/anthropics/choo/internal/escalate"
 	"github.com/anthropics/choo/internal/events"
 	"github.com/anthropics/choo/internal/git"
 	"github.com/anthropics/choo/internal/github"
@@ -26,9 +27,18 @@ type Worker struct {
 	git          *git.WorktreeManager
 	github       *github.PRClient
 	claude       *ClaudeClient
+	escalator    escalate.Escalator
 	worktreePath string
 	branch       string
 	currentTask  *discovery.Task
+
+	// prNumber is the PR number after creation
+	//nolint:unused // WIP: used by forcePushAndMerge when conflict resolution is fully integrated
+	prNumber int
+
+	// invokeClaudeWithOutput is the function that invokes Claude and captures output
+	// Can be overridden for testing
+	invokeClaudeWithOutput func(ctx context.Context, prompt string) (string, error)
 }
 
 // WorkerConfig holds worker configuration
@@ -53,25 +63,27 @@ type BaselineCheck struct {
 
 // WorkerDeps bundles worker dependencies for injection
 type WorkerDeps struct {
-	Events *events.Bus
-	Git    *git.WorktreeManager
-	GitHub *github.PRClient
-	Claude *ClaudeClient
+	Events    *events.Bus
+	Git       *git.WorktreeManager
+	GitHub    *github.PRClient
+	Claude    *ClaudeClient
+	Escalator escalate.Escalator
 }
 
 // ClaudeClient is a placeholder interface for the Claude client
 // This will be replaced when the claude package is implemented
-type ClaudeClient interface{}
+type ClaudeClient any
 
 // NewWorker creates a worker for executing a unit
 func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker {
 	return &Worker{
-		unit:   unit,
-		config: cfg,
-		events: deps.Events,
-		git:    deps.Git,
-		github: deps.GitHub,
-		claude: deps.Claude,
+		unit:      unit,
+		config:    cfg,
+		events:    deps.Events,
+		git:       deps.Git,
+		github:    deps.GitHub,
+		claude:    deps.Claude,
+		escalator: deps.Escalator,
 	}
 }
 

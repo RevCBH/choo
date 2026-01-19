@@ -1,7 +1,7 @@
 ---
 task: 1
-status: pending
-backpressure: "go test ./internal/git/... -run \"Rebase|Conflict\""
+status: complete
+backpressure: go test ./internal/git/... -run Rebase && go test ./internal/git/... -run Conflict
 depends_on: []
 ---
 
@@ -161,7 +161,7 @@ func TestAbortRebase_NoRebaseInProgress(t *testing.T) {
 
 ### Validation Command
 ```bash
-go test ./internal/git/... -run "Rebase|Conflict"
+go test ./internal/git/... -run Rebase && go test ./internal/git/... -run Conflict
 ```
 
 ## NOT In Scope

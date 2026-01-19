@@ -1,7 +1,7 @@
 ---
 task: 2
-status: pending
-backpressure: "go test ./internal/worker/... -run ConflictPrompt"
+status: complete
+backpressure: go test ./internal/worker/... -run ConflictPrompt
 depends_on: []
 ---
 
