@@ -73,6 +73,49 @@ die() {
 }
 
 # ============================================================================
+# Failure Context Management
+# ============================================================================
+
+# Get the failure context file path for a task
+get_failure_context_file() {
+    local spec_file="$1"
+    local spec_hash
+    spec_hash=$(echo "$spec_file" | md5sum | cut -d' ' -f1)
+    echo "$RALPH_LOG_DIR/failure_context_${spec_hash}.txt"
+}
+
+# Store failure context for next iteration
+store_failure_context() {
+    local spec_file="$1"
+    local failure_output="$2"
+    local context_file
+    context_file=$(get_failure_context_file "$spec_file")
+
+    echo "$failure_output" > "$context_file"
+    info "Stored failure context for next iteration"
+}
+
+# Retrieve failure context from previous iteration
+get_failure_context() {
+    local spec_file="$1"
+    local context_file
+    context_file=$(get_failure_context_file "$spec_file")
+
+    if [[ -f "$context_file" ]]; then
+        cat "$context_file"
+    fi
+}
+
+# Clear failure context after successful completion
+clear_failure_context() {
+    local spec_file="$1"
+    local context_file
+    context_file=$(get_failure_context_file "$spec_file")
+
+    rm -f "$context_file"
+}
+
+# ============================================================================
 # YAML Frontmatter Parsing
 # ============================================================================
 

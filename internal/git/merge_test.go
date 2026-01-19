@@ -321,7 +321,7 @@ func TestRebase_WithConflicts(t *testing.T) {
 	}
 
 	// Clean up: abort the rebase
-	if err := abortRebase(ctx, repoPath); err != nil {
+	if err := AbortRebase(ctx, repoPath); err != nil {
 		t.Fatalf("failed to abort rebase: %v", err)
 	}
 }
@@ -449,9 +449,9 @@ func TestGetConflictedFiles(t *testing.T) {
 	_ = cmd.Run() // Expected to fail with conflict
 
 	// Get conflicted files
-	files, err := getConflictedFiles(ctx, repoPath)
+	files, err := GetConflictedFiles(ctx, repoPath)
 	if err != nil {
-		t.Fatalf("getConflictedFiles failed: %v", err)
+		t.Fatalf("GetConflictedFiles failed: %v", err)
 	}
 
 	if len(files) != 1 {
@@ -463,7 +463,7 @@ func TestGetConflictedFiles(t *testing.T) {
 	}
 
 	// Clean up: abort the rebase
-	if err := abortRebase(ctx, repoPath); err != nil {
+	if err := AbortRebase(ctx, repoPath); err != nil {
 		t.Fatalf("failed to abort rebase: %v", err)
 	}
 }
@@ -473,9 +473,9 @@ func TestGetConflictedFiles_NoConflicts(t *testing.T) {
 	ctx := context.Background()
 
 	// No conflicts in clean repo
-	files, err := getConflictedFiles(ctx, repoPath)
+	files, err := GetConflictedFiles(ctx, repoPath)
 	if err != nil {
-		t.Fatalf("getConflictedFiles failed: %v", err)
+		t.Fatalf("GetConflictedFiles failed: %v", err)
 	}
 
 	if len(files) != 0 {
@@ -716,9 +716,9 @@ func TestAbortRebase(t *testing.T) {
 	_ = cmd.Run() // Expected to fail
 
 	// Abort the rebase
-	err := abortRebase(ctx, repoPath)
+	err := AbortRebase(ctx, repoPath)
 	if err != nil {
-		t.Fatalf("abortRebase failed: %v", err)
+		t.Fatalf("AbortRebase failed: %v", err)
 	}
 
 	// Verify we're back to normal state
@@ -1040,7 +1040,7 @@ func TestResolveConflicts_MaxAttempts(t *testing.T) {
 	}
 
 	// Clean up: abort the rebase
-	if err := abortRebase(ctx, repoPath); err != nil {
+	if err := AbortRebase(ctx, repoPath); err != nil {
 		t.Fatalf("failed to abort rebase: %v", err)
 	}
 }
@@ -1172,5 +1172,45 @@ func TestReadConflictFile_NonExistent(t *testing.T) {
 	_, err := readConflictFile("/nonexistent/file.txt")
 	if err == nil {
 		t.Error("expected readConflictFile to fail for nonexistent file")
+	}
+}
+
+func TestIsRebaseInProgress_NotInRebase(t *testing.T) {
+	// Create a clean git repo
+	dir := t.TempDir()
+	cmd := exec.Command("git", "init", dir)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("git init failed: %v", err)
+	}
+
+	// Configure git user for commits
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+
+	inRebase, err := IsRebaseInProgress(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if inRebase {
+		t.Error("expected not in rebase")
+	}
+}
+
+func TestAbortRebase_NoRebaseInProgress(t *testing.T) {
+	// Create a clean git repo
+	dir := t.TempDir()
+	exec.Command("git", "init", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+
+	// Create initial commit
+	os.WriteFile(filepath.Join(dir, "test.txt"), []byte("content"), 0644)
+	exec.Command("git", "-C", dir, "add", ".").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "init").Run()
+
+	// AbortRebase should error when no rebase in progress
+	err := AbortRebase(context.Background(), dir)
+	if err == nil {
+		t.Error("expected error when no rebase in progress")
 	}
 }

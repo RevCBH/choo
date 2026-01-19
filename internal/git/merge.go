@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -88,14 +89,14 @@ func (m *MergeManager) Merge(ctx context.Context, branch *Branch) (*MergeResult,
 		if m.Claude == nil {
 			result.Error = fmt.Errorf("conflicts detected but no Claude client for resolution")
 			// Abort the rebase to leave repo in clean state
-			_ = abortRebase(ctx, branch.Worktree)
+			_ = AbortRebase(ctx, branch.Worktree)
 			return result, result.Error
 		}
 
 		if err := m.ResolveConflicts(ctx, branch.Worktree); err != nil {
 			result.Error = fmt.Errorf("conflict resolution failed: %w", err)
 			// Abort the rebase to leave repo in clean state
-			_ = abortRebase(ctx, branch.Worktree)
+			_ = AbortRebase(ctx, branch.Worktree)
 			return result, result.Error
 		}
 		result.ConflictsResolved = 1
@@ -180,8 +181,39 @@ func deleteBranch(ctx context.Context, repoRoot, branchName string, remote bool)
 	return err
 }
 
-// getConflictedFiles returns list of files with merge conflicts
-func getConflictedFiles(ctx context.Context, worktreePath string) ([]string, error) {
+// IsRebaseInProgress checks if a rebase is currently in progress
+func IsRebaseInProgress(ctx context.Context, worktreePath string) (bool, error) {
+	// Check for .git/rebase-merge or .git/rebase-apply directories
+	gitDir := filepath.Join(worktreePath, ".git")
+
+	// For worktrees, .git is a file pointing to the actual git dir
+	gitDirContent, err := os.ReadFile(gitDir)
+	if err == nil && strings.HasPrefix(string(gitDirContent), "gitdir:") {
+		// This is a worktree, extract the actual git dir
+		gitDir = strings.TrimSpace(strings.TrimPrefix(string(gitDirContent), "gitdir:"))
+	}
+
+	// Check for rebase-merge (interactive rebase)
+	if _, err := os.Stat(filepath.Join(gitDir, "rebase-merge")); err == nil {
+		return true, nil
+	}
+
+	// Check for rebase-apply (non-interactive rebase)
+	if _, err := os.Stat(filepath.Join(gitDir, "rebase-apply")); err == nil {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// AbortRebase aborts an in-progress rebase
+func AbortRebase(ctx context.Context, worktreePath string) error {
+	_, err := gitExec(ctx, worktreePath, "rebase", "--abort")
+	return err
+}
+
+// GetConflictedFiles returns the list of files with merge conflicts
+func GetConflictedFiles(ctx context.Context, worktreePath string) ([]string, error) {
 	out, err := gitExec(ctx, worktreePath, "diff", "--name-only", "--diff-filter=U")
 	if err != nil {
 		return nil, err
@@ -192,19 +224,17 @@ func getConflictedFiles(ctx context.Context, worktreePath string) ([]string, err
 		return []string{}, nil
 	}
 
-	files := strings.Split(out, "\n")
-	return files, nil
+	return strings.Split(out, "\n"), nil
+}
+
+// getConflictedFiles is kept for backward compatibility (internal use)
+func getConflictedFiles(ctx context.Context, worktreePath string) ([]string, error) {
+	return GetConflictedFiles(ctx, worktreePath)
 }
 
 // continueRebase continues a rebase after conflict resolution
 func continueRebase(ctx context.Context, worktreePath string) error {
 	_, err := gitExec(ctx, worktreePath, "rebase", "--continue")
-	return err
-}
-
-// abortRebase aborts a rebase in progress
-func abortRebase(ctx context.Context, worktreePath string) error {
-	_, err := gitExec(ctx, worktreePath, "rebase", "--abort")
 	return err
 }
 

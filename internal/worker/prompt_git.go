@@ -56,6 +56,25 @@ Guidelines for the PR:
 Print the PR URL when done so the orchestrator can capture it.`, unitTitle, branch, targetBranch, targetBranch, branch)
 }
 
+// BuildConflictPrompt creates the prompt for Claude to resolve merge conflicts
+func BuildConflictPrompt(targetBranch string, conflictedFiles []string) string {
+	return fmt.Sprintf(`The rebase onto %s resulted in merge conflicts.
+
+Conflicted files:
+%s
+
+Please resolve all conflicts:
+1. Open each conflicted file
+2. Find the conflict markers (<<<<<<, =======, >>>>>>>)
+3. Edit to resolve - keep the correct code, remove markers
+4. Stage resolved files: git add <file>
+5. Continue the rebase: git rebase --continue
+
+If the rebase continues successfully, do NOT push - the orchestrator will handle that.
+
+If you cannot resolve a conflict, explain why in your response.`, targetBranch, formatFileList(conflictedFiles))
+}
+
 // formatFileList formats a list of files for inclusion in prompts
 func formatFileList(files []string) string {
 	if len(files) == 0 {

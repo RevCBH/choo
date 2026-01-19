@@ -86,10 +86,29 @@ func TestBuildPRPrompt_IncludesGhCli(t *testing.T) {
 	}
 }
 
+func TestFormatFileList(t *testing.T) {
+	files := []string{"a.go", "b.go", "c.go"}
+	result := formatFileList(files)
+
+	// Check that all files are present in the result
+	for _, f := range files {
+		if !strings.Contains(result, "- "+f) {
+			t.Errorf("result should contain '- %s'", f)
+		}
+	}
+}
+
 func TestFormatFileList_Empty(t *testing.T) {
 	result := formatFileList(nil)
 	if result != "(no files listed)" {
 		t.Errorf("expected empty message, got %q", result)
+	}
+}
+
+func TestFormatFileList_SingleFile(t *testing.T) {
+	result := formatFileList([]string{"only.go"})
+	if !strings.Contains(result, "- only.go") {
+		t.Errorf("result should contain '- only.go', got %q", result)
 	}
 }
 
@@ -100,6 +119,56 @@ func TestFormatFileList_MultipleFiles(t *testing.T) {
 	for _, f := range files {
 		if !strings.Contains(result, "- "+f) {
 			t.Errorf("result should contain '- %s'", f)
+		}
+	}
+}
+
+func TestBuildConflictPrompt_SingleFile(t *testing.T) {
+	prompt := BuildConflictPrompt("main", []string{"src/config.go"})
+
+	if !strings.Contains(prompt, "main") {
+		t.Error("prompt should contain target branch")
+	}
+	if !strings.Contains(prompt, "src/config.go") {
+		t.Error("prompt should contain conflicted file")
+	}
+	if !strings.Contains(prompt, "git rebase --continue") {
+		t.Error("prompt should instruct to continue rebase")
+	}
+}
+
+func TestBuildConflictPrompt_MultipleFiles(t *testing.T) {
+	files := []string{
+		"src/config.go",
+		"src/worker/merge.go",
+		"internal/git/rebase.go",
+	}
+
+	prompt := BuildConflictPrompt("main", files)
+
+	for _, f := range files {
+		if !strings.Contains(prompt, f) {
+			t.Errorf("prompt should contain file %s", f)
+		}
+	}
+}
+
+func TestBuildConflictPrompt_ContainsInstructions(t *testing.T) {
+	prompt := BuildConflictPrompt("develop", []string{"file.go"})
+
+	expectedPhrases := []string{
+		"conflict markers",
+		"<<<<<<",
+		"=======",
+		">>>>>>>",
+		"git add",
+		"git rebase --continue",
+		"do NOT push",
+	}
+
+	for _, phrase := range expectedPhrases {
+		if !strings.Contains(prompt, phrase) {
+			t.Errorf("prompt should contain %q", phrase)
 		}
 	}
 }
