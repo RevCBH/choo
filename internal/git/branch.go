@@ -18,6 +18,9 @@ type Branch struct {
 
 	// TargetBranch is the branch this will merge into
 	TargetBranch string
+
+	// Worktree is the absolute path to the worktree for this branch
+	Worktree string
 }
 
 // ClaudeClient interface for generating branch names

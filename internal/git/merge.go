@@ -68,9 +68,47 @@ func (m *MergeManager) Merge(ctx context.Context, branch *Branch) (*MergeResult,
 		return result, result.Error
 	}
 
-	// Note: The actual worktree path would come from the branch/worktree system.
-	// For now, this demonstrates the merge flow logic.
-	// In practice, the caller would pass the worktree path or we'd look it up.
+	// If no worktree path provided, we can only fetch
+	if branch.Worktree == "" {
+		result.Success = true
+		return result, nil
+	}
+
+	// Rebase onto origin/<target_branch>
+	targetRef := fmt.Sprintf("origin/%s", branch.TargetBranch)
+	hasConflicts, err := Rebase(ctx, branch.Worktree, targetRef)
+	if err != nil {
+		result.Error = fmt.Errorf("rebase failed: %w", err)
+		return result, result.Error
+	}
+
+	// If conflicts, delegate to conflict resolution
+	if hasConflicts {
+		if m.Claude == nil {
+			result.Error = fmt.Errorf("conflicts detected but no Claude client for resolution")
+			// Abort the rebase to leave repo in clean state
+			_ = abortRebase(ctx, branch.Worktree)
+			return result, result.Error
+		}
+
+		if err := m.ResolveConflicts(ctx, branch.Worktree); err != nil {
+			result.Error = fmt.Errorf("conflict resolution failed: %w", err)
+			// Abort the rebase to leave repo in clean state
+			_ = abortRebase(ctx, branch.Worktree)
+			return result, result.Error
+		}
+		result.ConflictsResolved = 1
+		result.Attempts = 1
+	}
+
+	// Push (force-with-lease since we rebased)
+	if err := ForcePushWithLease(ctx, branch.Worktree); err != nil {
+		result.Error = fmt.Errorf("push failed: %w", err)
+		return result, result.Error
+	}
+
+	// Schedule branch for deletion after batch completes
+	m.ScheduleBranchDelete(branch.Name)
 
 	result.Success = true
 	return result, nil
