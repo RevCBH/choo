@@ -1,6 +1,6 @@
 ---
 task: 5
-status: pending
+status: complete
 backpressure: "go test ./internal/orchestrator/... -run TestOrchestrator_DryRun"
 depends_on: [1, 2]
 ---
@@ -303,7 +303,7 @@ depends_on: []
 
 	os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(`---
 task: 1
-status: pending
+status: in_progress
 backpressure: "echo ok"
 depends_on: []
 ---

@@ -1,11 +1,13 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -530,5 +532,267 @@ depends_on: []
 	// Result should still be populated
 	if result == nil {
 		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestOrchestrator_DryRun_Basic(t *testing.T) {
+	bus := events.NewBus(100)
+	defer bus.Close()
+
+	units := []*discovery.Unit{
+		{
+			ID:        "unit-a",
+			DependsOn: []string{},
+			Tasks:     make([]*discovery.Task, 3),
+		},
+		{
+			ID:        "unit-b",
+			DependsOn: []string{"unit-a"},
+			Tasks:     make([]*discovery.Task, 2),
+		},
+	}
+
+	orch := &Orchestrator{
+		cfg: Config{
+			DryRun:      true,
+			Parallelism: 4,
+		},
+		bus:     bus,
+		unitMap: buildUnitMap(units),
+	}
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	result, err := orch.dryRun(units)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.TotalUnits != 2 {
+		t.Errorf("expected 2 total units, got %d", result.TotalUnits)
+	}
+
+	// Verify output contains expected information
+	expectedStrings := []string{
+		"Execution Plan",
+		"Units to execute: 2",
+		"Max parallelism: 4",
+		"unit-a",
+		"unit-b",
+		"Topological order",
+	}
+
+	for _, expected := range expectedStrings {
+		if !strings.Contains(output, expected) {
+			t.Errorf("expected output to contain %q", expected)
+		}
+	}
+}
+
+func TestOrchestrator_DryRun_TaskCounts(t *testing.T) {
+	bus := events.NewBus(100)
+	defer bus.Close()
+
+	units := []*discovery.Unit{
+		{
+			ID:        "unit-a",
+			DependsOn: []string{},
+			Tasks: []*discovery.Task{
+				{Number: 1},
+				{Number: 2},
+				{Number: 3},
+			},
+		},
+	}
+
+	orch := &Orchestrator{
+		cfg: Config{
+			DryRun:      true,
+			Parallelism: 2,
+		},
+		bus:     bus,
+		unitMap: buildUnitMap(units),
+	}
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	_, err := orch.dryRun(units)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should show task count
+	if !strings.Contains(output, "(3 tasks)") {
+		t.Errorf("expected output to contain task count, got: %s", output)
+	}
+}
+
+func TestOrchestrator_DryRun_Levels(t *testing.T) {
+	bus := events.NewBus(100)
+	defer bus.Close()
+
+	// Create a graph that will have multiple levels
+	// Level 1: unit-a, unit-b (no deps)
+	// Level 2: unit-c (depends on a), unit-d (depends on b)
+	// Level 3: unit-e (depends on c and d)
+	units := []*discovery.Unit{
+		{ID: "unit-a", DependsOn: []string{}},
+		{ID: "unit-b", DependsOn: []string{}},
+		{ID: "unit-c", DependsOn: []string{"unit-a"}},
+		{ID: "unit-d", DependsOn: []string{"unit-b"}},
+		{ID: "unit-e", DependsOn: []string{"unit-c", "unit-d"}},
+	}
+
+	orch := &Orchestrator{
+		cfg: Config{
+			DryRun:      true,
+			Parallelism: 4,
+		},
+		bus:     bus,
+		unitMap: buildUnitMap(units),
+	}
+
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	_, err := orch.dryRun(units)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have 3 execution levels
+	if !strings.Contains(output, "Execution levels: 3") {
+		t.Errorf("expected 3 execution levels, got: %s", output)
+	}
+
+	// Verify level structure
+	if !strings.Contains(output, "Level 1") {
+		t.Error("expected Level 1 in output")
+	}
+	if !strings.Contains(output, "Level 2") {
+		t.Error("expected Level 2 in output")
+	}
+	if !strings.Contains(output, "Level 3") {
+		t.Error("expected Level 3 in output")
+	}
+}
+
+func TestOrchestrator_DryRun_CycleDetection(t *testing.T) {
+	bus := events.NewBus(100)
+	defer bus.Close()
+
+	// Create a cycle: a -> b -> c -> a
+	units := []*discovery.Unit{
+		{ID: "unit-a", DependsOn: []string{"unit-c"}},
+		{ID: "unit-b", DependsOn: []string{"unit-a"}},
+		{ID: "unit-c", DependsOn: []string{"unit-b"}},
+	}
+
+	orch := &Orchestrator{
+		cfg: Config{
+			DryRun:      true,
+			Parallelism: 2,
+		},
+		bus:     bus,
+		unitMap: buildUnitMap(units),
+	}
+
+	_, err := orch.dryRun(units)
+
+	if err == nil {
+		t.Error("expected error for cyclic dependencies")
+	}
+}
+
+func TestOrchestrator_Run_DryRunMode(t *testing.T) {
+	// Integration test: Run() with DryRun=true should call dryRun()
+	tmpDir := t.TempDir()
+	tasksDir := filepath.Join(tmpDir, "tasks")
+	unitDir := filepath.Join(tasksDir, "test-unit")
+	os.MkdirAll(unitDir, 0755)
+
+	os.WriteFile(filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md"), []byte(`---
+unit: test-unit
+depends_on: []
+---
+# Test Unit
+`), 0644)
+
+	os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(`---
+task: 1
+status: in_progress
+backpressure: "echo ok"
+depends_on: []
+---
+# Task 1
+`), 0644)
+
+	bus := events.NewBus(100)
+	defer bus.Close()
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	orch := New(Config{
+		TasksDir:    tasksDir,
+		Parallelism: 1,
+		DryRun:      true,
+	}, Dependencies{
+		Bus: bus,
+	})
+
+	ctx := context.Background()
+	result, err := orch.Run(ctx)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if result.TotalUnits != 1 {
+		t.Errorf("expected 1 unit, got %d", result.TotalUnits)
+	}
+
+	// Should have printed execution plan
+	if !strings.Contains(output, "Execution Plan") {
+		t.Error("expected Execution Plan header in output")
 	}
 }

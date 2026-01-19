@@ -395,9 +395,43 @@ func categorizeErrorType(err error) string {
 	}
 }
 
-// dryRun is a stub for dry-run mode (task #5)
+// dryRun prints the execution plan without running workers
 func (o *Orchestrator) dryRun(units []*discovery.Unit) (*Result, error) {
-	// Dry-run implementation will be added in task #5
+	// Build schedule without executing
+	sched := scheduler.New(o.bus, o.cfg.Parallelism)
+	schedule, err := sched.Schedule(units)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build unit map for task counts
+	unitMap := buildUnitMap(units)
+
+	// Print execution plan
+	fmt.Printf("Execution Plan\n")
+	fmt.Printf("==============\n\n")
+	fmt.Printf("Units to execute: %d\n", len(units))
+	fmt.Printf("Max parallelism: %d\n", o.cfg.Parallelism)
+	fmt.Printf("Execution levels: %d\n\n", len(schedule.Levels))
+
+	for i, level := range schedule.Levels {
+		fmt.Printf("Level %d (parallel):\n", i+1)
+		for _, unitID := range level {
+			unit := unitMap[unitID]
+			taskCount := 0
+			if unit != nil {
+				taskCount = len(unit.Tasks)
+			}
+			fmt.Printf("  - %s (%d tasks)\n", unitID, taskCount)
+		}
+		fmt.Println()
+	}
+
+	fmt.Printf("Topological order:\n")
+	for i, unitID := range schedule.TopologicalOrder {
+		fmt.Printf("  %d. %s\n", i+1, unitID)
+	}
+
 	return &Result{
 		TotalUnits: len(units),
 	}, nil
