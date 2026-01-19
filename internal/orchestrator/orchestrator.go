@@ -81,8 +81,14 @@ type Result struct {
 	Error          error
 }
 
+// DefaultShutdownTimeout is the default grace period for shutdown
+const DefaultShutdownTimeout = 30 * time.Second
+
 // New creates an orchestrator with the given configuration and dependencies
 func New(cfg Config, deps Dependencies) *Orchestrator {
+	if cfg.ShutdownTimeout == 0 {
+		cfg.ShutdownTimeout = DefaultShutdownTimeout
+	}
 	return &Orchestrator{
 		cfg:       cfg,
 		bus:       deps.Bus,
@@ -105,6 +111,35 @@ func (o *Orchestrator) Close() error {
 		o.bus.Close()
 	}
 
+	return nil
+}
+
+// shutdown gracefully stops the orchestrator with timeout
+func (o *Orchestrator) shutdown(ctx context.Context) error {
+	// Create shutdown context with timeout
+	shutdownCtx, cancel := context.WithTimeout(ctx, o.cfg.ShutdownTimeout)
+	defer cancel()
+
+	var errs []error
+
+	// Stop accepting new work
+	// (dispatch loop exits via context cancellation in Run())
+
+	// Wait for in-progress workers to complete
+	if o.pool != nil {
+		if err := o.pool.Shutdown(shutdownCtx); err != nil {
+			errs = append(errs, fmt.Errorf("worker shutdown: %w", err))
+		}
+	}
+
+	// Close event bus (drains pending events)
+	if o.bus != nil {
+		o.bus.Close()
+	}
+
+	if len(errs) > 0 {
+		return errs[0]
+	}
 	return nil
 }
 
@@ -218,6 +253,12 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 	for {
 		select {
 		case <-ctx.Done():
+			// Graceful shutdown
+			if err := o.shutdown(context.Background()); err != nil {
+				// Log but don't fail - we're already shutting down
+				o.bus.Emit(events.NewEvent(events.OrchFailed, "").
+					WithError(fmt.Errorf("shutdown error: %w", err)))
+			}
 			return o.buildResult(startTime, ctx.Err()), ctx.Err()
 		default:
 		}

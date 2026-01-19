@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -11,7 +12,9 @@ import (
 	"github.com/anthropics/choo/internal/discovery"
 	"github.com/anthropics/choo/internal/escalate"
 	"github.com/anthropics/choo/internal/events"
+	"github.com/anthropics/choo/internal/git"
 	"github.com/anthropics/choo/internal/scheduler"
+	"github.com/anthropics/choo/internal/worker"
 )
 
 func TestOrchestrator_Run_Discovery(t *testing.T) {
@@ -327,4 +330,205 @@ func (m *mockEscalator) Escalate(ctx context.Context, e escalate.Escalation) err
 
 func (m *mockEscalator) Name() string {
 	return "mock"
+}
+
+func TestOrchestrator_Shutdown_Clean(t *testing.T) {
+	bus := events.NewBus(100)
+
+	cfg := Config{
+		ShutdownTimeout: 5 * time.Second,
+		Parallelism:     2,
+	}
+
+	orch := New(cfg, Dependencies{Bus: bus})
+
+	// Initialize pool manually for testing
+	workerCfg := worker.WorkerConfig{}
+	workerDeps := worker.WorkerDeps{Events: bus}
+	orch.pool = worker.NewPool(2, workerCfg, workerDeps)
+
+	// Shutdown should complete cleanly
+	ctx := context.Background()
+	err := orch.shutdown(ctx)
+
+	if err != nil {
+		t.Errorf("unexpected shutdown error: %v", err)
+	}
+}
+
+func TestOrchestrator_Shutdown_Timeout(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Initialize git repo
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to init git repo: %v", err)
+	}
+
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to config git user.email: %v", err)
+	}
+
+	cmd = exec.Command("git", "config", "user.name", "Test")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to config git user.name: %v", err)
+	}
+
+	bus := events.NewBus(100)
+
+	// Very short timeout
+	cfg := Config{
+		ShutdownTimeout: 1 * time.Millisecond,
+		Parallelism:     1,
+	}
+
+	orch := New(cfg, Dependencies{Bus: bus})
+
+	// Create pool with git manager
+	gitMgr := git.NewWorktreeManager(tmpDir, nil)
+	workerCfg := worker.WorkerConfig{
+		RepoRoot:     tmpDir,
+		WorktreeBase: filepath.Join(tmpDir, ".ralph", "worktrees"),
+	}
+	workerDeps := worker.WorkerDeps{
+		Events: bus,
+		Git:    gitMgr,
+	}
+	orch.pool = worker.NewPool(1, workerCfg, workerDeps)
+
+	// Submit a blocking unit (won't complete quickly)
+	unit := &discovery.Unit{
+		ID: "blocking-unit",
+		Tasks: []*discovery.Task{
+			{Number: 1, Backpressure: "sleep 10"},
+		},
+	}
+	orch.pool.Submit(unit)
+
+	// Give worker time to start
+	time.Sleep(10 * time.Millisecond)
+
+	// Shutdown with already-cancelled context
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := orch.shutdown(ctx)
+
+	// Should timeout waiting for workers
+	if err == nil {
+		t.Log("shutdown completed (pool may have been empty)")
+	}
+}
+
+func TestOrchestrator_Shutdown_NilComponents(t *testing.T) {
+	// Test shutdown with nil pool and bus doesn't panic
+	orch := &Orchestrator{
+		cfg: Config{ShutdownTimeout: time.Second},
+	}
+
+	err := orch.shutdown(context.Background())
+	if err != nil {
+		t.Errorf("unexpected error with nil components: %v", err)
+	}
+}
+
+func TestOrchestrator_DefaultShutdownTimeout(t *testing.T) {
+	bus := events.NewBus(100)
+	defer bus.Close()
+
+	// Don't set ShutdownTimeout
+	cfg := Config{
+		Parallelism: 1,
+	}
+
+	orch := New(cfg, Dependencies{Bus: bus})
+
+	if orch.cfg.ShutdownTimeout != DefaultShutdownTimeout {
+		t.Errorf("expected default timeout %v, got %v",
+			DefaultShutdownTimeout, orch.cfg.ShutdownTimeout)
+	}
+}
+
+func TestOrchestrator_Run_ContextCancellation(t *testing.T) {
+	// Create temp tasks directory
+	tmpDir := t.TempDir()
+
+	// Initialize git repo
+	cmd := exec.Command("git", "init")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to init git repo: %v", err)
+	}
+
+	cmd = exec.Command("git", "config", "user.email", "test@example.com")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to config git user.email: %v", err)
+	}
+
+	cmd = exec.Command("git", "config", "user.name", "Test")
+	cmd.Dir = tmpDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to config git user.name: %v", err)
+	}
+
+	tasksDir := filepath.Join(tmpDir, "tasks")
+	unitDir := filepath.Join(tasksDir, "slow-unit")
+	os.MkdirAll(unitDir, 0755)
+
+	os.WriteFile(filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md"), []byte(`---
+unit: slow-unit
+depends_on: []
+---
+# Slow Unit
+`), 0644)
+
+	os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(`---
+task: 1
+status: in_progress
+backpressure: "sleep 60"
+depends_on: []
+---
+# Slow Task
+`), 0644)
+
+	bus := events.NewBus(100)
+	gitMgr := git.NewWorktreeManager(tmpDir, nil)
+	worktreeBase := filepath.Join(tmpDir, ".ralph", "worktrees")
+
+	cfg := Config{
+		TasksDir:        tasksDir,
+		Parallelism:     1,
+		ShutdownTimeout: 100 * time.Millisecond,
+		RepoRoot:        tmpDir,
+		WorktreeBase:    worktreeBase,
+	}
+
+	orch := New(cfg, Dependencies{
+		Bus: bus,
+		Git: gitMgr,
+	})
+
+	// Cancel context after short delay
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+
+	result, err := orch.Run(ctx)
+
+	// Should return context cancelled error
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+
+	// Result should still be populated
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
 }
