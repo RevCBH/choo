@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/anthropics/choo/internal/escalate"
+	"github.com/anthropics/choo/internal/events"
 )
 
 // getHeadRef returns the current HEAD commit SHA
@@ -101,6 +102,52 @@ func (w *Worker) commitViaClaudeCode(ctx context.Context, taskTitle string) erro
 			})
 		}
 		return result.LastErr
+	}
+
+	return nil
+}
+
+// pushViaClaudeCode invokes Claude to push the branch to remote
+func (w *Worker) pushViaClaudeCode(ctx context.Context) error {
+	prompt := BuildPushPrompt(w.branch)
+
+	result := RetryWithBackoff(ctx, DefaultRetryConfig, func(ctx context.Context) error {
+		if err := w.invokeClaude(ctx, prompt); err != nil {
+			return err
+		}
+
+		// Verify branch exists on remote
+		exists, err := w.branchExistsOnRemote(ctx, w.branch)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("branch not found on remote after push")
+		}
+		return nil
+	})
+
+	if !result.Success {
+		if w.escalator != nil {
+			w.escalator.Escalate(ctx, escalate.Escalation{
+				Severity: escalate.SeverityBlocking,
+				Unit:     w.unit.ID,
+				Title:    "Failed to push branch",
+				Message:  fmt.Sprintf("Claude could not push after %d attempts", result.Attempts),
+				Context: map[string]string{
+					"branch": w.branch,
+					"error":  result.LastErr.Error(),
+				},
+			})
+		}
+		return result.LastErr
+	}
+
+	// Emit BranchPushed event on success
+	if w.events != nil {
+		evt := events.NewEvent(events.BranchPushed, w.unit.ID).
+			WithPayload(map[string]interface{}{"branch": w.branch})
+		w.events.Emit(evt)
 	}
 
 	return nil

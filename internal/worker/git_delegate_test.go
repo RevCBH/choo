@@ -9,9 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anthropics/choo/internal/discovery"
 	"github.com/anthropics/choo/internal/escalate"
+	"github.com/anthropics/choo/internal/events"
 )
 
 // setupTestGitRepo creates a temporary git repo for testing
@@ -420,4 +422,277 @@ func TestCommitViaClaudeCode_VerifiesCommit(t *testing.T) {
 	if !strings.Contains(err.Error(), "did not create a commit") {
 		t.Errorf("error should mention missing commit: %v", err)
 	}
+}
+
+// captureEventBus wraps an events.Bus and captures emitted events
+type captureEventBus struct {
+	*events.Bus
+	emitted []events.Event
+}
+
+func newCaptureEventBus() *captureEventBus {
+	bus := events.NewBus(100)
+	capture := &captureEventBus{
+		Bus:     bus,
+		emitted: make([]events.Event, 0),
+	}
+	bus.Subscribe(func(e events.Event) {
+		capture.emitted = append(capture.emitted, e)
+	})
+	return capture
+}
+
+func TestPushViaClaudeCode_Success(t *testing.T) {
+	dir, cleanup := setupTestGitRepo(t)
+	defer cleanup()
+
+	// Setup remote for testing (use local bare repo as "remote")
+	remoteDir, err := os.MkdirTemp("", "git-remote-*")
+	if err != nil {
+		t.Fatalf("failed to create remote dir: %v", err)
+	}
+	defer os.RemoveAll(remoteDir)
+
+	// Initialize bare remote
+	cmd := exec.Command("git", "init", "--bare")
+	cmd.Dir = remoteDir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to init remote: %v", err)
+	}
+
+	// Add remote to test repo
+	cmd = exec.Command("git", "remote", "add", "origin", remoteDir)
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to add remote: %v", err)
+	}
+
+	eventBus := newCaptureEventBus()
+	defer eventBus.Close()
+
+	w := &Worker{
+		worktreePath: dir,
+		branch:       "test-branch",
+		unit:         &discovery.Unit{ID: "test-unit"},
+		escalator:    &mockEscalator{},
+		events:       eventBus.Bus,
+	}
+
+	// Create branch
+	cmd = exec.Command("git", "checkout", "-b", "test-branch")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to create branch: %v", err)
+	}
+
+	// Create a wrapper that overrides invokeClaude
+	wrapper := &mockPushInvoker{
+		Worker: w,
+		invokeFunc: func(ctx context.Context, prompt string) error {
+			cmd := exec.Command("git", "push", "-u", "origin", "test-branch")
+			cmd.Dir = dir
+			return cmd.Run()
+		},
+	}
+
+	err = wrapper.pushViaClaudeCode(context.Background())
+	if err != nil {
+		t.Errorf("expected success, got error: %v", err)
+	}
+}
+
+func TestPushViaClaudeCode_EmitsEvent(t *testing.T) {
+	dir, cleanup := setupTestGitRepo(t)
+	defer cleanup()
+
+	// Setup remote
+	remoteDir, _ := os.MkdirTemp("", "git-remote-*")
+	defer os.RemoveAll(remoteDir)
+
+	cmd := exec.Command("git", "init", "--bare")
+	cmd.Dir = remoteDir
+	cmd.Run()
+
+	cmd = exec.Command("git", "remote", "add", "origin", remoteDir)
+	cmd.Dir = dir
+	cmd.Run()
+
+	cmd = exec.Command("git", "checkout", "-b", "feature-branch")
+	cmd.Dir = dir
+	cmd.Run()
+
+	eventBus := newCaptureEventBus()
+	defer eventBus.Close()
+
+	w := &Worker{
+		worktreePath: dir,
+		branch:       "feature-branch",
+		unit:         &discovery.Unit{ID: "test-unit"},
+		escalator:    &mockEscalator{},
+		events:       eventBus.Bus,
+	}
+
+	wrapper := &mockPushInvoker{
+		Worker: w,
+		invokeFunc: func(ctx context.Context, prompt string) error {
+			cmd := exec.Command("git", "push", "-u", "origin", "feature-branch")
+			cmd.Dir = dir
+			return cmd.Run()
+		},
+	}
+
+	if err := wrapper.pushViaClaudeCode(context.Background()); err != nil {
+		t.Fatalf("pushViaClaudeCode failed: %v", err)
+	}
+
+	// Wait a moment for event bus to process
+	time.Sleep(100 * time.Millisecond)
+
+	// Find the BranchPushed event in the emitted events
+	var branchPushedEvent *events.Event
+	for _, e := range eventBus.emitted {
+		if e.Type == events.BranchPushed {
+			branchPushedEvent = &e
+			break
+		}
+	}
+
+	if branchPushedEvent == nil {
+		t.Errorf("expected BranchPushed event to be emitted, got events: %v", eventBus.emitted)
+		return
+	}
+
+	payload, ok := branchPushedEvent.Payload.(map[string]interface{})
+	if !ok {
+		t.Error("expected payload to be map")
+	}
+	if payload["branch"] != "feature-branch" {
+		t.Errorf("expected branch in payload, got %v", payload)
+	}
+}
+
+func TestPushViaClaudeCode_EscalatesOnExhaustion(t *testing.T) {
+	dir, cleanup := setupTestGitRepo(t)
+	defer cleanup()
+
+	esc := &mockEscalator{}
+	w := &Worker{
+		worktreePath: dir,
+		branch:       "test-branch",
+		unit:         &discovery.Unit{ID: "test-unit"},
+		escalator:    esc,
+	}
+
+	wrapper := &mockPushInvoker{
+		Worker: w,
+		invokeFunc: func(ctx context.Context, prompt string) error {
+			return errors.New("network error")
+		},
+	}
+
+	err := wrapper.pushViaClaudeCode(context.Background())
+	if err == nil {
+		t.Error("expected error after exhausting retries")
+	}
+
+	if len(esc.escalations) == 0 {
+		t.Error("expected escalation to be called")
+	}
+
+	if len(esc.escalations) > 0 {
+		e := esc.escalations[0]
+		if e.Severity != escalate.SeverityBlocking {
+			t.Errorf("expected SeverityBlocking, got %v", e.Severity)
+		}
+		if e.Title != "Failed to push branch" {
+			t.Errorf("unexpected title: %s", e.Title)
+		}
+		if e.Context["branch"] != "test-branch" {
+			t.Errorf("expected branch in context: %v", e.Context)
+		}
+	}
+}
+
+func TestPushViaClaudeCode_VerifiesBranch(t *testing.T) {
+	dir, cleanup := setupTestGitRepo(t)
+	defer cleanup()
+
+	esc := &mockEscalator{}
+	w := &Worker{
+		worktreePath: dir,
+		branch:       "test-branch",
+		unit:         &discovery.Unit{ID: "test-unit"},
+		escalator:    esc,
+	}
+
+	wrapper := &mockPushInvoker{
+		Worker: w,
+		invokeFunc: func(ctx context.Context, prompt string) error {
+			return nil // Success but no push
+		},
+	}
+
+	err := wrapper.pushViaClaudeCode(context.Background())
+	if err == nil {
+		t.Error("expected error when branch not on remote")
+	}
+}
+
+// mockPushInvoker wraps a Worker and allows customizing invokeClaude behavior
+type mockPushInvoker struct {
+	*Worker
+	invokeFunc func(ctx context.Context, prompt string) error
+}
+
+func (m *mockPushInvoker) invokeClaude(ctx context.Context, prompt string) error {
+	if m.invokeFunc != nil {
+		return m.invokeFunc(ctx, prompt)
+	}
+	return m.Worker.invokeClaude(ctx, prompt)
+}
+
+// pushViaClaudeCode overrides the Worker method to use the mock's invokeClaude
+func (m *mockPushInvoker) pushViaClaudeCode(ctx context.Context) error {
+	prompt := BuildPushPrompt(m.branch)
+
+	result := RetryWithBackoff(ctx, DefaultRetryConfig, func(ctx context.Context) error {
+		if err := m.invokeClaude(ctx, prompt); err != nil {
+			return err
+		}
+
+		// Verify branch exists on remote
+		exists, err := m.branchExistsOnRemote(ctx, m.branch)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			return fmt.Errorf("branch not found on remote after push")
+		}
+		return nil
+	})
+
+	if !result.Success {
+		if m.escalator != nil {
+			m.escalator.Escalate(ctx, escalate.Escalation{
+				Severity: escalate.SeverityBlocking,
+				Unit:     m.unit.ID,
+				Title:    "Failed to push branch",
+				Message:  fmt.Sprintf("Claude could not push after %d attempts", result.Attempts),
+				Context: map[string]string{
+					"branch": m.branch,
+					"error":  result.LastErr.Error(),
+				},
+			})
+		}
+		return result.LastErr
+	}
+
+	// Emit BranchPushed event on success
+	if m.events != nil {
+		evt := events.NewEvent(events.BranchPushed, m.unit.ID).
+			WithPayload(map[string]interface{}{"branch": m.branch})
+		m.events.Emit(evt)
+	}
+
+	return nil
 }
