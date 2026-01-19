@@ -51,6 +51,13 @@ func setupTestRepoWithRemote(t *testing.T) (repoPath string, remotePath string) 
 		t.Fatalf("failed to config git email: %v", err)
 	}
 
+	// Set editor to true to avoid "Terminal is dumb, but EDITOR unset" in CI
+	cmd = exec.Command("git", "config", "core.editor", "true")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to config git editor: %v", err)
+	}
+
 	// Create initial commit on main
 	testFile := filepath.Join(repoPath, "README.md")
 	if err := os.WriteFile(testFile, []byte("# Test Repo"), 0644); err != nil {
