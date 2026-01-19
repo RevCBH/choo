@@ -178,6 +178,11 @@ func (m *MergeManager) ResolveConflicts(ctx context.Context, worktreePath string
 
 // resolveConflictsWithClaude is the internal implementation with retry logic
 func (m *MergeManager) resolveConflictsWithClaude(ctx context.Context, worktreePath string) error {
+	// Guard against nil Claude client
+	if m.Claude == nil {
+		return fmt.Errorf("cannot resolve conflicts: Claude client is not configured")
+	}
+
 	for attempt := 1; attempt <= m.MaxConflictAttempts; attempt++ {
 		// Get list of conflicted files
 		conflicts, err := getConflictedFiles(ctx, worktreePath)
@@ -208,8 +213,13 @@ func (m *MergeManager) resolveConflictsWithClaude(ctx context.Context, worktreeP
 		// Check if conflicts remain
 		remaining, _ := getConflictedFiles(ctx, worktreePath)
 		if len(remaining) == 0 {
-			// Continue rebase
+			// Continue rebase - may hit another conflicting commit
 			if err := continueRebase(ctx, worktreePath); err != nil {
+				// Check if continueRebase hit another conflict
+				if isConflictError(err) {
+					// Loop back to resolve the next conflict set
+					continue
+				}
 				return err
 			}
 			return nil
@@ -217,6 +227,17 @@ func (m *MergeManager) resolveConflictsWithClaude(ctx context.Context, worktreeP
 	}
 
 	return fmt.Errorf("failed to resolve conflicts after %d attempts", m.MaxConflictAttempts)
+}
+
+// isConflictError checks if an error indicates merge conflicts
+func isConflictError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "CONFLICT") ||
+		strings.Contains(errStr, "could not apply") ||
+		strings.Contains(errStr, "needs merge")
 }
 
 // buildConflictPrompt creates the prompt for Claude to resolve conflicts
