@@ -1,6 +1,6 @@
 ---
 task: 4
-status: pending
+status: complete
 backpressure: "go test ./internal/escalate/... -run Webhook"
 depends_on: [1]
 ---
