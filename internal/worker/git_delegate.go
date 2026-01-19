@@ -66,6 +66,8 @@ func (w *Worker) getChangedFiles(ctx context.Context) ([]string, error) {
 }
 
 // commitViaClaudeCode invokes Claude to stage and commit changes
+//
+//nolint:unused // WIP: will be wired up when git delegation is fully integrated
 func (w *Worker) commitViaClaudeCode(ctx context.Context, taskTitle string) error {
 	// Get the HEAD ref before invoking Claude
 	headBefore, err := w.getHeadRef(ctx)
@@ -94,7 +96,7 @@ func (w *Worker) commitViaClaudeCode(ctx context.Context, taskTitle string) erro
 
 	if !result.Success {
 		if w.escalator != nil {
-			w.escalator.Escalate(ctx, escalate.Escalation{
+			_ = w.escalator.Escalate(ctx, escalate.Escalation{
 				Severity: escalate.SeverityBlocking,
 				Unit:     w.unit.ID,
 				Title:    "Failed to commit changes",
@@ -112,6 +114,8 @@ func (w *Worker) commitViaClaudeCode(ctx context.Context, taskTitle string) erro
 }
 
 // pushViaClaudeCode invokes Claude to push the branch to remote
+//
+//nolint:unused // WIP: will be wired up when git delegation is fully integrated
 func (w *Worker) pushViaClaudeCode(ctx context.Context) error {
 	prompt := BuildPushPrompt(w.branch)
 
@@ -133,7 +137,7 @@ func (w *Worker) pushViaClaudeCode(ctx context.Context) error {
 
 	if !result.Success {
 		if w.escalator != nil {
-			w.escalator.Escalate(ctx, escalate.Escalation{
+			_ = w.escalator.Escalate(ctx, escalate.Escalation{
 				Severity: escalate.SeverityBlocking,
 				Unit:     w.unit.ID,
 				Title:    "Failed to push branch",
@@ -150,7 +154,7 @@ func (w *Worker) pushViaClaudeCode(ctx context.Context) error {
 	// Emit BranchPushed event on success
 	if w.events != nil {
 		evt := events.NewEvent(events.BranchPushed, w.unit.ID).
-			WithPayload(map[string]interface{}{"branch": w.branch})
+			WithPayload(map[string]any{"branch": w.branch})
 		w.events.Emit(evt)
 	}
 
@@ -218,7 +222,7 @@ func (w *Worker) createPRViaClaudeCode(ctx context.Context) (string, error) {
 
 	if !result.Success {
 		if w.escalator != nil {
-			w.escalator.Escalate(ctx, escalate.Escalation{
+			_ = w.escalator.Escalate(ctx, escalate.Escalation{
 				Severity: escalate.SeverityBlocking,
 				Unit:     w.unit.ID,
 				Title:    "Failed to create PR",

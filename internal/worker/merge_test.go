@@ -32,11 +32,14 @@ func TestMergeConflictResolution_EscalateOnFailure(t *testing.T) {
 }
 
 // mockGitHubClient mocks GitHub operations for testing
+//
+//nolint:unused // WIP: will be used when tests are enabled
 type mockGitHubClient struct {
 	mergeErr    error
 	mergeCalled bool
 }
 
+//nolint:unused // WIP: will be used when tests are enabled
 func (m *mockGitHubClient) Merge(ctx context.Context, prNumber int) (*github.MergeResult, error) {
 	m.mergeCalled = true
 	if m.mergeErr != nil {
@@ -50,10 +53,13 @@ func (m *mockGitHubClient) Merge(ctx context.Context, prNumber int) (*github.Mer
 }
 
 // mockEventBus captures emitted events for testing
+//
+//nolint:unused // WIP: will be used when tests are enabled
 type mockEventBus struct {
 	emittedEvents []events.Event
 }
 
+//nolint:unused // WIP: will be used when tests are enabled
 func (m *mockEventBus) Emit(evt events.Event) {
 	m.emittedEvents = append(m.emittedEvents, evt)
 }

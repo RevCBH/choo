@@ -33,6 +33,7 @@ type Worker struct {
 	currentTask  *discovery.Task
 
 	// prNumber is the PR number after creation
+	//nolint:unused // WIP: used by forcePushAndMerge when conflict resolution is fully integrated
 	prNumber int
 
 	// invokeClaudeWithOutput is the function that invokes Claude and captures output
@@ -71,7 +72,7 @@ type WorkerDeps struct {
 
 // ClaudeClient is a placeholder interface for the Claude client
 // This will be replaced when the claude package is implemented
-type ClaudeClient interface{}
+type ClaudeClient any
 
 // NewWorker creates a worker for executing a unit
 func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker {

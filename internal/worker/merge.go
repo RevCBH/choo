@@ -36,6 +36,8 @@ type ConflictInfo struct {
 
 // mergeWithConflictResolution performs a full merge with conflict handling
 // This is called by the worker after PR approval
+//
+//nolint:unused // WIP: will be wired up when conflict resolution is fully integrated
 func (w *Worker) mergeWithConflictResolution(ctx context.Context) error {
 	// Fetch latest
 	if err := git.Fetch(ctx, w.config.RepoRoot, w.config.TargetBranch); err != nil {
@@ -95,7 +97,7 @@ func (w *Worker) mergeWithConflictResolution(ctx context.Context) error {
 
 		// Escalate to user
 		if w.escalator != nil {
-			w.escalator.Escalate(ctx, escalate.Escalation{
+			_ = w.escalator.Escalate(ctx, escalate.Escalation{
 				Severity: escalate.SeverityBlocking,
 				Unit:     w.unit.ID,
 				Title:    "Failed to resolve merge conflicts",
@@ -118,6 +120,8 @@ func (w *Worker) mergeWithConflictResolution(ctx context.Context) error {
 }
 
 // forcePushAndMerge pushes the rebased branch and merges via GitHub API
+//
+//nolint:unused // WIP: called by mergeWithConflictResolution
 func (w *Worker) forcePushAndMerge(ctx context.Context) error {
 	// Force push the rebased branch
 	if err := git.ForcePushWithLease(ctx, w.worktreePath); err != nil {
