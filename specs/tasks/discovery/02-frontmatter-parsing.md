@@ -1,6 +1,6 @@
 ---
 task: 2
-status: pending
+status: complete
 backpressure: "go test ./internal/discovery/... -run TestParse"
 depends_on: [1]
 ---
@@ -114,23 +114,23 @@ Test cases embedded in test file:
 
 ```go
 // Valid frontmatter
-`---
-task: 1
-status: pending
-backpressure: "go test ./..."
-depends_on: []
----
+var validFrontmatter = `---
+	task: 1
+	status: pending
+	backpressure: "go test ./..."
+	depends_on: []
+	---
 
-# Title`
+	# Title`
 
 // No frontmatter
-`# Just a title`
+var noFrontmatter = `# Just a title`
 
 // Unclosed frontmatter
-`---
-task: 1
-status: pending
-# Title`
+var unclosedFrontmatter = `---
+	task: 1
+	status: pending
+	# Title`
 ```
 
 ### CI Compatibility

@@ -1,0 +1,15 @@
+Task complete! The core types implementation is already in place in internal/discovery/types.go:3. All validation checks passed:
+
+- `go build ./internal/discovery/...` - No compilation errors
+- `go fmt ./...` - No formatting issues  
+- `go vet ./...` - No vet warnings
+
+The implementation includes:
+- `Unit` struct with all required fields
+- `UnitStatus` type with all 7 status constants
+- `Task` struct with all required fields
+- `TaskStatus` type with all 4 status constants
+- `parseUnitStatus()` function with empty string defaulting to pending
+- `parseTaskStatus()` function with empty string defaulting to pending
+
+The frontmatter status has been updated to `complete` in specs/tasks/discovery/01-core-types.md:3.

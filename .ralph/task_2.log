@@ -1,0 +1,35 @@
+Excellent! All tests pass including the `TestExtractTitle_Found` and `TestExtractTitle_NotFound` tests.
+
+## Summary
+
+Task #2 (Frontmatter Parsing) is now complete. Here's what was accomplished:
+
+### Implemented Files:
+- `internal/discovery/frontmatter.go` - Contains all required types and functions:
+  - `UnitFrontmatter` struct
+  - `TaskFrontmatter` struct
+  - `ParseFrontmatter()` function
+  - `ParseUnitFrontmatter()` function
+  - `ParseTaskFrontmatter()` function
+  - `extractTitle()` function
+
+- `internal/discovery/frontmatter_test.go` - All 9 required tests:
+  - ✓ `TestParseFrontmatter_Valid`
+  - ✓ `TestParseFrontmatter_NoFrontmatter`
+  - ✓ `TestParseFrontmatter_Unclosed`
+  - ✓ `TestParseUnitFrontmatter_Complete`
+  - ✓ `TestParseUnitFrontmatter_Minimal`
+  - ✓ `TestParseTaskFrontmatter_Complete`
+  - ✓ `TestParseTaskFrontmatter_WithDeps`
+  - ✓ `TestExtractTitle_Found`
+  - ✓ `TestExtractTitle_NotFound`
+
+### Validation Passed:
+- ✓ Backpressure command: `go test ./internal/discovery/... -run TestParse -v`
+- ✓ Baseline check: `go fmt ./...`
+- ✓ Baseline check: `go vet ./...`
+
+### Spec Updated:
+- ✓ Status changed from `in_progress` to `complete` in `specs/tasks/discovery/02-frontmatter-parsing.md`
+
+The implementation correctly handles YAML frontmatter extraction and parsing for both IMPLEMENTATION_PLAN.md (unit) files and task files, with proper error handling for edge cases.
