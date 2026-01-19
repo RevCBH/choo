@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -251,10 +252,14 @@ depends_on: []
 	os.Chdir(tmpDir)
 	defer os.Chdir(oldWd)
 
+	// Initialize git repo (required for worktree operations)
+	initGitRepo(t, tmpDir)
+
 	app := New()
 	opts := RunOptions{
-		TasksDir:    tasksDir,
-		Parallelism: 1,
+		TasksDir:     tasksDir,
+		Parallelism:  1,
+		TargetBranch: "main",
 	}
 
 	// Cancel after short delay
@@ -334,5 +339,24 @@ depends_on: []
 
 	if err != nil {
 		t.Fatalf("command execution failed: %v", err)
+	}
+}
+
+// initGitRepo initializes a git repository in the given directory with a main branch
+func initGitRepo(t *testing.T, dir string) {
+	t.Helper()
+	cmds := [][]string{
+		{"git", "init", "-b", "main"},
+		{"git", "config", "user.email", "test@test.com"},
+		{"git", "config", "user.name", "Test User"},
+		{"git", "add", "."},
+		{"git", "commit", "-m", "initial commit"},
+	}
+	for _, args := range cmds {
+		cmd := exec.Command(args[0], args[1:]...)
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git command %v failed: %v\n%s", args, err, out)
+		}
 	}
 }

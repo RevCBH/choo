@@ -37,8 +37,12 @@ func TestSignalHandler_New(t *testing.T) {
 }
 
 func TestSignalHandler_GracefulShutdown(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode: flaky when run with other signal-handling tests")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	handler := NewSignalHandler(cancel)
+	defer handler.Stop()
 
 	var mu sync.Mutex
 	callbackCalled := false
@@ -50,7 +54,7 @@ func TestSignalHandler_GracefulShutdown(t *testing.T) {
 		mu.Unlock()
 	})
 
-	handler.Start()
+	handler.StartWithNotify(false)
 
 	// Check context cancellation in a separate goroutine
 	go func() {
@@ -87,10 +91,14 @@ func TestSignalHandler_GracefulShutdown(t *testing.T) {
 }
 
 func TestSignalHandler_MultipleCallbacks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode: flaky when run with other signal-handling tests")
+	}
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	handler := NewSignalHandler(cancel)
+	defer handler.Stop()
 
 	var mu sync.Mutex
 	callOrder := []int{}
@@ -113,7 +121,7 @@ func TestSignalHandler_MultipleCallbacks(t *testing.T) {
 		mu.Unlock()
 	})
 
-	handler.Start()
+	handler.StartWithNotify(false)
 
 	// Send SIGTERM
 	handler.signals <- syscall.SIGTERM
@@ -146,11 +154,15 @@ func TestSignalHandler_MultipleCallbacks(t *testing.T) {
 }
 
 func TestSignalHandler_Wait(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode: flaky when run with other signal-handling tests")
+	}
 	_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	handler := NewSignalHandler(cancel)
-	handler.Start()
+	defer handler.Stop()
+	handler.StartWithNotify(false)
 
 	waitCompleted := false
 	var wg sync.WaitGroup
@@ -192,10 +204,14 @@ func TestSignalHandler_Wait(t *testing.T) {
 }
 
 func TestSignalHandler_ContextCancelled(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping in short mode: flaky when run with other signal-handling tests")
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	handler := NewSignalHandler(cancel)
+	defer handler.Stop()
 
-	handler.Start()
+	handler.StartWithNotify(false)
 
 	// Send SIGINT
 	handler.signals <- syscall.SIGINT
@@ -226,7 +242,7 @@ func TestSignalHandler_Stop(t *testing.T) {
 	defer cancel()
 
 	handler := NewSignalHandler(cancel)
-	handler.Start()
+	handler.StartWithNotify(false)
 
 	// Stop should not panic
 	handler.Stop()
