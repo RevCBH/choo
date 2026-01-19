@@ -4,7 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/anthropics/choo/internal/config"
+	"github.com/anthropics/choo/internal/escalate"
+	"github.com/anthropics/choo/internal/events"
+	"github.com/anthropics/choo/internal/git"
+	"github.com/anthropics/choo/internal/github"
+	"github.com/anthropics/choo/internal/orchestrator"
 	"github.com/spf13/cobra"
 )
 
@@ -99,28 +106,75 @@ func (a *App) RunOrchestrator(ctx context.Context, opts RunOptions) error {
 	handler.Start()
 	defer handler.Stop()
 
-	// For dry-run mode, print execution plan
-	if opts.DryRun {
-		fmt.Printf("Dry-run mode: execution plan\n")
-		fmt.Printf("Tasks directory: %s\n", opts.TasksDir)
-		fmt.Printf("Parallelism: %d\n", opts.Parallelism)
-		fmt.Printf("Target branch: %s\n", opts.TargetBranch)
-		if opts.Unit != "" {
-			fmt.Printf("Single unit mode: %s\n", opts.Unit)
-		} else {
-			fmt.Printf("Mode: all units\n")
-		}
-		fmt.Printf("PR creation: %t\n", !opts.NoPR)
-		fmt.Printf("Skip review: %t\n", opts.SkipReview)
-		return nil
+	// Load configuration
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	// TODO: Wire orchestrator components (task #9)
-	// TODO: Run discovery (task #9)
-	// TODO: Execute scheduler loop (task #9)
+	cfg, err := config.LoadConfig(wd)
+	if err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
 
-	// Placeholder: Wait for context cancellation
-	<-ctx.Done()
+	// Create event bus
+	eventBus := events.NewBus(1000)
+	defer eventBus.Close()
 
-	return nil
+	// Create Git WorktreeManager
+	gitManager := git.NewWorktreeManager(wd, nil)
+
+	// Create GitHub PRClient
+	pollInterval, _ := cfg.ReviewPollIntervalDuration()
+	reviewTimeout, _ := cfg.ReviewTimeoutDuration()
+	ghClient, err := github.NewPRClient(github.PRClientConfig{
+		Owner:         cfg.GitHub.Owner,
+		Repo:          cfg.GitHub.Repo,
+		PollInterval:  pollInterval,
+		ReviewTimeout: reviewTimeout,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create GitHub client: %w", err)
+	}
+
+	// Create escalator (terminal by default)
+	esc := escalate.NewTerminal()
+
+	// Build orchestrator config from CLI options and loaded config
+	orchCfg := orchestrator.Config{
+		Parallelism:     opts.Parallelism,
+		TargetBranch:    opts.TargetBranch,
+		TasksDir:        opts.TasksDir,
+		RepoRoot:        wd,
+		WorktreeBase:    cfg.Worktree.BasePath,
+		NoPR:            opts.NoPR,
+		SkipReview:      opts.SkipReview,
+		SingleUnit:      opts.Unit,
+		DryRun:          opts.DryRun,
+		ShutdownTimeout: orchestrator.DefaultShutdownTimeout,
+	}
+
+	// Create orchestrator
+	orch := orchestrator.New(orchCfg, orchestrator.Dependencies{
+		Bus:       eventBus,
+		Escalator: esc,
+		Git:       gitManager,
+		GitHub:    ghClient,
+	})
+	defer orch.Close()
+
+	// Run orchestrator
+	result, err := orch.Run(ctx)
+
+	// Print summary
+	if result != nil {
+		fmt.Printf("\nOrchestration complete:\n")
+		fmt.Printf("  Total units:     %d\n", result.TotalUnits)
+		fmt.Printf("  Completed:       %d\n", result.CompletedUnits)
+		fmt.Printf("  Failed:          %d\n", result.FailedUnits)
+		fmt.Printf("  Blocked:         %d\n", result.BlockedUnits)
+		fmt.Printf("  Duration:        %s\n", result.Duration.Round(time.Millisecond))
+	}
+
+	return err
 }

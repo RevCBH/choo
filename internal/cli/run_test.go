@@ -3,8 +3,11 @@ package cli
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRunCmd_DefaultFlags(t *testing.T) {
@@ -152,67 +155,184 @@ func TestRunOptions_Validate_EmptyTasksDir(t *testing.T) {
 }
 
 func TestRunOrchestrator_DryRun(t *testing.T) {
-	app := New()
+	// Create temp directory with tasks
+	tmpDir := t.TempDir()
+	tasksDir := filepath.Join(tmpDir, "tasks")
+	unitDir := filepath.Join(tasksDir, "test-unit")
+	os.MkdirAll(unitDir, 0755)
 
+	os.WriteFile(filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md"), []byte(`---
+unit: test-unit
+depends_on: []
+---
+# Test Unit
+`), 0644)
+
+	os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(`---
+task: 1
+status: in_progress
+backpressure: "echo ok"
+depends_on: []
+---
+# Task 1
+`), 0644)
+
+	// Create a minimal config to avoid auto-detect
+	os.WriteFile(filepath.Join(tmpDir, ".choo.yaml"), []byte(`github:
+  owner: testowner
+  repo: testrepo
+`), 0644)
+
+	// Change to tmpDir for config loading
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	app := New()
 	opts := RunOptions{
-		Parallelism:  4,
-		TargetBranch: "main",
-		DryRun:       true,
-		NoPR:         false,
-		Unit:         "",
-		SkipReview:   false,
-		TasksDir:     "specs/tasks",
+		TasksDir:    tasksDir,
+		Parallelism: 1,
+		DryRun:      true,
+	}
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	ctx := context.Background()
+	err := app.RunOrchestrator(ctx, opts)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !strings.Contains(output, "Execution Plan") {
+		t.Error("expected dry-run output")
+	}
+}
+
+func TestRunOrchestrator_ContextCancellation(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksDir := filepath.Join(tmpDir, "tasks")
+	unitDir := filepath.Join(tasksDir, "test-unit")
+	os.MkdirAll(unitDir, 0755)
+
+	os.WriteFile(filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md"), []byte(`---
+unit: test-unit
+depends_on: []
+---
+# Test Unit
+`), 0644)
+
+	os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(`---
+task: 1
+status: in_progress
+backpressure: "sleep 60"
+depends_on: []
+---
+# Long Task
+`), 0644)
+
+	// Create a minimal config to avoid auto-detect
+	os.WriteFile(filepath.Join(tmpDir, ".choo.yaml"), []byte(`github:
+  owner: testowner
+  repo: testrepo
+`), 0644)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
+	app := New()
+	opts := RunOptions{
+		TasksDir:    tasksDir,
+		Parallelism: 1,
+	}
+
+	// Cancel after short delay
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	err := app.RunOrchestrator(ctx, opts)
+
+	// Should return context cancellation
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestRunOrchestrator_InvalidTasksDir(t *testing.T) {
+	app := New()
+	opts := RunOptions{
+		TasksDir:    "/nonexistent/path",
+		Parallelism: 1,
 	}
 
 	ctx := context.Background()
-
-	// Capture stdout
-	oldStdout := redirectStdout()
-	defer restoreStdout(oldStdout)
-
 	err := app.RunOrchestrator(ctx, opts)
-	if err != nil {
-		t.Fatalf("RunOrchestrator failed: %v", err)
-	}
 
-	// Note: In a real scenario, we'd capture and verify the output
-	// For now, we just verify it doesn't error
+	if err == nil {
+		t.Error("expected error for invalid tasks directory")
+	}
 }
 
-func TestRunOrchestrator_SingleUnit(t *testing.T) {
+func TestRunCmd_Integration(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksDir := filepath.Join(tmpDir, "tasks")
+	unitDir := filepath.Join(tasksDir, "test-unit")
+	os.MkdirAll(unitDir, 0755)
+
+	os.WriteFile(filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md"), []byte(`---
+unit: test-unit
+depends_on: []
+---
+# Test Unit
+`), 0644)
+
+	os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(`---
+task: 1
+status: in_progress
+backpressure: "echo ok"
+depends_on: []
+---
+# Task 1
+`), 0644)
+
+	// Create a minimal config to avoid auto-detect
+	os.WriteFile(filepath.Join(tmpDir, ".choo.yaml"), []byte(`github:
+  owner: testowner
+  repo: testrepo
+`), 0644)
+
+	oldWd, _ := os.Getwd()
+	os.Chdir(tmpDir)
+	defer os.Chdir(oldWd)
+
 	app := New()
+	cmd := NewRunCmd(app)
 
-	opts := RunOptions{
-		Parallelism:  4,
-		TargetBranch: "main",
-		DryRun:       true, // Use dry-run to avoid actual execution
-		NoPR:         false,
-		Unit:         "testunit",
-		SkipReview:   false,
-		TasksDir:     "specs/tasks",
-	}
+	// Set args for dry-run
+	cmd.SetArgs([]string{tasksDir, "--dry-run"})
 
-	ctx := context.Background()
+	// Capture output
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
 
-	// Capture stdout
-	oldStdout := redirectStdout()
-	defer restoreStdout(oldStdout)
+	err := cmd.Execute()
 
-	err := app.RunOrchestrator(ctx, opts)
 	if err != nil {
-		t.Fatalf("RunOrchestrator failed: %v", err)
+		t.Fatalf("command execution failed: %v", err)
 	}
-
-	// The --unit flag should be reflected in the dry-run output
-	// Actual verification of single-unit mode execution is in task #9
-}
-
-// Helper to redirect stdout for testing
-func redirectStdout() *bytes.Buffer {
-	return new(bytes.Buffer)
-}
-
-// Helper to restore stdout
-func restoreStdout(buf *bytes.Buffer) {
-	// No-op for now, as we're not actually redirecting in these tests
 }
