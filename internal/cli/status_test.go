@@ -83,9 +83,25 @@ func TestShowStatus_WithUnits(t *testing.T) {
 		t.Fatalf("Failed to create unit directory: %v", err)
 	}
 
+	implPlan := filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md")
+	err = os.WriteFile(implPlan, []byte(`---
+unit: test-unit
+---
+# Implementation Plan
+`), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create implementation plan: %v", err)
+	}
+
 	// Create a mock task file
 	taskFile := filepath.Join(unitDir, "01-task.md")
-	err = os.WriteFile(taskFile, []byte("# Test Task"), 0644)
+	err = os.WriteFile(taskFile, []byte(`---
+task: 1
+status: complete
+backpressure: "true"
+---
+# Test Task
+`), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create task file: %v", err)
 	}
