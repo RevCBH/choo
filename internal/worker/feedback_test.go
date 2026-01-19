@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/RevCBH/choo/internal/github"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,15 +34,6 @@ func (m *feedbackEscalator) Escalate(ctx context.Context, e Escalation) error {
 		return m.escalateFunc(ctx, e)
 	}
 	return nil
-}
-
-type feedbackGitHubClient struct {
-	comments []github.PRComment
-	err      error
-}
-
-func (m *feedbackGitHubClient) GetPRComments(ctx context.Context, prNumber int) ([]github.PRComment, error) {
-	return m.comments, m.err
 }
 
 func TestHandleFeedback_RetriesOnFailure(t *testing.T) {

@@ -113,7 +113,8 @@ func (h *FeedbackHandler) HandleFeedback(ctx context.Context, prNumber int, prUR
 
 	if lastErr != nil {
 		if h.escalator != nil {
-			h.escalator.Escalate(ctx, Escalation{
+			// Best effort escalation - we still return the original error
+			_ = h.escalator.Escalate(ctx, Escalation{
 				Severity: SeverityBlocking,
 				Unit:     "",
 				Title:    "Failed to address PR feedback",
