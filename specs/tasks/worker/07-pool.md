@@ -1,6 +1,6 @@
 ---
 task: 7
-status: pending
+status: complete
 backpressure: "go test ./internal/worker/... -run Pool"
 depends_on: [6]
 ---
