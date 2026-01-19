@@ -513,46 +513,51 @@ execute_task() {
         local assertion
         assertion=$(get_frontmatter_field "$spec_file" "assertion")
 
-        # Verify backpressure and baseline checks pass
-        if run_backpressure "$backpressure" && run_baseline_checks; then
+        # Baseline checks must ALWAYS pass - no assertion can bypass these
+        if ! run_baseline_checks; then
+            error "Agent marked complete but baseline checks failed - reverting status"
+            store_failure_context "$spec_file" "$VALIDATION_OUTPUT"
+            set_frontmatter_field "$spec_file" "status" "in_progress"
+            return 1
+        fi
+
+        # Backpressure check - can be bypassed with agent assertion
+        if run_backpressure "$backpressure"; then
             success "Task #$task_num completed successfully"
             clear_failure_context "$spec_file"
             return 0
+        elif [[ "$assertion" == "backpressure_verified" ]]; then
+            warn "═══════════════════════════════════════════════════════════════"
+            warn "POTENTIAL ORCHESTRATOR BUG DETECTED"
+            warn "Agent asserted backpressure passes but orchestrator validation failed"
+            warn "Trusting agent assertion and marking task complete"
+            warn "Backpressure command: $backpressure"
+            warn "Validation output: $VALIDATION_OUTPUT"
+            warn "═══════════════════════════════════════════════════════════════"
+
+            # Log to a separate file for later review
+            local bug_log="$RALPH_LOG_DIR/potential_bugs.log"
+            {
+                echo "════════════════════════════════════════════════════════════════"
+                echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
+                echo "Task: $workset_name/#$task_num - $task_desc"
+                echo "Spec: $spec_file"
+                echo "Backpressure: $backpressure"
+                echo "Agent assertion: $assertion"
+                echo "Validation output:"
+                echo "$VALIDATION_OUTPUT"
+                echo "════════════════════════════════════════════════════════════════"
+                echo ""
+            } >> "$bug_log"
+
+            success "Task #$task_num accepted via agent assertion"
+            clear_failure_context "$spec_file"
+            return 0
         else
-            # Validation failed - check for agent assertion
-            if [[ "$assertion" == "backpressure_verified" ]]; then
-                warn "═══════════════════════════════════════════════════════════════"
-                warn "POTENTIAL ORCHESTRATOR BUG DETECTED"
-                warn "Agent asserted backpressure passes but orchestrator validation failed"
-                warn "Trusting agent assertion and marking task complete"
-                warn "Backpressure command: $backpressure"
-                warn "Validation output: $VALIDATION_OUTPUT"
-                warn "═══════════════════════════════════════════════════════════════"
-
-                # Log to a separate file for later review
-                local bug_log="$RALPH_LOG_DIR/potential_bugs.log"
-                {
-                    echo "════════════════════════════════════════════════════════════════"
-                    echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
-                    echo "Task: $workset_name/#$task_num - $task_desc"
-                    echo "Spec: $spec_file"
-                    echo "Backpressure: $backpressure"
-                    echo "Agent assertion: $assertion"
-                    echo "Validation output:"
-                    echo "$VALIDATION_OUTPUT"
-                    echo "════════════════════════════════════════════════════════════════"
-                    echo ""
-                } >> "$bug_log"
-
-                success "Task #$task_num accepted via agent assertion"
-                clear_failure_context "$spec_file"
-                return 0
-            else
-                error "Agent marked complete but validation failed - reverting status"
-                store_failure_context "$spec_file" "$VALIDATION_OUTPUT"
-                set_frontmatter_field "$spec_file" "status" "in_progress"
-                return 1
-            fi
+            error "Agent marked complete but backpressure failed - reverting status"
+            store_failure_context "$spec_file" "$VALIDATION_OUTPUT"
+            set_frontmatter_field "$spec_file" "status" "in_progress"
+            return 1
         fi
     else
         info "Task #$task_num status is '$new_status' (not complete yet)"
