@@ -55,7 +55,7 @@ func (a *App) ArchiveCompleted(opts ArchiveOptions) error {
 		return err
 	}
 
-	repoRoot := gitRepoRoot()
+	repoRoot := gitRepoRoot(opts.TasksDir)
 
 	archivedUnits := 0
 	archivedSpecs := 0
@@ -166,8 +166,10 @@ func indexSpecFiles(specsDir string) (map[string]string, error) {
 	return specs, nil
 }
 
-func gitRepoRoot() string {
-	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+func gitRepoRoot(fromPath string) string {
+	// Use git -C to run from the given path context, so this works
+	// even when invoked from outside the repo with an absolute path
+	cmd := exec.Command("git", "-C", fromPath, "rev-parse", "--show-toplevel")
 	output, err := cmd.Output()
 	if err != nil {
 		return ""
