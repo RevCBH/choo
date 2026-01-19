@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"context"
+	"fmt"
 	"time"
 
 	"github.com/anthropics/choo/internal/discovery"
@@ -150,4 +152,141 @@ func filterToUnit(units []*discovery.Unit, targetID string) []*discovery.Unit {
 		}
 	}
 	return result
+}
+
+// Run executes the orchestration loop until completion or cancellation
+// Returns Result with execution statistics
+func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
+	startTime := time.Now()
+
+	// 1. Discovery phase
+	units, err := discovery.Discover(o.cfg.TasksDir)
+	if err != nil {
+		return nil, fmt.Errorf("discovery failed: %w", err)
+	}
+
+	// Filter to single unit if specified
+	if o.cfg.SingleUnit != "" {
+		units = filterToUnit(units, o.cfg.SingleUnit)
+		if len(units) == 0 {
+			return nil, fmt.Errorf("unit %q not found", o.cfg.SingleUnit)
+		}
+	}
+
+	o.units = units
+	o.unitMap = buildUnitMap(units)
+
+	// Handle dry-run mode
+	if o.cfg.DryRun {
+		return o.dryRun(units)
+	}
+
+	// Emit orchestrator started event
+	o.bus.Emit(events.NewEvent(events.OrchStarted, "").WithPayload(map[string]any{
+		"unit_count":  len(units),
+		"parallelism": o.cfg.Parallelism,
+	}))
+
+	// 2. Build schedule
+	o.scheduler = scheduler.New(o.bus, o.cfg.Parallelism)
+	_, err = o.scheduler.Schedule(units)
+	if err != nil {
+		return nil, fmt.Errorf("scheduling failed: %w", err)
+	}
+
+	// 3. Initialize worker pool
+	workerCfg := worker.WorkerConfig{
+		RepoRoot:     o.cfg.RepoRoot,
+		TargetBranch: o.cfg.TargetBranch,
+		WorktreeBase: o.cfg.WorktreeBase,
+		NoPR:         o.cfg.NoPR,
+	}
+
+	workerDeps := worker.WorkerDeps{
+		Events: o.bus,
+		Git:    o.git,
+		GitHub: o.github,
+	}
+
+	o.pool = worker.NewPool(o.cfg.Parallelism, workerCfg, workerDeps)
+
+	// Subscribe to worker completion events
+	o.bus.Subscribe(o.handleEvent)
+
+	// 4. Main dispatch loop
+	for {
+		select {
+		case <-ctx.Done():
+			return o.buildResult(startTime, ctx.Err()), ctx.Err()
+		default:
+		}
+
+		// Attempt to dispatch next ready unit
+		result := o.scheduler.Dispatch()
+
+		switch result.Reason {
+		case scheduler.ReasonNone:
+			// Successfully dispatched, submit to pool
+			unit := o.unitMap[result.Unit]
+			if err := o.pool.Submit(unit); err != nil {
+				o.scheduler.Fail(result.Unit, err)
+			}
+
+		case scheduler.ReasonAllComplete:
+			// All units finished successfully
+			o.bus.Emit(events.NewEvent(events.OrchCompleted, ""))
+			return o.buildResult(startTime, nil), nil
+
+		case scheduler.ReasonAllBlocked:
+			// All remaining units are blocked by failures
+			err := fmt.Errorf("execution blocked: all remaining units depend on failed units")
+			o.bus.Emit(events.NewEvent(events.OrchFailed, "").WithError(err))
+			return o.buildResult(startTime, err), err
+
+		case scheduler.ReasonAtCapacity, scheduler.ReasonNoReady:
+			// Wait for workers to complete or dependencies to resolve
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+}
+
+// buildResult constructs the Result from current scheduler state
+func (o *Orchestrator) buildResult(startTime time.Time, err error) *Result {
+	result := &Result{
+		TotalUnits: len(o.units),
+		Duration:   time.Since(startTime),
+		Error:      err,
+	}
+
+	if o.scheduler == nil {
+		return result
+	}
+
+	// Count states from scheduler
+	states := o.scheduler.GetAllStates()
+	for _, state := range states {
+		switch state.Status {
+		case scheduler.StatusComplete:
+			result.CompletedUnits++
+		case scheduler.StatusFailed:
+			result.FailedUnits++
+		case scheduler.StatusBlocked:
+			result.BlockedUnits++
+		}
+	}
+
+	return result
+}
+
+// handleEvent is a stub for event handling (task #3)
+func (o *Orchestrator) handleEvent(evt events.Event) {
+	// Event handling implementation will be added in task #3
+}
+
+// dryRun is a stub for dry-run mode (task #5)
+func (o *Orchestrator) dryRun(units []*discovery.Unit) (*Result, error) {
+	// Dry-run implementation will be added in task #5
+	return &Result{
+		TotalUnits: len(units),
+	}, nil
 }
