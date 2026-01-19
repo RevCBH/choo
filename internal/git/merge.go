@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"sync"
@@ -125,13 +126,12 @@ func (m *MergeManager) FlushDeletes(ctx context.Context) error {
 	for _, branchName := range m.PendingDeletes {
 		// Delete remote branch
 		if err := deleteBranch(ctx, m.RepoRoot, branchName, true); err != nil {
-			// Log warning but continue with other deletions
-			// In production, this would use a proper logger
+			log.Printf("warning: failed to delete remote branch %s: %v", branchName, err)
 		}
 
 		// Delete local branch
 		if err := deleteBranch(ctx, m.RepoRoot, branchName, false); err != nil {
-			// Log warning but continue with other deletions
+			log.Printf("warning: failed to delete local branch %s: %v", branchName, err)
 		}
 	}
 
