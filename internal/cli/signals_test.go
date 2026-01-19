@@ -164,6 +164,7 @@ func TestSignalHandler_Wait(t *testing.T) {
 	defer handler.Stop()
 	handler.StartWithNotify(false)
 
+	var mu sync.Mutex
 	waitCompleted := false
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -171,13 +172,18 @@ func TestSignalHandler_Wait(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		handler.Wait()
+		mu.Lock()
 		waitCompleted = true
+		mu.Unlock()
 	}()
 
 	// Give Wait a moment to start blocking
 	time.Sleep(50 * time.Millisecond)
 
-	if waitCompleted {
+	mu.Lock()
+	completed := waitCompleted
+	mu.Unlock()
+	if completed {
 		t.Error("Wait should block until shutdown is triggered")
 	}
 
@@ -198,6 +204,8 @@ func TestSignalHandler_Wait(t *testing.T) {
 		t.Fatal("Wait did not unblock after shutdown was triggered")
 	}
 
+	mu.Lock()
+	defer mu.Unlock()
 	if !waitCompleted {
 		t.Error("Wait should have completed after shutdown")
 	}
