@@ -16,6 +16,10 @@ func NewTerminal() *Terminal {
 
 // Escalate writes the escalation to stderr
 func (t *Terminal) Escalate(ctx context.Context, e Escalation) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	prefix := ""
 	switch e.Severity {
 	case SeverityCritical, SeverityBlocking:

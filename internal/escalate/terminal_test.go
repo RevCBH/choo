@@ -55,6 +55,23 @@ func TestTerminal_Name(t *testing.T) {
 	}
 }
 
+func TestTerminal_RespectsContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	term := NewTerminal()
+	err := term.Escalate(ctx, Escalation{
+		Severity: SeverityInfo,
+		Unit:     "test",
+		Title:    "Test",
+		Message:  "Should not print",
+	})
+
+	if err != context.Canceled {
+		t.Errorf("expected context.Canceled error, got %v", err)
+	}
+}
+
 func TestTerminal_SeverityFormatting(t *testing.T) {
 	tests := []struct {
 		name           string
