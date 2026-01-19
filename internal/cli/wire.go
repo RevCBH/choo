@@ -31,6 +31,12 @@ func WireOrchestrator(cfg *config.Config) (*Orchestrator, error) {
 		return nil, fmt.Errorf("config cannot be nil")
 	}
 
+	// Get repository root
+	wd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get working directory: %w", err)
+	}
+
 	// Create event bus first (other components depend on it)
 	eventBus := events.NewBus(1000)
 
@@ -38,7 +44,7 @@ func WireOrchestrator(cfg *config.Config) (*Orchestrator, error) {
 	disc := &discovery.Discovery{}
 
 	// Create Git WorktreeManager
-	gitManager := git.NewWorktreeManager(cfg)
+	gitManager := git.NewWorktreeManager(wd, nil)
 
 	// Create GitHub PRClient
 	pollInterval, _ := cfg.ReviewPollIntervalDuration()
