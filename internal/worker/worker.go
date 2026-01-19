@@ -31,6 +31,10 @@ type Worker struct {
 	worktreePath string
 	branch       string
 	currentTask  *discovery.Task
+
+	// invokeClaudeWithOutput is the function that invokes Claude and captures output
+	// Can be overridden for testing
+	invokeClaudeWithOutput func(ctx context.Context, prompt string) (string, error)
 }
 
 // WorkerConfig holds worker configuration

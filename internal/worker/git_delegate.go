@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 
 	"github.com/anthropics/choo/internal/escalate"
 	"github.com/anthropics/choo/internal/events"
 )
+
+// prURLPattern matches GitHub PR URLs
+var prURLPattern = regexp.MustCompile(`https://github\.com/[^/]+/[^/]+/pull/\d+`)
 
 // getHeadRef returns the current HEAD commit SHA
 func (w *Worker) getHeadRef(ctx context.Context) (string, error) {
@@ -157,4 +161,77 @@ func (w *Worker) pushViaClaudeCode(ctx context.Context) error {
 func (w *Worker) invokeClaude(ctx context.Context, prompt string) error {
 	taskPrompt := TaskPrompt{Content: prompt}
 	return w.invokeClaudeForTask(ctx, taskPrompt)
+}
+
+// invokeClaudeWithOutputImpl is the default implementation
+func (w *Worker) invokeClaudeWithOutputImpl(ctx context.Context, prompt string) (string, error) {
+	cmd := exec.CommandContext(ctx, "claude",
+		"--dangerously-skip-permissions",
+		"-p", prompt,
+	)
+	cmd.Dir = w.worktreePath
+
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	return string(out), nil
+}
+
+// extractPRURL extracts a GitHub PR URL from Claude's output
+func extractPRURL(output string) string {
+	match := prURLPattern.FindString(output)
+	return match
+}
+
+// createPRViaClaudeCode invokes Claude to create the PR
+func (w *Worker) createPRViaClaudeCode(ctx context.Context) (string, error) {
+	prompt := BuildPRPrompt(w.branch, w.config.TargetBranch, w.unit.ID)
+
+	var prURL string
+
+	result := RetryWithBackoff(ctx, DefaultRetryConfig, func(ctx context.Context) error {
+		var output string
+		var err error
+
+		// Use the mock function if set, otherwise use default implementation
+		if w.invokeClaudeWithOutput != nil {
+			output, err = w.invokeClaudeWithOutput(ctx, prompt)
+		} else {
+			output, err = w.invokeClaudeWithOutputImpl(ctx, prompt)
+		}
+
+		if err != nil {
+			return err
+		}
+
+		// Extract PR URL from output
+		url := extractPRURL(output)
+		if url == "" {
+			return fmt.Errorf("could not find PR URL in claude output")
+		}
+
+		prURL = url
+		return nil
+	})
+
+	if !result.Success {
+		if w.escalator != nil {
+			w.escalator.Escalate(ctx, escalate.Escalation{
+				Severity: escalate.SeverityBlocking,
+				Unit:     w.unit.ID,
+				Title:    "Failed to create PR",
+				Message:  fmt.Sprintf("Claude could not create PR after %d attempts", result.Attempts),
+				Context: map[string]string{
+					"branch": w.branch,
+					"target": w.config.TargetBranch,
+					"error":  result.LastErr.Error(),
+				},
+			})
+		}
+		return "", result.LastErr
+	}
+
+	return prURL, nil
 }

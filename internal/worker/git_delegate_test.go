@@ -696,3 +696,190 @@ func (m *mockPushInvoker) pushViaClaudeCode(ctx context.Context) error {
 
 	return nil
 }
+
+func TestExtractPRURL_ValidURL(t *testing.T) {
+	output := `Creating pull request...
+https://github.com/anthropics/choo/pull/42
+Done!`
+
+	url := extractPRURL(output)
+	if url != "https://github.com/anthropics/choo/pull/42" {
+		t.Errorf("expected PR URL, got %q", url)
+	}
+}
+
+func TestExtractPRURL_NoURL(t *testing.T) {
+	output := "Error: could not create PR"
+
+	url := extractPRURL(output)
+	if url != "" {
+		t.Errorf("expected empty string, got %q", url)
+	}
+}
+
+func TestExtractPRURL_MultipleURLs(t *testing.T) {
+	// Should return the first match
+	output := `https://github.com/anthropics/choo/pull/41
+https://github.com/anthropics/choo/pull/42`
+
+	url := extractPRURL(output)
+	if url != "https://github.com/anthropics/choo/pull/41" {
+		t.Errorf("expected first PR URL, got %q", url)
+	}
+}
+
+func TestExtractPRURL_URLInMiddleOfText(t *testing.T) {
+	output := `Pull request created successfully at https://github.com/owner/repo/pull/123 - please review`
+
+	url := extractPRURL(output)
+	if url != "https://github.com/owner/repo/pull/123" {
+		t.Errorf("expected PR URL from middle of text, got %q", url)
+	}
+}
+
+func TestExtractPRURL_DifferentOwnerRepo(t *testing.T) {
+	output := "https://github.com/my-org/my-project/pull/999"
+
+	url := extractPRURL(output)
+	if url != "https://github.com/my-org/my-project/pull/999" {
+		t.Errorf("expected PR URL with different org, got %q", url)
+	}
+}
+
+func TestCreatePRViaClaudeCode_Success(t *testing.T) {
+	dir, cleanup := setupTestGitRepo(t)
+	defer cleanup()
+
+	w := &Worker{
+		worktreePath: dir,
+		branch:       "feature/test",
+		unit:         &discovery.Unit{ID: "test-unit"},
+		config:       WorkerConfig{TargetBranch: "main"},
+		escalator:    &mockEscalator{},
+	}
+
+	// Mock invokeClaudeWithOutput to return PR URL
+	w.invokeClaudeWithOutput = func(ctx context.Context, prompt string) (string, error) {
+		return "Created PR: https://github.com/test/repo/pull/42", nil
+	}
+
+	url, err := w.createPRViaClaudeCode(context.Background())
+	if err != nil {
+		t.Errorf("expected success, got error: %v", err)
+	}
+	if url != "https://github.com/test/repo/pull/42" {
+		t.Errorf("expected PR URL, got %q", url)
+	}
+}
+
+func TestCreatePRViaClaudeCode_EscalatesOnExhaustion(t *testing.T) {
+	dir, cleanup := setupTestGitRepo(t)
+	defer cleanup()
+
+	esc := &mockEscalator{}
+	w := &Worker{
+		worktreePath: dir,
+		branch:       "feature/test",
+		unit:         &discovery.Unit{ID: "test-unit"},
+		config:       WorkerConfig{TargetBranch: "main"},
+		escalator:    esc,
+	}
+
+	// Mock invokeClaudeWithOutput to always fail
+	w.invokeClaudeWithOutput = func(ctx context.Context, prompt string) (string, error) {
+		return "", errors.New("gh CLI error")
+	}
+
+	url, err := w.createPRViaClaudeCode(context.Background())
+	if err == nil {
+		t.Error("expected error after exhausting retries")
+	}
+	if url != "" {
+		t.Errorf("expected empty URL on error, got %q", url)
+	}
+
+	if len(esc.escalations) == 0 {
+		t.Error("expected escalation to be called")
+	}
+
+	if len(esc.escalations) > 0 {
+		e := esc.escalations[0]
+		if e.Severity != escalate.SeverityBlocking {
+			t.Errorf("expected SeverityBlocking, got %v", e.Severity)
+		}
+		if e.Title != "Failed to create PR" {
+			t.Errorf("unexpected title: %s", e.Title)
+		}
+		if e.Context["branch"] != "feature/test" {
+			t.Errorf("expected branch in context: %v", e.Context)
+		}
+		if e.Context["target"] != "main" {
+			t.Errorf("expected target in context: %v", e.Context)
+		}
+	}
+}
+
+func TestCreatePRViaClaudeCode_FailsWithoutURL(t *testing.T) {
+	dir, cleanup := setupTestGitRepo(t)
+	defer cleanup()
+
+	esc := &mockEscalator{}
+	w := &Worker{
+		worktreePath: dir,
+		branch:       "feature/test",
+		unit:         &discovery.Unit{ID: "test-unit"},
+		config:       WorkerConfig{TargetBranch: "main"},
+		escalator:    esc,
+	}
+
+	// Mock invokeClaudeWithOutput to return no URL
+	w.invokeClaudeWithOutput = func(ctx context.Context, prompt string) (string, error) {
+		return "PR creation completed but no URL printed", nil
+	}
+
+	url, err := w.createPRViaClaudeCode(context.Background())
+	if err == nil {
+		t.Error("expected error when no URL in output")
+	}
+	if url != "" {
+		t.Errorf("expected empty URL, got %q", url)
+	}
+
+	if !strings.Contains(err.Error(), "could not find PR URL") {
+		t.Errorf("error should mention missing URL: %v", err)
+	}
+}
+
+func TestCreatePRViaClaudeCode_RetriesOnFailure(t *testing.T) {
+	dir, cleanup := setupTestGitRepo(t)
+	defer cleanup()
+
+	callCount := 0
+	w := &Worker{
+		worktreePath: dir,
+		branch:       "feature/test",
+		unit:         &discovery.Unit{ID: "test-unit"},
+		config:       WorkerConfig{TargetBranch: "main"},
+		escalator:    &mockEscalator{},
+	}
+
+	// Mock to fail twice then succeed
+	w.invokeClaudeWithOutput = func(ctx context.Context, prompt string) (string, error) {
+		callCount++
+		if callCount < 3 {
+			return "", errors.New("transient error")
+		}
+		return "https://github.com/test/repo/pull/42", nil
+	}
+
+	url, err := w.createPRViaClaudeCode(context.Background())
+	if err != nil {
+		t.Errorf("expected success after retries, got error: %v", err)
+	}
+	if url != "https://github.com/test/repo/pull/42" {
+		t.Errorf("expected PR URL, got %q", url)
+	}
+	if callCount != 3 {
+		t.Errorf("expected 3 calls, got %d", callCount)
+	}
+}
