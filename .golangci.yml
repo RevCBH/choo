@@ -1,0 +1,32 @@
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+linters-settings:
+  errcheck:
+    # Don't check for unchecked errors in test files for common test patterns
+    exclude-functions:
+      - (github.com/anthropics/choo/internal/scheduler.Scheduler).Transition
+      - (github.com/anthropics/choo/internal/worker.Pool).Submit
+      - (github.com/anthropics/choo/internal/worker.Pool).Wait
+      - (github.com/anthropics/choo/internal/git.WorktreeManager).RemoveWorktree
+      - (*os/exec.Cmd).Run
+      - (*encoding/json.Encoder).Encode
+      - (*encoding/json.Decoder).Decode
+      - (io.Writer).Write
+      - os.MkdirAll
+      - os.WriteFile
+      - os.Chdir
+      - (*bytes.Buffer).ReadFrom
+
+issues:
+  # Exclude test files from some checks
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck

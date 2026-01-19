@@ -205,7 +205,7 @@ func ValidateTaskDependencies(tasks []*Task) *ValidationResult {
 					Task:    &taskNum,
 					File:    task.FilePath,
 					Field:   "depends_on",
-					Message: fmt.Sprintf("task cannot depend on itself"),
+					Message: "task cannot depend on itself",
 				})
 				continue
 			}

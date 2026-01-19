@@ -18,9 +18,9 @@ func setupTestRepoWithRemote(t *testing.T) (repoPath string, remotePath string) 
 
 	tmpDir := t.TempDir()
 
-	// Create bare remote repository
+	// Create bare remote repository with main as default branch
 	remotePath = filepath.Join(tmpDir, "remote.git")
-	cmd := exec.Command("git", "init", "--bare", remotePath)
+	cmd := exec.Command("git", "init", "--bare", "--initial-branch=main", remotePath)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to init bare remote: %v", err)
 	}
@@ -31,6 +31,12 @@ func setupTestRepoWithRemote(t *testing.T) (repoPath string, remotePath string) 
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to clone repo: %v", err)
 	}
+
+	// Ensure we're on main branch (in case git defaults to something else)
+	cmd = exec.Command("git", "checkout", "-b", "main")
+	cmd.Dir = repoPath
+	// Ignore error - branch may already exist if git defaulted to main
+	_ = cmd.Run()
 
 	// Configure git user
 	cmd = exec.Command("git", "config", "user.name", "Test User")
@@ -43,6 +49,13 @@ func setupTestRepoWithRemote(t *testing.T) (repoPath string, remotePath string) 
 	cmd.Dir = repoPath
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("failed to config git email: %v", err)
+	}
+
+	// Set editor to true to avoid "Terminal is dumb, but EDITOR unset" in CI
+	cmd = exec.Command("git", "config", "core.editor", "true")
+	cmd.Dir = repoPath
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("failed to config git editor: %v", err)
 	}
 
 	// Create initial commit on main

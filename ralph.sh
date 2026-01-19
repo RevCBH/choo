@@ -76,10 +76,12 @@ die() {
 # YAML Frontmatter Parsing
 # ============================================================================
 
-# Extract frontmatter from a markdown file (content between --- markers)
+# Extract frontmatter from a markdown file (content between first --- markers only)
 get_frontmatter() {
     local file="$1"
-    sed -n '/^---$/,/^---$/p' "$file" | sed '1d;$d'
+    # Use awk to extract only the FIRST frontmatter block
+    # This avoids matching --- markers in code examples within the file
+    awk '/^---$/ { if (++count == 2) exit; next } count == 1' "$file"
 }
 
 # Get a specific field from frontmatter

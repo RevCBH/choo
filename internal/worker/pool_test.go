@@ -37,9 +37,13 @@ func setupGitRepo(t *testing.T) (repoDir string, cleanup func()) {
 		t.Fatalf("failed to init git repo: %v", err)
 	}
 
-	// Configure git
-	exec.Command("git", "config", "user.email", "test@test.com").Run()
-	exec.Command("git", "config", "user.name", "Test User").Run()
+	// Configure git in the test repo
+	cmd = exec.Command("git", "config", "user.email", "test@test.com")
+	cmd.Dir = repoDir
+	cmd.Run()
+	cmd = exec.Command("git", "config", "user.name", "Test User")
+	cmd.Dir = repoDir
+	cmd.Run()
 
 	// Create initial commit
 	readmePath := filepath.Join(repoDir, "README.md")

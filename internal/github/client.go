@@ -23,6 +23,7 @@ type PRClient struct {
 	pollInterval  time.Duration
 	reviewTimeout time.Duration
 	token         string
+	baseURL       string // Base URL for GitHub API, defaults to https://api.github.com
 	// events *events.Bus - added later when events package exists
 }
 
@@ -73,6 +74,7 @@ func NewPRClient(cfg PRClientConfig) (*PRClient, error) {
 		pollInterval:  pollInterval,
 		reviewTimeout: reviewTimeout,
 		token:         token,
+		baseURL:       "https://api.github.com",
 	}, nil
 }
 

@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"context"
-
 	"github.com/spf13/cobra"
 )
 
@@ -18,12 +16,8 @@ type App struct {
 	// Root command
 	rootCmd *cobra.Command
 
-	// Configuration (initialized lazily)
-	config interface{} // Placeholder for *config.Config
-
 	// Runtime state
 	verbose  bool
-	cancel   context.CancelFunc
 	shutdown chan struct{}
 
 	// Version information

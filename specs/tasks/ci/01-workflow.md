@@ -1,6 +1,6 @@
 ---
 task: 1
-status: pending
+status: complete
 backpressure: "test -f .github/workflows/ci.yml && head -1 .github/workflows/ci.yml | grep -q 'name:'"
 depends_on: []
 ---
