@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -427,6 +428,7 @@ func TestCommitViaClaudeCode_VerifiesCommit(t *testing.T) {
 // captureEventBus wraps an events.Bus and captures emitted events
 type captureEventBus struct {
 	*events.Bus
+	mu      sync.Mutex
 	emitted []events.Event
 }
 
@@ -437,9 +439,20 @@ func newCaptureEventBus() *captureEventBus {
 		emitted: make([]events.Event, 0),
 	}
 	bus.Subscribe(func(e events.Event) {
+		capture.mu.Lock()
 		capture.emitted = append(capture.emitted, e)
+		capture.mu.Unlock()
 	})
 	return capture
+}
+
+// getEmitted returns a copy of captured events (thread-safe)
+func (c *captureEventBus) getEmitted() []events.Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	result := make([]events.Event, len(c.emitted))
+	copy(result, c.emitted)
+	return result
 }
 
 func TestPushViaClaudeCode_Success(t *testing.T) {
@@ -548,9 +561,10 @@ func TestPushViaClaudeCode_EmitsEvent(t *testing.T) {
 	// Wait a moment for event bus to process
 	time.Sleep(100 * time.Millisecond)
 
-	// Find the BranchPushed event in the emitted events
+	// Find the BranchPushed event in the emitted events (use thread-safe getter)
+	emitted := eventBus.getEmitted()
 	var branchPushedEvent *events.Event
-	for _, e := range eventBus.emitted {
+	for _, e := range emitted {
 		if e.Type == events.BranchPushed {
 			branchPushedEvent = &e
 			break
@@ -558,7 +572,7 @@ func TestPushViaClaudeCode_EmitsEvent(t *testing.T) {
 	}
 
 	if branchPushedEvent == nil {
-		t.Errorf("expected BranchPushed event to be emitted, got events: %v", eventBus.emitted)
+		t.Errorf("expected BranchPushed event to be emitted, got events: %v", emitted)
 		return
 	}
 
