@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/anthropics/choo/internal/claude"
 	"github.com/anthropics/choo/internal/discovery"
 	"github.com/anthropics/choo/internal/events"
 	"github.com/anthropics/choo/internal/git"
@@ -18,7 +19,7 @@ type Pool struct {
 	events     *events.Bus
 	git        *git.WorktreeManager
 	github     *github.PRClient
-	claude     *ClaudeClient
+	claude     claude.Client
 	workers    map[string]*Worker
 	mu         sync.Mutex
 	wg         sync.WaitGroup

@@ -3,7 +3,9 @@ package cli
 import (
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/anthropics/choo/internal/claude"
 	"github.com/anthropics/choo/internal/config"
 	"github.com/anthropics/choo/internal/discovery"
 	"github.com/anthropics/choo/internal/events"
@@ -62,8 +64,31 @@ func WireOrchestrator(cfg *config.Config) (*Orchestrator, error) {
 	// Create Scheduler (depends on event bus)
 	sched := scheduler.New(eventBus, cfg.Parallelism)
 
-	// Create Worker Pool (depends on event bus and git manager)
-	workers := worker.New(cfg.Parallelism, eventBus, gitManager)
+	// Create Claude client
+	claudeClient := claude.NewCLIClient()
+
+	// Create Worker Config
+	workerCfg := worker.WorkerConfig{
+		RepoRoot:            wd,
+		TargetBranch:        cfg.TargetBranch,
+		WorktreeBase:        cfg.Worktree.BasePath,
+		MaxClaudeRetries:    3,
+		MaxBaselineRetries:  3,
+		BackpressureTimeout: 5 * time.Minute,
+		BaselineTimeout:     10 * time.Minute,
+		NoPR:                false,
+	}
+
+	// Create Worker Dependencies
+	workerDeps := worker.WorkerDeps{
+		Events: eventBus,
+		Git:    gitManager,
+		GitHub: ghClient,
+		Claude: claudeClient,
+	}
+
+	// Create Worker Pool
+	workers := worker.NewPool(cfg.Parallelism, workerCfg, workerDeps)
 
 	return &Orchestrator{
 		Config:    cfg,

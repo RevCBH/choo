@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
-	"strconv"
+	"time"
 
+	"github.com/anthropics/choo/internal/claude"
 	"github.com/anthropics/choo/internal/discovery"
 	"github.com/anthropics/choo/internal/events"
 )
@@ -71,28 +72,7 @@ func (w *Worker) findReadyTasks() []*discovery.Task {
 // invokeClaudeForTask runs Claude CLI as subprocess with the task prompt
 // CRITICAL: Uses subprocess, NEVER the Claude API directly
 func (w *Worker) invokeClaudeForTask(ctx context.Context, prompt TaskPrompt) error {
-	// 1. Build args: --dangerously-skip-permissions, -p prompt.Content
-	args := []string{
-		"--dangerously-skip-permissions",
-		"-p", prompt.Content,
-	}
-
-	// 2. Optionally add --max-turns if configured
-	if w.config.MaxClaudeRetries > 0 {
-		args = append(args, "--max-turns", strconv.Itoa(w.config.MaxClaudeRetries))
-	}
-
-	// 3. Create exec.CommandContext for "claude" binary
-	cmd := exec.CommandContext(ctx, "claude", args...)
-
-	// 4. Set cmd.Dir to worktree path
-	cmd.Dir = w.worktreePath
-
-	// 5. Connect stdout/stderr to logger (for now, inherit from parent)
-	cmd.Stdout = nil // Will inherit
-	cmd.Stderr = nil // Will inherit
-
-	// 6. Emit TaskClaudeInvoke event
+	// 1. Emit TaskClaudeInvoke event
 	if w.events != nil {
 		evt := events.NewEvent(events.TaskClaudeInvoke, w.unit.ID)
 		if w.currentTask != nil {
@@ -101,10 +81,21 @@ func (w *Worker) invokeClaudeForTask(ctx context.Context, prompt TaskPrompt) err
 		w.events.Emit(evt)
 	}
 
-	// 7. Run command
-	err := cmd.Run()
+	// 2. Build execute options
+	opts := claude.ExecuteOptions{
+		Prompt:                     prompt.Content,
+		WorkDir:                    w.worktreePath,
+		MaxTurns:                   w.config.MaxClaudeRetries,
+		DangerouslySkipPermissions: true,
+		Timeout:                    10 * time.Minute, // Default timeout
+		Stdout:                     nil,              // Inherit from parent
+		Stderr:                     nil,              // Inherit from parent
+	}
 
-	// 8. Emit TaskClaudeDone event
+	// 3. Execute via Claude client
+	result, err := w.claude.Execute(ctx, opts)
+
+	// 4. Emit TaskClaudeDone event
 	if w.events != nil {
 		evt := events.NewEvent(events.TaskClaudeDone, w.unit.ID)
 		if w.currentTask != nil {
@@ -116,8 +107,15 @@ func (w *Worker) invokeClaudeForTask(ctx context.Context, prompt TaskPrompt) err
 		w.events.Emit(evt)
 	}
 
-	// 9. Return error if command failed
-	return err
+	// 5. Return error if execution failed
+	if err != nil {
+		return err
+	}
+	if result != nil && !result.Success {
+		return fmt.Errorf("claude execution failed with exit code %d", result.ExitCode)
+	}
+
+	return nil
 }
 
 // verifyTaskComplete re-parses task file to check if status was updated
