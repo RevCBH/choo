@@ -59,8 +59,8 @@ func WireOrchestrator(cfg *config.Config) (*Orchestrator, error) {
 		return nil, fmt.Errorf("failed to create GitHub client: %w", err)
 	}
 
-	// Create Scheduler (depends on event bus and discovery)
-	sched := scheduler.New(cfg, eventBus, disc)
+	// Create Scheduler (depends on event bus)
+	sched := scheduler.New(eventBus, cfg.Parallelism)
 
 	// Create Worker Pool (depends on event bus and git manager)
 	workers := worker.New(cfg.Parallelism, eventBus, gitManager)

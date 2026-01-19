@@ -1,6 +1,6 @@
 ---
 task: 5
-status: pending
+status: complete
 backpressure: "go test ./internal/scheduler/... -run TestDispatch"
 depends_on: [4]
 ---

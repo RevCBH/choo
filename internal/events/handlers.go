@@ -91,6 +91,8 @@ func StateHandler(cfg StateConfig) Handler {
 			unit.SetStatus("complete")
 		case UnitFailed:
 			unit.SetStatus("failed")
+		case UnitBlocked:
+			unit.SetStatus("blocked")
 		case PRCreated:
 			if e.PR != nil {
 				unit.SetPRNumber(*e.PR)
