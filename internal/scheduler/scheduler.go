@@ -222,4 +222,7 @@ func (s *Scheduler) evaluateReady(unitID string) {
 	// All dependencies satisfied, move to ready
 	state.Status = StatusReady
 	s.ready.Push(unitID)
+
+	// Emit UnitQueued event
+	s.events.Emit(events.NewEvent(events.UnitQueued, unitID))
 }

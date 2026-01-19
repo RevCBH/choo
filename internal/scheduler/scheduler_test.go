@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"testing"
+	"time"
 
 	"github.com/anthropics/choo/internal/discovery"
 	"github.com/anthropics/choo/internal/events"
@@ -212,13 +213,22 @@ func TestScheduler_Transition_Valid(t *testing.T) {
 		t.Fatalf("Schedule() error = %v", err)
 	}
 
-	// Drain any events from scheduling
+	// Drain any events from scheduling (with timeout to ensure async events are delivered)
+	timeout := time.After(50 * time.Millisecond)
 drainLoop:
 	for {
 		select {
 		case <-eventChan:
-		default:
+		case <-timeout:
 			break drainLoop
+		default:
+			// Small yield to let event loop process
+			time.Sleep(1 * time.Millisecond)
+			select {
+			case <-eventChan:
+			default:
+				break drainLoop
+			}
 		}
 	}
 

@@ -46,6 +46,7 @@ const (
 	UnitStarted   EventType = "unit.started"
 	UnitCompleted EventType = "unit.completed"
 	UnitFailed    EventType = "unit.failed"
+	UnitBlocked   EventType = "unit.blocked"
 )
 
 // Task lifecycle events
