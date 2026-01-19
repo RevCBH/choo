@@ -204,3 +204,42 @@ func discoverUnitDirs(tasksDir string) ([]string, error) {
 
 	return unitDirs, nil
 }
+
+// ParseTaskFile parses a single task file and returns the task
+func ParseTaskFile(taskPath string) (*Task, error) {
+	taskContent, err := os.ReadFile(taskPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading %s: %w", taskPath, err)
+	}
+
+	frontmatter, body, err := ParseFrontmatter(taskContent)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing frontmatter in %s: %w", taskPath, err)
+	}
+
+	taskFrontmatter, err := ParseTaskFrontmatter(frontmatter)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing task frontmatter in %s: %w", taskPath, err)
+	}
+
+	// Parse task status
+	status, err := parseTaskStatus(taskFrontmatter.Status)
+	if err != nil {
+		return nil, fmt.Errorf("error in %s: %w", taskPath, err)
+	}
+
+	// Extract title
+	title := extractTitle(body)
+
+	task := &Task{
+		Number:       taskFrontmatter.Task,
+		Status:       status,
+		Backpressure: taskFrontmatter.Backpressure,
+		DependsOn:    taskFrontmatter.DependsOn,
+		FilePath:     taskPath,
+		Title:        title,
+		Content:      string(taskContent),
+	}
+
+	return task, nil
+}
