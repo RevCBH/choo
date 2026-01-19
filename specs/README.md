@@ -65,3 +65,36 @@ These specs close the gaps between v0.1 components and a fully operational self-
 1. **ESCALATION** + **CI** (parallel, no dependencies)
 2. **ORCHESTRATOR** + **CLAUDE-GIT** (parallel, depend on ESCALATION)
 3. **REVIEW-POLLING** + **CONFLICT-RESOLUTION** (parallel, depend on CLAUDE-GIT)
+
+## Monitoring Specs (v0.3)
+
+| Spec | Description | Dependencies |
+|------|-------------|--------------|
+| **[WEB](WEB.md)** | Real-time web dashboard daemon for orchestrator monitoring via HTTP/SSE | EVENTS, CLI |
+| **[WEB-PUSHER](WEB-PUSHER.md)** | Event pusher that connects `choo run` to web UI via Unix socket | WEB, EVENTS |
+| **[WEB-FRONTEND](WEB-FRONTEND.md)** | Browser UI with D3.js dependency graph visualization | WEB |
+
+### Dependency Graph
+
+```
+   ┌────────┐   ┌────────┐
+   │ EVENTS │   │  CLI   │
+   └───┬────┘   └───┬────┘
+       │            │
+       └──────┬─────┘
+              ▼
+          ┌───────┐
+          │  WEB  │
+          └───┬───┘
+              │
+       ┌──────┴──────┐
+       ▼             ▼
+┌────────────┐ ┌─────────────┐
+│ WEB-PUSHER │ │ WEB-FRONTEND│
+└────────────┘ └─────────────┘
+```
+
+### Implementation Order
+
+1. **WEB** (depends on v0.1 EVENTS and CLI)
+2. **WEB-PUSHER** + **WEB-FRONTEND** (parallel, both depend on WEB)

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/RevCBH/choo/internal/discovery"
@@ -46,7 +45,7 @@ func NewStatusCmd(app *App) *cobra.Command {
 // ShowStatus displays the current orchestration status
 func (a *App) ShowStatus(opts StatusOptions) error {
 	// Load discovery from tasks directory
-	units, err := loadDiscoveryFromDir(opts.TasksDir)
+	units, err := discovery.Discover(opts.TasksDir)
 	if err != nil {
 		return fmt.Errorf("failed to load discovery: %w", err)
 	}
@@ -157,64 +156,6 @@ func outputJSON(w io.Writer, units []UnitDisplay) error {
 	encoder := json.NewEncoder(w)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(units)
-}
-
-// loadDiscoveryFromDir loads units from a tasks directory
-func loadDiscoveryFromDir(tasksDir string) ([]*discovery.Unit, error) {
-	// For now, return empty slice for missing/empty directories
-	// This will be enhanced when discovery package is fully implemented
-	_, err := os.Stat(tasksDir)
-	if os.IsNotExist(err) {
-		return []*discovery.Unit{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-
-	// Read directory entries
-	entries, err := os.ReadDir(tasksDir)
-	if err != nil {
-		return nil, err
-	}
-
-	var units []*discovery.Unit
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		// Create a basic unit structure
-		unitPath := filepath.Join(tasksDir, entry.Name())
-		unit := &discovery.Unit{
-			ID:     entry.Name(),
-			Path:   unitPath,
-			Status: discovery.UnitStatusPending,
-			Tasks:  []*discovery.Task{},
-		}
-
-		// Try to load tasks from the unit directory
-		taskFiles, err := os.ReadDir(unitPath)
-		if err != nil {
-			continue
-		}
-
-		for _, taskFile := range taskFiles {
-			if taskFile.IsDir() || !strings.HasSuffix(taskFile.Name(), ".md") {
-				continue
-			}
-
-			// Create basic task
-			task := &discovery.Task{
-				FilePath: taskFile.Name(),
-				Status:   discovery.TaskStatusPending,
-			}
-			unit.Tasks = append(unit.Tasks, task)
-		}
-
-		units = append(units, unit)
-	}
-
-	return units, nil
 }
 
 // convertToUnitDisplays converts discovery units to display units
