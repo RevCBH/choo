@@ -100,21 +100,18 @@ func New(cfg Config, deps Dependencies) *Orchestrator {
 }
 
 // Close releases all resources held by the orchestrator
+// Note: Does not close the event bus as it is owned by the caller
 func (o *Orchestrator) Close() error {
 	// Stop worker pool if initialized
 	if o.pool != nil {
 		o.pool.Stop()
 	}
 
-	// Close event bus
-	if o.bus != nil {
-		o.bus.Close()
-	}
-
 	return nil
 }
 
 // shutdown gracefully stops the orchestrator with timeout
+// Note: Does not close the event bus as it is owned by the caller
 func (o *Orchestrator) shutdown(ctx context.Context) error {
 	// Create shutdown context with timeout
 	shutdownCtx, cancel := context.WithTimeout(ctx, o.cfg.ShutdownTimeout)
@@ -130,11 +127,6 @@ func (o *Orchestrator) shutdown(ctx context.Context) error {
 		if err := o.pool.Shutdown(shutdownCtx); err != nil {
 			errs = append(errs, fmt.Errorf("worker shutdown: %w", err))
 		}
-	}
-
-	// Close event bus (drains pending events)
-	if o.bus != nil {
-		o.bus.Close()
 	}
 
 	if len(errs) > 0 {

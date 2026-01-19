@@ -124,17 +124,26 @@ func (a *App) RunOrchestrator(ctx context.Context, opts RunOptions) error {
 	// Create Git WorktreeManager
 	gitManager := git.NewWorktreeManager(wd, nil)
 
-	// Create GitHub PRClient
-	pollInterval, _ := cfg.ReviewPollIntervalDuration()
-	reviewTimeout, _ := cfg.ReviewTimeoutDuration()
-	ghClient, err := github.NewPRClient(github.PRClientConfig{
-		Owner:         cfg.GitHub.Owner,
-		Repo:          cfg.GitHub.Repo,
-		PollInterval:  pollInterval,
-		ReviewTimeout: reviewTimeout,
-	})
-	if err != nil {
-		return fmt.Errorf("failed to create GitHub client: %w", err)
+	// Create GitHub PRClient (only if not dry-run, as it requires GitHub config)
+	var ghClient *github.PRClient
+	if !opts.DryRun {
+		pollInterval, err := cfg.ReviewPollIntervalDuration()
+		if err != nil {
+			return fmt.Errorf("invalid review poll interval: %w", err)
+		}
+		reviewTimeout, err := cfg.ReviewTimeoutDuration()
+		if err != nil {
+			return fmt.Errorf("invalid review timeout: %w", err)
+		}
+		ghClient, err = github.NewPRClient(github.PRClientConfig{
+			Owner:         cfg.GitHub.Owner,
+			Repo:          cfg.GitHub.Repo,
+			PollInterval:  pollInterval,
+			ReviewTimeout: reviewTimeout,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to create GitHub client: %w", err)
+		}
 	}
 
 	// Create escalator (terminal by default)
