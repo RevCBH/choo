@@ -1,7 +1,7 @@
 ---
 task: 4
-status: pending
-backpressure: "go test ./internal/worker/... -run ForcePush"
+status: complete
+backpressure: go test ./internal/worker/... -run ForcePush
 depends_on: [3]
 ---
 

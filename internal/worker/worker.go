@@ -32,6 +32,9 @@ type Worker struct {
 	branch       string
 	currentTask  *discovery.Task
 
+	// prNumber is the PR number after creation
+	prNumber int
+
 	// invokeClaudeWithOutput is the function that invokes Claude and captures output
 	// Can be overridden for testing
 	invokeClaudeWithOutput func(ctx context.Context, prompt string) (string, error)

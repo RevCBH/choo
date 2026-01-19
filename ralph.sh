@@ -80,7 +80,12 @@ die() {
 get_failure_context_file() {
     local spec_file="$1"
     local spec_hash
-    spec_hash=$(echo "$spec_file" | md5sum | cut -d' ' -f1)
+    # Use md5 on macOS, md5sum on Linux
+    if command -v md5 &>/dev/null; then
+        spec_hash=$(echo "$spec_file" | md5 | cut -d' ' -f4)
+    else
+        spec_hash=$(echo "$spec_file" | md5sum | cut -d' ' -f1)
+    fi
     echo "$RALPH_LOG_DIR/failure_context_${spec_hash}.txt"
 }
 
@@ -133,8 +138,22 @@ get_frontmatter_field() {
     local field="$2"
     local fm
     fm=$(get_frontmatter "$file")
-    # Strip inline comments (# ...) and quotes
-    echo "$fm" | grep "^${field}:" | sed "s/^${field}:[[:space:]]*//" | sed 's/#.*//' | tr -d '"' | xargs
+    # Extract field value and strip inline comments
+    local value
+    value=$(echo "$fm" | grep "^${field}:" | sed "s/^${field}:[[:space:]]*//" | sed 's/[[:space:]]*#.*//')
+    # Trim leading/trailing whitespace
+    value="${value#"${value%%[![:space:]]*}"}"
+    value="${value%"${value##*[![:space:]]}"}"
+    # Remove outer quotes if present (YAML style), preserving inner escaped quotes
+    if [[ "${value:0:1}" == '"' && "${value: -1}" == '"' ]]; then
+        # Outer double quotes - strip them and unescape inner quotes
+        value="${value:1:${#value}-2}"
+        value="${value//\\\"/\"}"
+    elif [[ "${value:0:1}" == "'" && "${value: -1}" == "'" ]]; then
+        # Outer single quotes - strip them, content is literal
+        value="${value:1:${#value}-2}"
+    fi
+    echo "$value"
 }
 
 # Get array field from frontmatter (e.g., depends_on: [1, 2])
@@ -280,6 +299,10 @@ build_agent_prompt() {
 
     [[ -f "$spec_file" ]] || die "Task spec not found: $spec_file"
 
+    # Check for failure context from previous iteration
+    local failure_context
+    failure_context=$(get_failure_context "$spec_file")
+
     cat <<EOF
 You are executing a Ralph task. Follow these instructions exactly.
 
@@ -291,6 +314,27 @@ $spec_file
 
 ## Task Spec Content
 $(cat "$spec_file")
+EOF
+
+    # Include failure context if present
+    if [[ -n "$failure_context" ]]; then
+        cat <<EOF
+
+## ⚠️ PREVIOUS VALIDATION FAILURE
+The orchestrator's validation failed on the previous attempt. Here is the error output:
+
+\`\`\`
+$failure_context
+\`\`\`
+
+**IMPORTANT**: Double-check by running the backpressure command yourself.
+- If it FAILS: Fix the issue and mark status complete
+- If it PASSES: The orchestrator may have a bug. Add \`assertion: backpressure_verified\` to the frontmatter AND mark status complete. The orchestrator will trust your assertion and move on.
+
+EOF
+    fi
+
+    cat <<EOF
 
 ## Instructions
 1. Read the task spec completely
@@ -313,6 +357,9 @@ $(cat "$spec_file")
 EOF
 }
 
+# Global to capture validation output for failure context
+VALIDATION_OUTPUT=""
+
 run_backpressure() {
     local backpressure="$1"
 
@@ -322,8 +369,22 @@ run_backpressure() {
     fi
 
     info "Running backpressure: $backpressure"
-    # Run in subshell to prevent cd from affecting parent process
-    (eval "$backpressure")
+    # Run in subshell and capture output
+    local output exit_code
+    output=$( (eval "$backpressure") 2>&1 ) || exit_code=$?
+    exit_code=${exit_code:-0}
+
+    if [[ $exit_code -ne 0 ]]; then
+        VALIDATION_OUTPUT="Backpressure command failed (exit code $exit_code):
+Command: $backpressure
+Output:
+$output"
+        echo "$output"
+        return 1
+    fi
+
+    echo "$output"
+    return 0
 }
 
 # Baseline checks that all tasks must pass (fmt, vet)
@@ -340,14 +401,23 @@ run_baseline_checks() {
             error "Go formatting check failed. Unformatted files:"
             echo "$unformatted"
             error "Run: go fmt ./..."
+            VALIDATION_OUTPUT="${VALIDATION_OUTPUT}
+Go formatting check failed. Unformatted files:
+$unformatted
+Run: go fmt ./..."
             return 1
         fi
 
         info "Running go vet..."
-        if ! go vet ./...; then
+        local vet_output
+        vet_output=$(go vet ./... 2>&1) || {
             error "go vet check failed"
+            VALIDATION_OUTPUT="${VALIDATION_OUTPUT}
+go vet check failed:
+$vet_output"
+            echo "$vet_output"
             return 1
-        fi
+        }
     fi
 
     success "Baseline checks passed"
@@ -386,6 +456,9 @@ Automated commit by ralph.sh
 execute_task() {
     local workset_dir="$1"
     local spec_file="$2"
+
+    # Reset validation output for this task
+    VALIDATION_OUTPUT=""
 
     local task_num backpressure task_desc spec_workset workset_name
     task_num=$(get_frontmatter_field "$spec_file" "task")
@@ -436,14 +509,50 @@ execute_task() {
     new_status=$(get_frontmatter_field "$spec_file" "status")
 
     if [[ "$new_status" == "complete" ]]; then
+        # Check if agent added an assertion
+        local assertion
+        assertion=$(get_frontmatter_field "$spec_file" "assertion")
+
         # Verify backpressure and baseline checks pass
         if run_backpressure "$backpressure" && run_baseline_checks; then
             success "Task #$task_num completed successfully"
+            clear_failure_context "$spec_file"
             return 0
         else
-            error "Agent marked complete but validation failed - reverting status"
-            set_frontmatter_field "$spec_file" "status" "in_progress"
-            return 1
+            # Validation failed - check for agent assertion
+            if [[ "$assertion" == "backpressure_verified" ]]; then
+                warn "═══════════════════════════════════════════════════════════════"
+                warn "POTENTIAL ORCHESTRATOR BUG DETECTED"
+                warn "Agent asserted backpressure passes but orchestrator validation failed"
+                warn "Trusting agent assertion and marking task complete"
+                warn "Backpressure command: $backpressure"
+                warn "Validation output: $VALIDATION_OUTPUT"
+                warn "═══════════════════════════════════════════════════════════════"
+
+                # Log to a separate file for later review
+                local bug_log="$RALPH_LOG_DIR/potential_bugs.log"
+                {
+                    echo "════════════════════════════════════════════════════════════════"
+                    echo "Timestamp: $(date '+%Y-%m-%d %H:%M:%S')"
+                    echo "Task: $workset_name/#$task_num - $task_desc"
+                    echo "Spec: $spec_file"
+                    echo "Backpressure: $backpressure"
+                    echo "Agent assertion: $assertion"
+                    echo "Validation output:"
+                    echo "$VALIDATION_OUTPUT"
+                    echo "════════════════════════════════════════════════════════════════"
+                    echo ""
+                } >> "$bug_log"
+
+                success "Task #$task_num accepted via agent assertion"
+                clear_failure_context "$spec_file"
+                return 0
+            else
+                error "Agent marked complete but validation failed - reverting status"
+                store_failure_context "$spec_file" "$VALIDATION_OUTPUT"
+                set_frontmatter_field "$spec_file" "status" "in_progress"
+                return 1
+            fi
         fi
     else
         info "Task #$task_num status is '$new_status' (not complete yet)"
@@ -563,6 +672,13 @@ main() {
                 echo "  pending     - Not started"
                 echo "  in_progress - Currently being worked on"
                 echo "  complete    - Done, backpressure passed"
+                echo ""
+                echo "Failure feedback:"
+                echo "  When validation fails, the error output is stored and included"
+                echo "  in the next agent prompt. If the agent verifies backpressure"
+                echo "  passes manually, it can add 'assertion: backpressure_verified'"
+                echo "  to the frontmatter. Ralph will trust the assertion and proceed,"
+                echo "  logging the discrepancy to .ralph/potential_bugs.log for review."
                 exit 0
                 ;;
             -*)

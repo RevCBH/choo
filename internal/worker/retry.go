@@ -10,22 +10,22 @@ type RetryConfig struct {
 	// MaxAttempts is the maximum number of attempts before giving up
 	MaxAttempts int
 
-	// InitialBackoff is the delay before the first retry
-	InitialBackoff time.Duration
+	// InitialDelay is the delay before the first retry
+	InitialDelay time.Duration
 
-	// MaxBackoff is the maximum delay between retries
-	MaxBackoff time.Duration
+	// MaxDelay is the maximum delay between retries
+	MaxDelay time.Duration
 
-	// BackoffMultiply is the factor to multiply backoff by after each attempt
-	BackoffMultiply float64
+	// Multiplier is the factor to multiply delay by after each attempt
+	Multiplier float64
 }
 
 // DefaultRetryConfig provides sensible defaults for git operations
 var DefaultRetryConfig = RetryConfig{
-	MaxAttempts:     3,
-	InitialBackoff:  1 * time.Second,
-	MaxBackoff:      30 * time.Second,
-	BackoffMultiply: 2.0,
+	MaxAttempts:  3,
+	InitialDelay: 1 * time.Second,
+	MaxDelay:     30 * time.Second,
+	Multiplier:   2.0,
 }
 
 // RetryResult indicates the outcome of a retried operation
@@ -49,7 +49,7 @@ func RetryWithBackoff(
 	operation func(ctx context.Context) error,
 ) RetryResult {
 	var lastErr error
-	backoff := cfg.InitialBackoff
+	delay := cfg.InitialDelay
 
 	for attempt := 1; attempt <= cfg.MaxAttempts; attempt++ {
 		err := operation(ctx)
@@ -63,13 +63,13 @@ func RetryWithBackoff(
 			select {
 			case <-ctx.Done():
 				return RetryResult{Success: false, Attempts: attempt, LastErr: ctx.Err()}
-			case <-time.After(backoff):
+			case <-time.After(delay):
 			}
 
 			// Exponential backoff
-			backoff = time.Duration(float64(backoff) * cfg.BackoffMultiply)
-			if backoff > cfg.MaxBackoff {
-				backoff = cfg.MaxBackoff
+			delay = time.Duration(float64(delay) * cfg.Multiplier)
+			if delay > cfg.MaxDelay {
+				delay = cfg.MaxDelay
 			}
 		}
 	}
