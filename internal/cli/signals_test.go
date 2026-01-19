@@ -40,11 +40,14 @@ func TestSignalHandler_GracefulShutdown(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	handler := NewSignalHandler(cancel)
 
+	var mu sync.Mutex
 	callbackCalled := false
 	contextCancelled := false
 
 	handler.OnShutdown(func() {
+		mu.Lock()
 		callbackCalled = true
+		mu.Unlock()
 	})
 
 	handler.Start()
@@ -52,7 +55,9 @@ func TestSignalHandler_GracefulShutdown(t *testing.T) {
 	// Check context cancellation in a separate goroutine
 	go func() {
 		<-ctx.Done()
+		mu.Lock()
 		contextCancelled = true
+		mu.Unlock()
 	}()
 
 	// Send SIGINT
@@ -66,12 +71,15 @@ func TestSignalHandler_GracefulShutdown(t *testing.T) {
 		t.Fatal("Shutdown did not complete in time")
 	}
 
+	// Give a moment for context cancellation to propagate
+	time.Sleep(10 * time.Millisecond)
+
+	mu.Lock()
+	defer mu.Unlock()
+
 	if !callbackCalled {
 		t.Error("SIGINT should trigger callback execution")
 	}
-
-	// Give a moment for context cancellation to propagate
-	time.Sleep(10 * time.Millisecond)
 
 	if !contextCancelled {
 		t.Error("SIGINT should trigger context cancellation")

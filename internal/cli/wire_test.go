@@ -9,6 +9,10 @@ import (
 )
 
 func TestWireOrchestrator_AllComponents(t *testing.T) {
+	if os.Getenv("GITHUB_TOKEN") == "" {
+		t.Skip("Skipping test: GITHUB_TOKEN not set")
+	}
+
 	cfg := &config.Config{
 		Parallelism:  4,
 		TargetBranch: "main",
@@ -48,6 +52,10 @@ func TestWireOrchestrator_AllComponents(t *testing.T) {
 }
 
 func TestWireOrchestrator_EventBus(t *testing.T) {
+	if os.Getenv("GITHUB_TOKEN") == "" {
+		t.Skip("Skipping test: GITHUB_TOKEN not set")
+	}
+
 	cfg := &config.Config{
 		Parallelism:  4,
 		TargetBranch: "main",
@@ -70,6 +78,10 @@ func TestWireOrchestrator_EventBus(t *testing.T) {
 }
 
 func TestOrchestrator_Close(t *testing.T) {
+	if os.Getenv("GITHUB_TOKEN") == "" {
+		t.Skip("Skipping test: GITHUB_TOKEN not set")
+	}
+
 	cfg := &config.Config{
 		Parallelism:  4,
 		TargetBranch: "main",

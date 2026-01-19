@@ -4,24 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 )
 
-func newTestClientWithCheckRuns(t *testing.T, runs []CheckRun) (*PRClient, *httptest.Server) {
+// newTestClient creates a PRClient configured to use the test server
+func newTestClient(t *testing.T, handler http.HandlerFunc) *PRClient {
 	t.Helper()
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := CheckRunsResponse{
-			TotalCount: len(runs),
-			CheckRuns:  runs,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}))
+	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 
 	return &PRClient{
@@ -29,74 +22,19 @@ func newTestClientWithCheckRuns(t *testing.T, runs []CheckRun) (*PRClient, *http
 		owner:      "test-owner",
 		repo:       "test-repo",
 		token:      "test-token",
-	}, server
+		baseURL:    server.URL,
+	}
 }
 
-// getCheckRunsForTest is a test helper that uses the test server URL
-func (c *PRClient) getCheckRunsForTest(ctx context.Context, ref string, serverURL string) ([]CheckRun, error) {
-	// Replace the GitHub API URL with test server URL
-	url := fmt.Sprintf("%s/repos/%s/%s/commits/%s/check-runs", serverURL, c.owner, c.repo, ref)
-
-	resp, err := c.doRequest(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var response CheckRunsResponse
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
-
-	return response.CheckRuns, nil
-}
-
-// GetCheckStatusForTest is a test helper that uses the test server URL
-func (c *PRClient) GetCheckStatusForTest(ctx context.Context, ref string, serverURL string) (CheckStatus, error) {
-	runs, err := c.getCheckRunsForTest(ctx, ref, serverURL)
-	if err != nil {
-		return "", fmt.Errorf("get check runs: %w", err)
-	}
-
-	allComplete := true
-	anyFailed := false
-
-	for _, run := range runs {
-		if run.Status != "completed" {
-			allComplete = false
+// checkRunsHandler returns an http.HandlerFunc that serves the given check runs
+func checkRunsHandler(runs []CheckRun) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		response := CheckRunsResponse{
+			TotalCount: len(runs),
+			CheckRuns:  runs,
 		}
-		if run.Conclusion == "failure" {
-			anyFailed = true
-		}
-	}
-
-	if anyFailed {
-		return CheckFailure, nil
-	}
-	if !allComplete {
-		return CheckPending, nil
-	}
-	return CheckSuccess, nil
-}
-
-// WaitForChecksForTest is a test helper that uses the test server URL
-func (c *PRClient) WaitForChecksForTest(ctx context.Context, ref string, pollInterval time.Duration, serverURL string) (CheckStatus, error) {
-	ticker := time.NewTicker(pollInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return "", ctx.Err()
-		case <-ticker.C:
-			status, err := c.GetCheckStatusForTest(ctx, ref, serverURL)
-			if err != nil {
-				return "", err
-			}
-			if status != CheckPending {
-				return status, nil
-			}
-		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
 	}
 }
 
@@ -106,9 +44,9 @@ func TestGetCheckStatus_AllSuccess(t *testing.T) {
 		{Name: "lint", Status: "completed", Conclusion: "success"},
 	}
 
-	client, server := newTestClientWithCheckRuns(t, runs)
+	client := newTestClient(t, checkRunsHandler(runs))
 
-	status, err := client.GetCheckStatusForTest(context.Background(), "abc123", server.URL)
+	status, err := client.GetCheckStatus(context.Background(), "abc123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -123,9 +61,9 @@ func TestGetCheckStatus_OnePending(t *testing.T) {
 		{Name: "lint", Status: "in_progress", Conclusion: ""},
 	}
 
-	client, server := newTestClientWithCheckRuns(t, runs)
+	client := newTestClient(t, checkRunsHandler(runs))
 
-	status, err := client.GetCheckStatusForTest(context.Background(), "abc123", server.URL)
+	status, err := client.GetCheckStatus(context.Background(), "abc123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -140,9 +78,9 @@ func TestGetCheckStatus_OneFailure(t *testing.T) {
 		{Name: "lint", Status: "completed", Conclusion: "success"},
 	}
 
-	client, server := newTestClientWithCheckRuns(t, runs)
+	client := newTestClient(t, checkRunsHandler(runs))
 
-	status, err := client.GetCheckStatusForTest(context.Background(), "abc123", server.URL)
+	status, err := client.GetCheckStatus(context.Background(), "abc123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -152,34 +90,104 @@ func TestGetCheckStatus_OneFailure(t *testing.T) {
 }
 
 func TestGetCheckStatus_FailureTakesPrecedence(t *testing.T) {
-	// Even if some checks are pending, a failure is immediately reported
+	// Failure takes precedence over pending - if any check has failed,
+	// report failure immediately even if other checks are still running.
+	// This enables fail-fast behavior in CI.
 	runs := []CheckRun{
 		{Name: "test", Status: "completed", Conclusion: "failure"},
 		{Name: "lint", Status: "in_progress", Conclusion: ""},
 	}
 
-	client, server := newTestClientWithCheckRuns(t, runs)
+	client := newTestClient(t, checkRunsHandler(runs))
 
-	status, err := client.GetCheckStatusForTest(context.Background(), "abc123", server.URL)
+	status, err := client.GetCheckStatus(context.Background(), "abc123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if status != CheckFailure {
-		t.Errorf("expected CheckFailure, got %s", status)
+		t.Errorf("expected CheckFailure (failure takes precedence), got %s", status)
 	}
 }
 
 func TestGetCheckStatus_NoRuns(t *testing.T) {
 	runs := []CheckRun{}
 
-	client, server := newTestClientWithCheckRuns(t, runs)
+	client := newTestClient(t, checkRunsHandler(runs))
 
-	status, err := client.GetCheckStatusForTest(context.Background(), "abc123", server.URL)
+	status, err := client.GetCheckStatus(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Zero check runs should return pending, not success
+	if status != CheckPending {
+		t.Errorf("expected CheckPending for no runs (checks haven't started), got %s", status)
+	}
+}
+
+func TestGetCheckStatus_Cancelled(t *testing.T) {
+	runs := []CheckRun{
+		{Name: "test", Status: "completed", Conclusion: "cancelled"},
+		{Name: "lint", Status: "completed", Conclusion: "success"},
+	}
+
+	client := newTestClient(t, checkRunsHandler(runs))
+
+	status, err := client.GetCheckStatus(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != CheckFailure {
+		t.Errorf("expected CheckFailure for cancelled check, got %s", status)
+	}
+}
+
+func TestGetCheckStatus_TimedOut(t *testing.T) {
+	runs := []CheckRun{
+		{Name: "test", Status: "completed", Conclusion: "timed_out"},
+	}
+
+	client := newTestClient(t, checkRunsHandler(runs))
+
+	status, err := client.GetCheckStatus(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != CheckFailure {
+		t.Errorf("expected CheckFailure for timed_out check, got %s", status)
+	}
+}
+
+func TestGetCheckStatus_Skipped(t *testing.T) {
+	runs := []CheckRun{
+		{Name: "test", Status: "completed", Conclusion: "success"},
+		{Name: "optional", Status: "completed", Conclusion: "skipped"},
+	}
+
+	client := newTestClient(t, checkRunsHandler(runs))
+
+	status, err := client.GetCheckStatus(context.Background(), "abc123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if status != CheckSuccess {
-		t.Errorf("expected CheckSuccess for no runs, got %s", status)
+		t.Errorf("expected CheckSuccess (skipped is acceptable), got %s", status)
+	}
+}
+
+func TestGetCheckStatus_Neutral(t *testing.T) {
+	runs := []CheckRun{
+		{Name: "test", Status: "completed", Conclusion: "success"},
+		{Name: "info", Status: "completed", Conclusion: "neutral"},
+	}
+
+	client := newTestClient(t, checkRunsHandler(runs))
+
+	status, err := client.GetCheckStatus(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != CheckSuccess {
+		t.Errorf("expected CheckSuccess (neutral is acceptable), got %s", status)
 	}
 }
 
@@ -188,13 +196,95 @@ func TestWaitForChecks_Timeout(t *testing.T) {
 		{Name: "test", Status: "in_progress", Conclusion: ""},
 	}
 
-	client, server := newTestClientWithCheckRuns(t, runs)
+	client := newTestClient(t, checkRunsHandler(runs))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	_, err := client.WaitForChecksForTest(ctx, "abc123", 10*time.Millisecond, server.URL)
+	_, err := client.WaitForChecks(ctx, "abc123", 10*time.Millisecond)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("expected deadline exceeded, got %v", err)
+	}
+}
+
+func TestWaitForChecks_EventualSuccess(t *testing.T) {
+	callCount := 0
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		var runs []CheckRun
+		if callCount < 3 {
+			runs = []CheckRun{
+				{Name: "test", Status: "in_progress", Conclusion: ""},
+			}
+		} else {
+			runs = []CheckRun{
+				{Name: "test", Status: "completed", Conclusion: "success"},
+			}
+		}
+		response := CheckRunsResponse{
+			TotalCount: len(runs),
+			CheckRuns:  runs,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}
+
+	client := newTestClient(t, handler)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	status, err := client.WaitForChecks(ctx, "abc123", 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != CheckSuccess {
+		t.Errorf("expected CheckSuccess, got %s", status)
+	}
+	if callCount < 3 {
+		t.Errorf("expected at least 3 calls, got %d", callCount)
+	}
+}
+
+func TestGetCheckRuns_Pagination(t *testing.T) {
+	page1Runs := make([]CheckRun, 100)
+	for i := range page1Runs {
+		page1Runs[i] = CheckRun{ID: int64(i), Name: "test", Status: "completed", Conclusion: "success"}
+	}
+	page2Runs := []CheckRun{
+		{ID: 100, Name: "test", Status: "completed", Conclusion: "success"},
+		{ID: 101, Name: "test", Status: "completed", Conclusion: "success"},
+	}
+
+	callCount := 0
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		var response CheckRunsResponse
+		if callCount == 1 {
+			response = CheckRunsResponse{
+				TotalCount: 102,
+				CheckRuns:  page1Runs,
+			}
+		} else {
+			response = CheckRunsResponse{
+				TotalCount: 102,
+				CheckRuns:  page2Runs,
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}
+
+	client := newTestClient(t, handler)
+
+	status, err := client.GetCheckStatus(context.Background(), "abc123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if status != CheckSuccess {
+		t.Errorf("expected CheckSuccess, got %s", status)
+	}
+	if callCount != 2 {
+		t.Errorf("expected 2 API calls for pagination, got %d", callCount)
 	}
 }

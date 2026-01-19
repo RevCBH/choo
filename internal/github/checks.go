@@ -36,12 +36,18 @@ type CheckRunsResponse struct {
 }
 
 // GetCheckStatus returns the aggregated status of all CI checks for a git ref.
-// Returns CheckPending if any check is still running, CheckFailure if any check
-// failed, or CheckSuccess if all checks completed successfully.
+// Returns CheckPending if any check is still running or if there are no checks,
+// CheckFailure if any check failed, or CheckSuccess if all checks completed successfully.
+// Priority: failure > pending > success (failure is reported immediately even if checks are pending).
 func (c *PRClient) GetCheckStatus(ctx context.Context, ref string) (CheckStatus, error) {
 	runs, err := c.getCheckRuns(ctx, ref)
 	if err != nil {
 		return "", fmt.Errorf("get check runs: %w", err)
+	}
+
+	// No check runs means checks haven't started yet
+	if len(runs) == 0 {
+		return CheckPending, nil
 	}
 
 	allComplete := true
@@ -50,12 +56,19 @@ func (c *PRClient) GetCheckStatus(ctx context.Context, ref string) (CheckStatus,
 	for _, run := range runs {
 		if run.Status != "completed" {
 			allComplete = false
+			continue
 		}
-		if run.Conclusion == "failure" {
+		// Treat any conclusion other than success, skipped, or neutral as failure
+		// This includes: failure, cancelled, timed_out, action_required, stale
+		switch run.Conclusion {
+		case "success", "skipped", "neutral":
+			// These are acceptable outcomes
+		default:
 			anyFailed = true
 		}
 	}
 
+	// Failure takes precedence over pending
 	if anyFailed {
 		return CheckFailure, nil
 	}
@@ -66,26 +79,42 @@ func (c *PRClient) GetCheckStatus(ctx context.Context, ref string) (CheckStatus,
 }
 
 // getCheckRuns fetches all check runs for a git ref from the GitHub API.
+// It handles pagination to ensure all check runs are returned.
 func (c *PRClient) getCheckRuns(ctx context.Context, ref string) ([]CheckRun, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/commits/%s/check-runs", c.owner, c.repo, ref)
+	var allRuns []CheckRun
+	page := 1
+	perPage := 100 // Max allowed by GitHub API
 
-	resp, err := c.doRequest(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, err
+	for {
+		url := fmt.Sprintf("%s/repos/%s/%s/commits/%s/check-runs?per_page=%d&page=%d",
+			c.baseURL, c.owner, c.repo, ref, perPage, page)
+
+		resp, err := c.doRequest(ctx, "GET", url, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("read response body: %w", err)
+		}
+
+		var response CheckRunsResponse
+		if err := json.Unmarshal(body, &response); err != nil {
+			return nil, fmt.Errorf("unmarshal response: %w", err)
+		}
+
+		allRuns = append(allRuns, response.CheckRuns...)
+
+		// Check if we've fetched all runs
+		if len(allRuns) >= response.TotalCount || len(response.CheckRuns) < perPage {
+			break
+		}
+		page++
 	}
-	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response body: %w", err)
-	}
-
-	var response CheckRunsResponse
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
-
-	return response.CheckRuns, nil
+	return allRuns, nil
 }
 
 // WaitForChecks polls check status until all checks complete or context is cancelled.
