@@ -61,7 +61,7 @@ type Reaction struct {
 
 // getReactions fetches reactions on a PR (issue endpoint)
 func (c *PRClient) getReactions(ctx context.Context, prNumber int) ([]Reaction, error) {
-	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/issues/%d/reactions", c.owner, c.repo, prNumber)
+	url := fmt.Sprintf("%s/repos/%s/%s/issues/%d/reactions", c.baseURL, c.owner, c.repo, prNumber)
 	resp, err := c.doRequest(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -76,7 +76,7 @@ func (c *PRClient) getReactions(ctx context.Context, prNumber int) ([]Reaction, 
 	return reactions, nil
 }
 
-// GetReviewStatus fetches the current review status from reactions
+// GetReviewStatus fetches the current review status from reactions and comments
 func (c *PRClient) GetReviewStatus(ctx context.Context, prNumber int) (*ReviewState, error) {
 	reactions, err := c.getReactions(ctx, prNumber)
 	if err != nil {
@@ -90,9 +90,9 @@ func (c *PRClient) GetReviewStatus(ctx context.Context, prNumber int) (*ReviewSt
 
 	state := &ReviewState{
 		CommentCount: len(comments),
-		LastActivity: time.Now(),
 	}
 
+	// Track last activity from reactions
 	for _, reaction := range reactions {
 		if reaction.Content == "+1" {
 			state.HasThumbsUp = true
@@ -100,20 +100,41 @@ func (c *PRClient) GetReviewStatus(ctx context.Context, prNumber int) (*ReviewSt
 		if reaction.Content == "eyes" {
 			state.HasEyes = true
 		}
+		if reaction.CreatedAt.After(state.LastActivity) {
+			state.LastActivity = reaction.CreatedAt
+		}
+	}
+
+	// Track last activity from comments
+	for _, comment := range comments {
+		if comment.CreatedAt.After(state.LastActivity) {
+			state.LastActivity = comment.CreatedAt
+		}
+	}
+
+	// If no activity found, use current time
+	if state.LastActivity.IsZero() {
+		state.LastActivity = time.Now()
 	}
 
 	// Determine status with precedence: approved > in_progress > changes_requested > pending
-	if state.HasThumbsUp {
-		state.Status = ReviewApproved
-	} else if state.HasEyes {
-		state.Status = ReviewInProgress
-	} else if state.CommentCount > 0 {
-		state.Status = ReviewChangesRequested
-	} else {
-		state.Status = ReviewPending
-	}
+	state.Status = determineStatus(state.HasThumbsUp, state.HasEyes, state.CommentCount)
 
 	return state, nil
+}
+
+// determineStatus applies status precedence rules
+func determineStatus(hasThumbsUp, hasEyes bool, commentCount int) ReviewStatus {
+	if hasThumbsUp {
+		return ReviewApproved
+	}
+	if hasEyes {
+		return ReviewInProgress
+	}
+	if commentCount > 0 {
+		return ReviewChangesRequested
+	}
+	return ReviewPending
 }
 
 // PollReview polls the PR for review status changes

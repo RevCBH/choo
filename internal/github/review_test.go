@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -44,6 +45,7 @@ func newMockClient(reactions []Reaction, comments []PRComment) (*PRClient, *http
 		pollInterval:  10 * time.Millisecond,
 		reviewTimeout: 50 * time.Millisecond,
 		token:         "test-token",
+		baseURL:       server.URL,
 	}
 
 	return client, server
@@ -262,7 +264,7 @@ func TestPollReview_ContextCancellation(t *testing.T) {
 	}()
 
 	_, err := testClient.PollReview(ctx, 1)
-	if err != context.Canceled {
+	if err == nil || !errors.Is(err, context.Canceled) {
 		t.Errorf("expected context.Canceled error, got %v", err)
 	}
 }
@@ -325,6 +327,7 @@ func createTestClient(baseClient *PRClient, server *httptest.Server) *PRClient {
 		pollInterval:  baseClient.pollInterval,
 		reviewTimeout: baseClient.reviewTimeout,
 		token:         baseClient.token,
+		baseURL:       server.URL,
 	}
 
 	// Create wrapper that modifies URLs to use test server
@@ -362,4 +365,112 @@ func (t *testTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		base = http.DefaultTransport
 	}
 	return base.RoundTrip(req)
+}
+
+func TestGetReviewStatus_TracksLastActivityFromReactions(t *testing.T) {
+	reactionTime := time.Date(2024, 1, 15, 10, 30, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "reactions") {
+			json.NewEncoder(w).Encode([]Reaction{
+				{ID: 1, Content: "eyes", CreatedAt: reactionTime},
+			})
+			return
+		}
+		if strings.Contains(r.URL.Path, "comments") {
+			json.NewEncoder(w).Encode([]ghReviewComment{})
+			return
+		}
+	}))
+	defer server.Close()
+
+	client := &PRClient{
+		httpClient: &http.Client{
+			Transport: &testTransport{
+				base:      http.DefaultTransport,
+				serverURL: server.URL,
+			},
+		},
+		owner:         "owner",
+		repo:          "repo",
+		pollInterval:  10 * time.Millisecond,
+		reviewTimeout: 50 * time.Millisecond,
+		token:         "test-token",
+		baseURL:       server.URL,
+	}
+
+	state, err := client.GetReviewStatus(context.Background(), 123)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !state.LastActivity.Equal(reactionTime) {
+		t.Errorf("expected LastActivity %v, got %v", reactionTime, state.LastActivity)
+	}
+}
+
+func TestGetReviewStatus_TracksLastActivityFromComments(t *testing.T) {
+	commentTime := time.Date(2024, 1, 15, 11, 0, 0, 0, time.UTC)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "reactions") {
+			json.NewEncoder(w).Encode([]Reaction{})
+			return
+		}
+		if strings.Contains(r.URL.Path, "comments") {
+			json.NewEncoder(w).Encode([]ghReviewComment{
+				{ID: 1, Body: "Fix this", User: ghUser{Login: "reviewer"}, CreatedAt: commentTime},
+			})
+			return
+		}
+	}))
+	defer server.Close()
+
+	client := &PRClient{
+		httpClient: &http.Client{
+			Transport: &testTransport{
+				base:      http.DefaultTransport,
+				serverURL: server.URL,
+			},
+		},
+		owner:         "owner",
+		repo:          "repo",
+		pollInterval:  10 * time.Millisecond,
+		reviewTimeout: 50 * time.Millisecond,
+		token:         "test-token",
+		baseURL:       server.URL,
+	}
+
+	state, err := client.GetReviewStatus(context.Background(), 123)
+
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if !state.LastActivity.Equal(commentTime) {
+		t.Errorf("expected LastActivity %v, got %v", commentTime, state.LastActivity)
+	}
+}
+
+func TestDetermineStatus_Precedence(t *testing.T) {
+	tests := []struct {
+		name         string
+		hasThumbsUp  bool
+		hasEyes      bool
+		commentCount int
+		expected     ReviewStatus
+	}{
+		{"approved takes precedence", true, true, 5, ReviewApproved},
+		{"eyes without approval", false, true, 3, ReviewInProgress},
+		{"comments without reactions", false, false, 2, ReviewChangesRequested},
+		{"no activity is pending", false, false, 0, ReviewPending},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := determineStatus(tt.hasThumbsUp, tt.hasEyes, tt.commentCount)
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
 }
