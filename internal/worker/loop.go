@@ -181,20 +181,10 @@ func (w *Worker) verifyTaskComplete(task *discovery.Task) (bool, error) {
 	// e.g., .ralph/worktrees/web/specs/tasks/web/01-types.md
 	taskPath := filepath.Join(w.worktreePath, unitPath, task.FilePath)
 
-	// Debug output
-	fmt.Fprintf(os.Stderr, "DEBUG verifyTaskComplete:\n")
-	fmt.Fprintf(os.Stderr, "  worktreePath: %s\n", w.worktreePath)
-	fmt.Fprintf(os.Stderr, "  unitPath: %s\n", unitPath)
-	fmt.Fprintf(os.Stderr, "  task.FilePath: %s\n", task.FilePath)
-	fmt.Fprintf(os.Stderr, "  taskPath: %s\n", taskPath)
-
 	updated, err := discovery.ParseTaskFile(taskPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "  ERROR: %v\n", err)
 		return false, fmt.Errorf("failed to parse task file %s: %w", taskPath, err)
 	}
-
-	fmt.Fprintf(os.Stderr, "  status: %s\n", updated.Status)
 
 	// Return true if status is complete
 	return updated.Status == discovery.TaskStatusComplete, nil
@@ -240,8 +230,6 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 	}
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		fmt.Fprintf(os.Stderr, "DEBUG: attempt %d of %d\n", attempt+1, maxRetries)
-
 		// Set currentTask to first ready task for event emission
 		if len(readyTasks) > 0 {
 			w.currentTask = readyTasks[0]
@@ -250,22 +238,17 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 		// a. Emit TaskClaudeInvoke event (done inside invokeClaudeForTask)
 		// b. Invoke Claude
 		claudeErr := w.invokeClaudeForTask(ctx, prompt)
-		fmt.Fprintf(os.Stderr, "DEBUG: Claude returned, error=%v\n", claudeErr)
 
 		// c. Find which task was completed (scan all ready tasks)
 		// IMPORTANT: Check for completion EVEN if Claude returned an error,
 		// because Claude might complete the task and then hit max-turns or other limits
-		fmt.Fprintf(os.Stderr, "DEBUG: checking %d ready tasks for completion\n", len(readyTasks))
 		var completedTask *discovery.Task
 		for _, task := range readyTasks {
-			fmt.Fprintf(os.Stderr, "DEBUG: checking task #%d\n", task.Number)
 			complete, err := w.verifyTaskComplete(task)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "DEBUG: verifyTaskComplete error: %v\n", err)
 				// Error parsing task file, continue to next task
 				continue
 			}
-			fmt.Fprintf(os.Stderr, "DEBUG: task #%d complete=%v\n", task.Number, complete)
 			if complete {
 				completedTask = task
 				break
@@ -274,7 +257,6 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 
 		// d. If a task was completed
 		if completedTask != nil {
-			fmt.Fprintf(os.Stderr, "DEBUG: task #%d found complete, running backpressure\n", completedTask.Number)
 			// Run backpressure
 			if w.events != nil {
 				evt := events.NewEvent(events.TaskBackpressure, w.unit.ID).WithTask(completedTask.Number).WithPayload(map[string]any{
@@ -283,9 +265,7 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 				w.events.Emit(evt)
 			}
 
-			fmt.Fprintf(os.Stderr, "DEBUG: backpressure command: %s\n", completedTask.Backpressure)
 			result := RunBackpressure(ctx, completedTask.Backpressure, w.worktreePath, w.config.BackpressureTimeout)
-			fmt.Fprintf(os.Stderr, "DEBUG: backpressure result: success=%v, exit=%d, output=%s\n", result.Success, result.ExitCode, result.Output)
 
 			// If backpressure passes → return completed task
 			if result.Success {
@@ -296,26 +276,38 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 				return completedTask, nil
 			}
 
-			// If backpressure fails → emit validation fail, continue retry loop
+			// If backpressure fails → emit validation fail and retry event, continue retry loop
 			if w.events != nil {
 				evt := events.NewEvent(events.TaskValidationFail, w.unit.ID).WithTask(completedTask.Number)
-				evt = evt.WithPayload(map[string]interface{}{
+				evt = evt.WithPayload(map[string]any{
 					"output":    result.Output,
 					"exit_code": result.ExitCode,
 				})
 				w.events.Emit(evt)
+
+				retryEvt := events.NewEvent(events.TaskRetry, w.unit.ID).WithTask(completedTask.Number)
+				retryEvt = retryEvt.WithPayload(map[string]any{
+					"attempt": attempt + 1,
+					"reason":  "backpressure_failed",
+				})
+				w.events.Emit(retryEvt)
 			}
 
 			// Note: We don't revert status here as the spec doesn't mention it
 			// The retry will just try again
+			continue
 		}
 
 		// e. If no task completed → emit TaskRetry, continue
 		if w.events != nil {
 			evt := events.NewEvent(events.TaskRetry, w.unit.ID)
-			payload := map[string]interface{}{
+			reason := "no_task_completed"
+			if claudeErr != nil {
+				reason = "claude_invocation_failed"
+			}
+			payload := map[string]any{
 				"attempt": attempt + 1,
-				"reason":  "no_task_completed",
+				"reason":  reason,
 			}
 			if claudeErr != nil {
 				payload["claude_error"] = claudeErr.Error()

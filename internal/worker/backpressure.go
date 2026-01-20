@@ -2,8 +2,6 @@ package worker
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"os/exec"
 	"time"
 
@@ -20,8 +18,6 @@ type BackpressureResult struct {
 
 // RunBackpressure executes a task's backpressure command
 func RunBackpressure(ctx context.Context, command string, workdir string, timeout time.Duration) BackpressureResult {
-	fmt.Fprintf(os.Stderr, "DEBUG RunBackpressure: command=%q workdir=%q timeout=%v\n", command, workdir, timeout)
-
 	// 1. Create timeout context
 	ctxWithTimeout, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -38,8 +34,6 @@ func RunBackpressure(ctx context.Context, command string, workdir string, timeou
 	// 4. Track duration
 	duration := time.Since(start)
 
-	fmt.Fprintf(os.Stderr, "DEBUG RunBackpressure: err=%v duration=%v output=%q\n", err, duration, string(output))
-
 	// 5. Extract exit code on failure
 	exitCode := 0
 	success := true
@@ -50,7 +44,6 @@ func RunBackpressure(ctx context.Context, command string, workdir string, timeou
 			exitCode = exitErr.ExitCode()
 		} else {
 			// For other errors (e.g., timeout), set a non-zero exit code
-			fmt.Fprintf(os.Stderr, "DEBUG RunBackpressure: non-exit error type=%T\n", err)
 			exitCode = -1
 		}
 	}

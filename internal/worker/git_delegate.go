@@ -13,6 +13,8 @@ import (
 )
 
 // prURLPattern matches GitHub PR URLs
+//
+//nolint:unused // WIP: used in integration tests for PR creation
 var prURLPattern = regexp.MustCompile(`https://github\.com/[^/]+/[^/]+/pull/\d+`)
 
 func (w *Worker) runner() git.Runner {
@@ -169,6 +171,8 @@ func (w *Worker) invokeClaude(ctx context.Context, prompt string) error {
 }
 
 // invokeClaudeWithOutputImpl is the default implementation
+//
+//nolint:unused // WIP: used in integration tests for PR creation
 func (w *Worker) invokeClaudeWithOutputImpl(ctx context.Context, prompt string) (string, error) {
 	cmd := exec.CommandContext(ctx, "claude",
 		"--dangerously-skip-permissions",
@@ -185,12 +189,16 @@ func (w *Worker) invokeClaudeWithOutputImpl(ctx context.Context, prompt string) 
 }
 
 // extractPRURL extracts a GitHub PR URL from Claude's output
+//
+//nolint:unused // WIP: used in integration tests for PR creation
 func extractPRURL(output string) string {
 	match := prURLPattern.FindString(output)
 	return match
 }
 
 // createPRViaClaudeCode invokes Claude to create the PR
+//
+//nolint:unused // WIP: used in integration tests for PR creation
 func (w *Worker) createPRViaClaudeCode(ctx context.Context) (string, error) {
 	prompt := BuildPRPrompt(w.branch, w.config.TargetBranch, w.unit.ID)
 

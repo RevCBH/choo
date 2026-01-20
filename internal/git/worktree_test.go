@@ -10,6 +10,7 @@ import (
 
 func TestWorktreeManager_Create_UsesExpectedBranchAndPath(t *testing.T) {
 	runner := newFakeRunner()
+	runner.stub("worktree list --porcelain", "", nil) // No existing worktrees
 	runner.stub("worktree add -b ralph/unit-1 /tmp/repo/.ralph/worktrees/unit-1 HEAD", "", nil)
 	useRunner(t, runner)
 

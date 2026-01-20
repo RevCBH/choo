@@ -85,8 +85,9 @@ func (s *Server) Start() error {
 
 	// Start HTTP server
 	go func() {
-		if err := s.httpServer.Serve(listener); err != http.ErrServerClosed {
-			// Log error but don't crash
+		if err := s.httpServer.Serve(listener); err != nil && err != http.ErrServerClosed {
+			// Log error but don't crash - server already started
+			_ = err // explicitly ignore
 		}
 	}()
 
@@ -99,7 +100,7 @@ func (s *Server) Start() error {
 // - Stops SSE hub
 func (s *Server) Stop(ctx context.Context) error {
 	// Stop accepting new socket connections
-	s.socketServer.Stop()
+	_ = s.socketServer.Stop()
 
 	// Stop SSE hub
 	s.hub.Stop()

@@ -294,17 +294,22 @@ func TestEventsHandler_StreamsEvents(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait for client to be registered
-	time.Sleep(50 * time.Millisecond)
+	// Read connection comment first
+	connBuf := make([]byte, 256)
+	connDone := make(chan struct{})
+	go func() {
+		pr.Read(connBuf)
+		close(connDone)
+	}()
 
-	// Broadcast an event
-	event := &Event{
-		Type: "test.event",
-		Time: time.Now(),
+	select {
+	case <-connDone:
+		// Connection comment received
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for connection comment")
 	}
-	hub.Broadcast(event)
 
-	// Read the event from the stream with timeout
+	// Start reader BEFORE broadcast (pipe is synchronous - writes block until read)
 	readDone := make(chan struct{})
 	var output string
 	go func() {
@@ -315,6 +320,16 @@ func TestEventsHandler_StreamsEvents(t *testing.T) {
 		}
 		close(readDone)
 	}()
+
+	// Give reader goroutine time to start and block on Read
+	time.Sleep(10 * time.Millisecond)
+
+	// Broadcast an event
+	event := &Event{
+		Type: "test.event",
+		Time: time.Now(),
+	}
+	hub.Broadcast(event)
 
 	select {
 	case <-readDone:
@@ -362,18 +377,22 @@ func TestEventsHandler_SSEFormat(t *testing.T) {
 		close(done)
 	}()
 
-	// Wait for client to be registered
-	time.Sleep(50 * time.Millisecond)
+	// Read connection comment first
+	connBuf := make([]byte, 256)
+	connDone := make(chan struct{})
+	go func() {
+		pr.Read(connBuf)
+		close(connDone)
+	}()
 
-	// Broadcast an event
-	event := &Event{
-		Type: "unit.started",
-		Time: time.Now(),
-		Unit: "test-unit",
+	select {
+	case <-connDone:
+		// Connection comment received
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("timeout waiting for connection comment")
 	}
-	hub.Broadcast(event)
 
-	// Read the event from the stream with timeout
+	// Start reader BEFORE broadcast (pipe is synchronous - writes block until read)
 	readDone := make(chan struct{})
 	var output string
 	go func() {
@@ -384,6 +403,17 @@ func TestEventsHandler_SSEFormat(t *testing.T) {
 		}
 		close(readDone)
 	}()
+
+	// Give reader goroutine time to start and block on Read
+	time.Sleep(10 * time.Millisecond)
+
+	// Broadcast an event
+	event := &Event{
+		Type: "unit.started",
+		Time: time.Now(),
+		Unit: "test-unit",
+	}
+	hub.Broadcast(event)
 
 	select {
 	case <-readDone:

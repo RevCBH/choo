@@ -39,6 +39,7 @@ type Worker struct {
 
 	// invokeClaudeWithOutput is the function that invokes Claude and captures output
 	// Can be overridden for testing
+	//nolint:unused // WIP: used in integration tests for PR creation
 	invokeClaudeWithOutput func(ctx context.Context, prompt string) (string, error)
 }
 

@@ -85,6 +85,8 @@ func gitExec(ctx context.Context, dir string, args ...string) (string, error) {
 
 // gitExecWithStdin executes a git command with stdin input.
 // Used for commands that require piped input.
+//
+//nolint:unused // WIP: will be used for commands requiring stdin input
 func gitExecWithStdin(ctx context.Context, dir string, stdin string, args ...string) (string, error) {
 	runnerMu.RLock()
 	runner := defaultRunner

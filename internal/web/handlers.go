@@ -88,6 +88,9 @@ func EventsHandler(hub *Hub) http.HandlerFunc {
 // generateID generates a random client ID.
 func generateID() string {
 	bytes := make([]byte, 8)
-	rand.Read(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to a less random but still unique ID
+		return hex.EncodeToString([]byte("fallback"))
+	}
 	return hex.EncodeToString(bytes)
 }

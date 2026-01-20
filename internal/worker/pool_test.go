@@ -57,10 +57,11 @@ func mockDeps(t *testing.T) WorkerDeps {
 	repoDir, cleanup := setupRepo(t)
 	t.Cleanup(cleanup)
 
+	prevRunner := git.DefaultRunner()
 	git.SetDefaultRunner(noopGitRunner{})
 
 	t.Cleanup(func() {
-		git.SetDefaultRunner(nil)
+		git.SetDefaultRunner(prevRunner)
 	})
 
 	return WorkerDeps{
