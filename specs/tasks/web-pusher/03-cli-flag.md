@@ -1,6 +1,6 @@
 ---
 task: 3
-status: pending
+status: complete
 backpressure: "go build ./cmd/choo/... && go test ./internal/cli/... -run TestRunOptions"
 depends_on: [2]
 ---

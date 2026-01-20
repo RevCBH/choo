@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/github"
 	"github.com/RevCBH/choo/internal/orchestrator"
+	"github.com/RevCBH/choo/internal/web"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -28,6 +30,8 @@ type RunOptions struct {
 	SkipReview   bool   // Auto-merge without waiting for review
 	TasksDir     string // Path to specs/tasks/ directory
 	NoTUI        bool   // Disable TUI even when stdout is a TTY
+	Web          bool   // Enable web UI event forwarding
+	WebSocket    string // Custom Unix socket path (optional)
 }
 
 // Validate checks RunOptions for validity
@@ -88,6 +92,8 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 	cmd.Flags().StringVar(&opts.Unit, "unit", "", "Run only specified unit (single-unit mode)")
 	cmd.Flags().BoolVar(&opts.SkipReview, "skip-review", false, "Auto-merge without waiting for review")
 	cmd.Flags().BoolVar(&opts.NoTUI, "no-tui", false, "Disable interactive TUI (use summary-only output)")
+	cmd.Flags().BoolVar(&opts.Web, "web", false, "Enable web UI event forwarding")
+	cmd.Flags().StringVar(&opts.WebSocket, "web-socket", "", "Custom Unix socket path (default: /tmp/choo.sock)")
 
 	return cmd
 }
@@ -147,6 +153,24 @@ func (a *App) RunOrchestrator(ctx context.Context, opts RunOptions) error {
 		defer func() {
 			tuiBridge.SendDone()
 		}()
+	}
+
+	// Create SocketPusher if --web flag is set
+	var pusher *web.SocketPusher
+	if opts.Web {
+		cfg := web.DefaultPusherConfig()
+		if opts.WebSocket != "" {
+			cfg.SocketPath = opts.WebSocket
+		}
+		pusher = web.NewSocketPusher(eventBus, cfg)
+		defer pusher.Close()
+
+		// Start pusher now so it receives all events including OrchStarted
+		if err := pusher.Start(ctx); err != nil {
+			// Log warning but don't fail - web UI is optional
+			log.Printf("WARN: failed to start web pusher: %v", err)
+			pusher = nil // Clear so we don't try to use it
+		}
 	}
 
 	// Create Git WorktreeManager

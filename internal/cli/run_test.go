@@ -153,6 +153,77 @@ func TestRunOptions_Validate_EmptyTasksDir(t *testing.T) {
 	}
 }
 
+func TestRunOptions_WebFlag(t *testing.T) {
+	app := New()
+	cmd := NewRunCmd(app)
+
+	// Parse flags with --web
+	err := cmd.ParseFlags([]string{"--web"})
+	if err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	// Verify flag value
+	webFlag, err := cmd.Flags().GetBool("web")
+	if err != nil {
+		t.Fatalf("failed to get web flag: %v", err)
+	}
+	if !webFlag {
+		t.Error("Expected web flag to be true")
+	}
+}
+
+func TestRunOptions_WebSocketFlag(t *testing.T) {
+	app := New()
+	cmd := NewRunCmd(app)
+
+	// Parse flags with --web-socket
+	err := cmd.ParseFlags([]string{"--web-socket", "/custom/path.sock"})
+	if err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	// Verify flag value
+	webSocketFlag, err := cmd.Flags().GetString("web-socket")
+	if err != nil {
+		t.Fatalf("failed to get web-socket flag: %v", err)
+	}
+	if webSocketFlag != "/custom/path.sock" {
+		t.Errorf("Expected web-socket '/custom/path.sock', got %s", webSocketFlag)
+	}
+}
+
+func TestRunOptions_WebSocketWithoutWeb(t *testing.T) {
+	// Test that --web-socket can be set independently of --web
+	// (it's ignored when --web is false, but parsing should work)
+	app := New()
+	cmd := NewRunCmd(app)
+
+	// Parse flags with --web-socket but without --web
+	err := cmd.ParseFlags([]string{"--web-socket", "/custom/path.sock"})
+	if err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	// Verify --web defaults to false
+	webFlag, err := cmd.Flags().GetBool("web")
+	if err != nil {
+		t.Fatalf("failed to get web flag: %v", err)
+	}
+	if webFlag {
+		t.Error("Expected web flag to be false when not specified")
+	}
+
+	// Verify --web-socket was parsed
+	webSocketFlag, err := cmd.Flags().GetString("web-socket")
+	if err != nil {
+		t.Fatalf("failed to get web-socket flag: %v", err)
+	}
+	if webSocketFlag != "/custom/path.sock" {
+		t.Errorf("Expected web-socket '/custom/path.sock', got %s", webSocketFlag)
+	}
+}
+
 func TestRunOrchestrator_DryRun(t *testing.T) {
 	// Create temp directory with tasks
 	tmpDir := t.TempDir()
