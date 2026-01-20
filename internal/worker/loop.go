@@ -3,9 +3,11 @@ package worker
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
+	"time"
 
 	"github.com/RevCBH/choo/internal/discovery"
 	"github.com/RevCBH/choo/internal/events"
@@ -70,67 +72,131 @@ func (w *Worker) findReadyTasks() []*discovery.Task {
 
 // invokeClaudeForTask runs Claude CLI as subprocess with the task prompt
 // CRITICAL: Uses subprocess, NEVER the Claude API directly
+// NOTE: We do NOT pass --max-turns to Claude. Each Claude invocation is ONE Ralph turn.
+// Claude should have unlimited turns to complete the task within a single invocation.
+// MaxClaudeRetries controls how many times Ralph will invoke Claude, not Claude's internal turns.
 func (w *Worker) invokeClaudeForTask(ctx context.Context, prompt TaskPrompt) error {
-	// 1. Build args: --dangerously-skip-permissions, -p prompt.Content
+	// Build args: --dangerously-skip-permissions, -p prompt.Content
+	// No --max-turns: Claude gets unlimited turns per invocation
 	args := []string{
 		"--dangerously-skip-permissions",
 		"-p", prompt.Content,
 	}
 
-	// 2. Optionally add --max-turns if configured
-	if w.config.MaxClaudeRetries > 0 {
-		args = append(args, "--max-turns", strconv.Itoa(w.config.MaxClaudeRetries))
-	}
-
-	// 3. Create exec.CommandContext for "claude" binary
+	// Create exec.CommandContext for "claude" binary
 	cmd := exec.CommandContext(ctx, "claude", args...)
 
-	// 4. Set cmd.Dir to worktree path
+	// Set cmd.Dir to worktree path
 	cmd.Dir = w.worktreePath
 
-	// 5. Connect stdout/stderr to logger (for now, inherit from parent)
-	cmd.Stdout = nil // Will inherit
-	cmd.Stderr = nil // Will inherit
+	// Create log file for Claude output
+	logDir := filepath.Join(w.config.WorktreeBase, "logs")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create log directory: %v\n", err)
+	}
 
-	// 6. Emit TaskClaudeInvoke event
+	logFile, err := os.Create(filepath.Join(logDir, fmt.Sprintf("claude-%s-%d.log", w.unit.ID, time.Now().Unix())))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create log file: %v\n", err)
+		// Fall back to inheriting stdout/stderr (unless suppressed)
+		if !w.config.SuppressOutput {
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
+	} else {
+		defer logFile.Close()
+		// Write prompt to log file first
+		fmt.Fprintf(logFile, "=== PROMPT ===\n%s\n=== END PROMPT ===\n\n", prompt.Content)
+		fmt.Fprintf(logFile, "=== CLAUDE OUTPUT ===\n")
+
+		if w.config.SuppressOutput {
+			// TUI mode: only write to log file
+			cmd.Stdout = logFile
+			cmd.Stderr = logFile
+		} else {
+			// Non-TUI mode: tee output to both log file and stdout/stderr
+			cmd.Stdout = io.MultiWriter(os.Stdout, logFile)
+			cmd.Stderr = io.MultiWriter(os.Stderr, logFile)
+			fmt.Fprintf(os.Stderr, "Claude output logging to: %s\n", logFile.Name())
+		}
+	}
+
+	// Emit TaskClaudeInvoke event
 	if w.events != nil {
 		evt := events.NewEvent(events.TaskClaudeInvoke, w.unit.ID)
 		if w.currentTask != nil {
-			evt = evt.WithTask(w.currentTask.Number)
+			evt = evt.WithTask(w.currentTask.Number).WithPayload(map[string]any{
+				"title": w.currentTask.Title,
+			})
 		}
 		w.events.Emit(evt)
 	}
 
-	// 7. Run command
-	err := cmd.Run()
+	// Run command
+	runErr := cmd.Run()
 
-	// 8. Emit TaskClaudeDone event
+	// Write completion status to log
+	if logFile != nil {
+		fmt.Fprintf(logFile, "\n=== END CLAUDE OUTPUT ===\n")
+		if runErr != nil {
+			fmt.Fprintf(logFile, "Exit error: %v\n", runErr)
+		} else {
+			fmt.Fprintf(logFile, "Exit: success\n")
+		}
+	}
+
+	// Emit TaskClaudeDone event
 	if w.events != nil {
 		evt := events.NewEvent(events.TaskClaudeDone, w.unit.ID)
 		if w.currentTask != nil {
 			evt = evt.WithTask(w.currentTask.Number)
 		}
-		if err != nil {
-			evt = evt.WithError(err)
+		if runErr != nil {
+			evt = evt.WithError(runErr)
 		}
 		w.events.Emit(evt)
 	}
 
-	// 9. Return error if command failed
-	return err
+	// Return error if command failed
+	return runErr
 }
 
 // verifyTaskComplete re-parses task file to check if status was updated
 func (w *Worker) verifyTaskComplete(task *discovery.Task) (bool, error) {
-	// 1. Call discovery.ParseTaskFile(task.FilePath)
-	// Use worktreePath since Claude edits files in the worktree, not the main repo
-	taskPath := filepath.Join(w.worktreePath, task.FilePath)
-	updated, err := discovery.ParseTaskFile(taskPath)
-	if err != nil {
-		return false, err
+	// unit.Path may be relative (e.g., specs/tasks/web) or absolute
+	// task.FilePath is relative to unit dir (e.g., 01-types.md)
+	// We need: worktreePath/unit.Path/task.FilePath
+
+	// If unit.Path is absolute, make it relative to RepoRoot
+	unitPath := w.unit.Path
+	if filepath.IsAbs(unitPath) {
+		var err error
+		unitPath, err = filepath.Rel(w.config.RepoRoot, unitPath)
+		if err != nil {
+			return false, fmt.Errorf("failed to get relative unit path: %w", err)
+		}
 	}
 
-	// 2. Return updated.Status == TaskStatusComplete
+	// Construct full task path in worktree:
+	// e.g., .ralph/worktrees/web/specs/tasks/web/01-types.md
+	taskPath := filepath.Join(w.worktreePath, unitPath, task.FilePath)
+
+	// Debug output
+	fmt.Fprintf(os.Stderr, "DEBUG verifyTaskComplete:\n")
+	fmt.Fprintf(os.Stderr, "  worktreePath: %s\n", w.worktreePath)
+	fmt.Fprintf(os.Stderr, "  unitPath: %s\n", unitPath)
+	fmt.Fprintf(os.Stderr, "  task.FilePath: %s\n", task.FilePath)
+	fmt.Fprintf(os.Stderr, "  taskPath: %s\n", taskPath)
+
+	updated, err := discovery.ParseTaskFile(taskPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  ERROR: %v\n", err)
+		return false, fmt.Errorf("failed to parse task file %s: %w", taskPath, err)
+	}
+
+	fmt.Fprintf(os.Stderr, "  status: %s\n", updated.Status)
+
+	// Return true if status is complete
 	return updated.Status == discovery.TaskStatusComplete, nil
 }
 
@@ -174,31 +240,32 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 	}
 
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		// a. Emit TaskClaudeInvoke event (done inside invokeClaudeForTask)
-		// b. Invoke Claude
-		err := w.invokeClaudeForTask(ctx, prompt)
-		if err != nil {
-			// If Claude invocation itself failed, continue retrying
-			if w.events != nil {
-				evt := events.NewEvent(events.TaskRetry, w.unit.ID)
-				evt = evt.WithPayload(map[string]interface{}{
-					"attempt": attempt + 1,
-					"reason":  "claude_invocation_failed",
-					"error":   err.Error(),
-				})
-				w.events.Emit(evt)
-			}
-			continue
+		fmt.Fprintf(os.Stderr, "DEBUG: attempt %d of %d\n", attempt+1, maxRetries)
+
+		// Set currentTask to first ready task for event emission
+		if len(readyTasks) > 0 {
+			w.currentTask = readyTasks[0]
 		}
 
+		// a. Emit TaskClaudeInvoke event (done inside invokeClaudeForTask)
+		// b. Invoke Claude
+		claudeErr := w.invokeClaudeForTask(ctx, prompt)
+		fmt.Fprintf(os.Stderr, "DEBUG: Claude returned, error=%v\n", claudeErr)
+
 		// c. Find which task was completed (scan all ready tasks)
+		// IMPORTANT: Check for completion EVEN if Claude returned an error,
+		// because Claude might complete the task and then hit max-turns or other limits
+		fmt.Fprintf(os.Stderr, "DEBUG: checking %d ready tasks for completion\n", len(readyTasks))
 		var completedTask *discovery.Task
 		for _, task := range readyTasks {
+			fmt.Fprintf(os.Stderr, "DEBUG: checking task #%d\n", task.Number)
 			complete, err := w.verifyTaskComplete(task)
 			if err != nil {
+				fmt.Fprintf(os.Stderr, "DEBUG: verifyTaskComplete error: %v\n", err)
 				// Error parsing task file, continue to next task
 				continue
 			}
+			fmt.Fprintf(os.Stderr, "DEBUG: task #%d complete=%v\n", task.Number, complete)
 			if complete {
 				completedTask = task
 				break
@@ -207,13 +274,18 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 
 		// d. If a task was completed
 		if completedTask != nil {
+			fmt.Fprintf(os.Stderr, "DEBUG: task #%d found complete, running backpressure\n", completedTask.Number)
 			// Run backpressure
 			if w.events != nil {
-				evt := events.NewEvent(events.TaskBackpressure, w.unit.ID).WithTask(completedTask.Number)
+				evt := events.NewEvent(events.TaskBackpressure, w.unit.ID).WithTask(completedTask.Number).WithPayload(map[string]any{
+					"title": completedTask.Title,
+				})
 				w.events.Emit(evt)
 			}
 
+			fmt.Fprintf(os.Stderr, "DEBUG: backpressure command: %s\n", completedTask.Backpressure)
 			result := RunBackpressure(ctx, completedTask.Backpressure, w.worktreePath, w.config.BackpressureTimeout)
+			fmt.Fprintf(os.Stderr, "DEBUG: backpressure result: success=%v, exit=%d, output=%s\n", result.Success, result.ExitCode, result.Output)
 
 			// If backpressure passes → return completed task
 			if result.Success {
@@ -241,10 +313,14 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 		// e. If no task completed → emit TaskRetry, continue
 		if w.events != nil {
 			evt := events.NewEvent(events.TaskRetry, w.unit.ID)
-			evt = evt.WithPayload(map[string]interface{}{
+			payload := map[string]interface{}{
 				"attempt": attempt + 1,
 				"reason":  "no_task_completed",
-			})
+			}
+			if claudeErr != nil {
+				payload["claude_error"] = claudeErr.Error()
+			}
+			evt = evt.WithPayload(payload)
 			w.events.Emit(evt)
 		}
 	}
