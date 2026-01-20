@@ -177,11 +177,11 @@ body {
     opacity: 0.3;
 }
 
-.node circle {
+.node rect {
     transition: fill 0.3s;
 }
 
-.node circle.pulse {
+.node rect.pulse {
     animation: pulse 2s infinite;
 }
 
@@ -191,6 +191,24 @@ body {
     }
     50% {
         opacity: 0.6;
+    }
+}
+
+/* Progress block styling */
+.progress-block {
+    transition: fill 0.3s, opacity 0.3s;
+}
+
+.progress-block.current-task {
+    animation: task-pulse 1s infinite;
+}
+
+@keyframes task-pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.4;
     }
 }
 

@@ -56,8 +56,9 @@ func (s *Store) HandleEvent(e *Event) {
 		if s.graph != nil {
 			for _, node := range s.graph.Nodes {
 				s.units[node.ID] = &UnitState{
-					ID:     node.ID,
-					Status: "pending",
+					ID:         node.ID,
+					Status:     "pending",
+					TotalTasks: node.Tasks,
 				}
 			}
 		}
@@ -71,16 +72,36 @@ func (s *Store) HandleEvent(e *Event) {
 		if unit, ok := s.units[e.Unit]; ok {
 			unit.Status = "in_progress"
 			unit.StartedAt = e.Time
+			// Extract total_tasks from payload if available
+			if e.Payload != nil {
+				var payload struct {
+					TotalTasks     int `json:"total_tasks"`
+					CompletedTasks int `json:"completed_tasks"`
+				}
+				if err := json.Unmarshal(e.Payload, &payload); err == nil {
+					unit.TotalTasks = payload.TotalTasks
+					unit.CurrentTask = payload.CompletedTasks
+				}
+			}
 		}
 
 	case "task.started":
 		if unit, ok := s.units[e.Unit]; ok {
-			unit.CurrentTask++
+			// Use task number from event if provided (convert 1-indexed to 0-indexed)
+			if e.Task != nil {
+				unit.CurrentTask = *e.Task - 1
+			} else {
+				unit.CurrentTask++
+			}
 		}
 
 	case "unit.completed":
 		if unit, ok := s.units[e.Unit]; ok {
 			unit.Status = "complete"
+			// Set to last task (0-indexed) so display shows "N of N"
+			if unit.TotalTasks > 0 {
+				unit.CurrentTask = unit.TotalTasks - 1
+			}
 		}
 
 	case "unit.failed":
