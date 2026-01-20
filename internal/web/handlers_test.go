@@ -28,8 +28,8 @@ func TestIndexHandler_ServesHTML(t *testing.T) {
 	}
 
 	body := w.Body.String()
-	if !strings.Contains(body, "Choo Orchestrator Monitor") {
-		t.Errorf("expected body to contain 'Choo Orchestrator Monitor', got %s", body)
+	if !strings.Contains(body, "Choo Orchestrator") {
+		t.Errorf("expected body to contain 'Choo Orchestrator', got %s", body)
 	}
 }
 
@@ -42,7 +42,7 @@ func TestIndexHandler_ServesStaticFiles(t *testing.T) {
 		contains    string
 	}{
 		{"/style.css", "text/css", "font-family"},
-		{"/app.js", "javascript", "console.log"},
+		{"/app.js", "javascript", "EventSource"},
 	}
 
 	for _, tt := range tests {

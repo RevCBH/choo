@@ -50,7 +50,8 @@ class SSEClient {
         const eventTypes = [
             'unit.started', 'unit.completed', 'unit.failed',
             'task.started', 'task.completed',
-            'orch.started', 'orch.completed', 'orch.failed'
+            'orch.started', 'orch.completed', 'orch.failed',
+            'orch.dryrun.started', 'orch.dryrun.completed'
         ];
 
         eventTypes.forEach(type => {
@@ -146,6 +147,19 @@ const eventHandlers = {
     "orch.failed": (event) => {
         state.status = "failed";
         showToast("Orchestration failed", "error");
+        renderConnectionStatus();
+        addEventLog(event);
+    },
+
+    "orch.dryrun.started": (event) => {
+        state.status = "running";
+        state.startedAt = event.time;
+        renderConnectionStatus();
+        addEventLog(event);
+    },
+
+    "orch.dryrun.completed": (event) => {
+        state.status = "complete";
         renderConnectionStatus();
         addEventLog(event);
     }

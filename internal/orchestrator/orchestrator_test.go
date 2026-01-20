@@ -646,3 +646,272 @@ depends_on: []
 		t.Error("expected Execution Plan header in output")
 	}
 }
+
+func TestFilterOutCompleteUnits(t *testing.T) {
+	tests := []struct {
+		name     string
+		units    []*discovery.Unit
+		expected []string // IDs of units that should remain
+	}{
+		{
+			name:     "empty list",
+			units:    []*discovery.Unit{},
+			expected: []string{},
+		},
+		{
+			name: "no complete units",
+			units: []*discovery.Unit{
+				{ID: "unit-a", Status: discovery.UnitStatusPending},
+				{ID: "unit-b", Status: discovery.UnitStatusInProgress},
+			},
+			expected: []string{"unit-a", "unit-b"},
+		},
+		{
+			name: "all complete units",
+			units: []*discovery.Unit{
+				{ID: "unit-a", Status: discovery.UnitStatusComplete},
+				{ID: "unit-b", Status: discovery.UnitStatusComplete},
+			},
+			expected: []string{},
+		},
+		{
+			name: "mixed - filters out complete",
+			units: []*discovery.Unit{
+				{ID: "unit-a", Status: discovery.UnitStatusComplete},
+				{ID: "unit-b", Status: discovery.UnitStatusPending},
+				{ID: "unit-c", Status: discovery.UnitStatusInProgress},
+				{ID: "unit-d", Status: discovery.UnitStatusComplete},
+			},
+			expected: []string{"unit-b", "unit-c"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := filterOutCompleteUnits(tc.units)
+
+			if len(result) != len(tc.expected) {
+				t.Fatalf("expected %d units, got %d", len(tc.expected), len(result))
+			}
+
+			for i, unit := range result {
+				if unit.ID != tc.expected[i] {
+					t.Errorf("expected unit %s at position %d, got %s", tc.expected[i], i, unit.ID)
+				}
+			}
+		})
+	}
+}
+
+func TestOrchestrator_DryRun_FiltersCompleteUnits(t *testing.T) {
+	// Test that dry-run excludes already-complete units
+	tmpDir := t.TempDir()
+	tasksDir := filepath.Join(tmpDir, "tasks")
+
+	// Create complete-unit with all tasks complete
+	completeDir := filepath.Join(tasksDir, "complete-unit")
+	os.MkdirAll(completeDir, 0755)
+	os.WriteFile(filepath.Join(completeDir, "IMPLEMENTATION_PLAN.md"), []byte(`---
+unit: complete-unit
+depends_on: []
+---
+# Complete Unit
+`), 0644)
+	os.WriteFile(filepath.Join(completeDir, "01-task.md"), []byte(`---
+task: 1
+status: complete
+backpressure: "echo ok"
+---
+# Task 1
+`), 0644)
+
+	// Create pending-unit with pending tasks
+	pendingDir := filepath.Join(tasksDir, "pending-unit")
+	os.MkdirAll(pendingDir, 0755)
+	os.WriteFile(filepath.Join(pendingDir, "IMPLEMENTATION_PLAN.md"), []byte(`---
+unit: pending-unit
+depends_on: []
+---
+# Pending Unit
+`), 0644)
+	os.WriteFile(filepath.Join(pendingDir, "01-task.md"), []byte(`---
+task: 1
+status: pending
+backpressure: "echo ok"
+---
+# Task 1
+`), 0644)
+
+	bus := events.NewBus(100)
+	defer bus.Close()
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	orch := New(Config{
+		TasksDir:    tasksDir,
+		Parallelism: 1,
+		DryRun:      true,
+	}, Dependencies{
+		Bus: bus,
+	})
+
+	ctx := context.Background()
+	result, err := orch.Run(ctx)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should only include the pending unit
+	if result.TotalUnits != 1 {
+		t.Errorf("expected 1 unit (pending only), got %d", result.TotalUnits)
+	}
+
+	// Output should contain pending-unit but not complete-unit
+	if !strings.Contains(output, "pending-unit") {
+		t.Error("expected output to contain pending-unit")
+	}
+	if strings.Contains(output, "complete-unit") {
+		t.Error("expected output NOT to contain complete-unit")
+	}
+}
+
+func TestOrchestrator_DryRun_AllUnitsComplete(t *testing.T) {
+	// Test that when all units are complete, dry-run returns early
+	tmpDir := t.TempDir()
+	tasksDir := filepath.Join(tmpDir, "tasks")
+
+	// Create only complete units
+	completeDir := filepath.Join(tasksDir, "complete-unit")
+	os.MkdirAll(completeDir, 0755)
+	os.WriteFile(filepath.Join(completeDir, "IMPLEMENTATION_PLAN.md"), []byte(`---
+unit: complete-unit
+depends_on: []
+---
+# Complete Unit
+`), 0644)
+	os.WriteFile(filepath.Join(completeDir, "01-task.md"), []byte(`---
+task: 1
+status: complete
+backpressure: "echo ok"
+---
+# Task 1
+`), 0644)
+
+	bus := events.NewBus(100)
+	defer bus.Close()
+
+	orch := New(Config{
+		TasksDir:    tasksDir,
+		Parallelism: 1,
+		DryRun:      true,
+	}, Dependencies{
+		Bus: bus,
+	})
+
+	ctx := context.Background()
+	result, err := orch.Run(ctx)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// All units complete, so TotalUnits should be 0
+	if result.TotalUnits != 0 {
+		t.Errorf("expected 0 units when all are complete, got %d", result.TotalUnits)
+	}
+}
+
+func TestOrchestrator_SingleUnit_FiltersCompleteDependencies(t *testing.T) {
+	// Test that when targeting a single unit, complete dependencies are filtered out
+	tmpDir := t.TempDir()
+	tasksDir := filepath.Join(tmpDir, "tasks")
+
+	// Create dependency unit that is complete
+	depDir := filepath.Join(tasksDir, "dep-unit")
+	os.MkdirAll(depDir, 0755)
+	os.WriteFile(filepath.Join(depDir, "IMPLEMENTATION_PLAN.md"), []byte(`---
+unit: dep-unit
+depends_on: []
+---
+# Dependency Unit
+`), 0644)
+	os.WriteFile(filepath.Join(depDir, "01-task.md"), []byte(`---
+task: 1
+status: complete
+backpressure: "echo ok"
+---
+# Task 1
+`), 0644)
+
+	// Create target unit that depends on complete unit
+	targetDir := filepath.Join(tasksDir, "target-unit")
+	os.MkdirAll(targetDir, 0755)
+	os.WriteFile(filepath.Join(targetDir, "IMPLEMENTATION_PLAN.md"), []byte(`---
+unit: target-unit
+depends_on: [dep-unit]
+---
+# Target Unit
+`), 0644)
+	os.WriteFile(filepath.Join(targetDir, "01-task.md"), []byte(`---
+task: 1
+status: pending
+backpressure: "echo ok"
+---
+# Task 1
+`), 0644)
+
+	bus := events.NewBus(100)
+	defer bus.Close()
+
+	// Capture stdout
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	orch := New(Config{
+		TasksDir:    tasksDir,
+		Parallelism: 1,
+		SingleUnit:  "target-unit",
+		DryRun:      true,
+	}, Dependencies{
+		Bus: bus,
+	})
+
+	ctx := context.Background()
+	result, err := orch.Run(ctx)
+
+	w.Close()
+	os.Stdout = oldStdout
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	output := buf.String()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should only include target-unit (dependency is complete)
+	if result.TotalUnits != 1 {
+		t.Errorf("expected 1 unit (target only), got %d", result.TotalUnits)
+	}
+
+	// Output should contain target-unit but not dep-unit
+	if !strings.Contains(output, "target-unit") {
+		t.Error("expected output to contain target-unit")
+	}
+	if strings.Contains(output, "dep-unit") {
+		t.Error("expected output NOT to contain dep-unit (it's complete)")
+	}
+}

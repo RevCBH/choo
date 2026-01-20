@@ -92,7 +92,7 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 	cmd.Flags().StringVar(&opts.Unit, "unit", "", "Run only specified unit (single-unit mode)")
 	cmd.Flags().BoolVar(&opts.SkipReview, "skip-review", false, "Auto-merge without waiting for review")
 	cmd.Flags().BoolVar(&opts.Web, "web", false, "Enable web UI event forwarding")
-	cmd.Flags().StringVar(&opts.WebSocket, "web-socket", "", "Custom Unix socket path (default: /tmp/choo.sock)")
+	cmd.Flags().StringVar(&opts.WebSocket, "web-socket", "", "Custom Unix socket path (default: ~/.choo/web.sock)")
 	cmd.Flags().BoolVar(&opts.NoTUI, "no-tui", false, "Disable interactive TUI (use summary-only output)")
 
 	return cmd

@@ -216,6 +216,35 @@ func filterToUnit(units []*discovery.Unit, targetID string) []*discovery.Unit {
 	return result
 }
 
+// filterOutCompleteUnits removes units that are already complete
+// and updates dependency lists to remove references to complete units
+func filterOutCompleteUnits(units []*discovery.Unit) []*discovery.Unit {
+	// First, collect IDs of complete units
+	completeIDs := make(map[string]bool)
+	for _, unit := range units {
+		if unit.Status == discovery.UnitStatusComplete {
+			completeIDs[unit.ID] = true
+		}
+	}
+
+	// Filter out complete units and update dependency lists
+	var result []*discovery.Unit
+	for _, unit := range units {
+		if unit.Status != discovery.UnitStatusComplete {
+			// Remove completed dependencies from the unit's DependsOn list
+			var filteredDeps []string
+			for _, depID := range unit.DependsOn {
+				if !completeIDs[depID] {
+					filteredDeps = append(filteredDeps, depID)
+				}
+			}
+			unit.DependsOn = filteredDeps
+			result = append(result, unit)
+		}
+	}
+	return result
+}
+
 // Run executes the orchestration loop until completion or cancellation
 // Returns Result with execution statistics
 func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
@@ -233,6 +262,16 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 		if len(units) == 0 {
 			return nil, fmt.Errorf("unit %q not found", o.cfg.SingleUnit)
 		}
+	}
+
+	// Filter out already-complete units (they don't need to be re-executed)
+	units = filterOutCompleteUnits(units)
+	if len(units) == 0 {
+		// All units already complete - nothing to do
+		return &Result{
+			TotalUnits:     0,
+			CompletedUnits: 0,
+		}, nil
 	}
 
 	o.units = units
@@ -524,6 +563,13 @@ func (o *Orchestrator) dryRun(units []*discovery.Unit) (*Result, error) {
 	// Build unit map for task counts
 	unitMap := buildUnitMap(units)
 
+	// Emit dry-run started event with graph for web UI
+	o.bus.Emit(events.NewEvent(events.OrchDryRunStarted, "").WithPayload(map[string]any{
+		"unit_count":  len(units),
+		"parallelism": o.cfg.Parallelism,
+		"graph":       buildGraphData(units, schedule.Levels),
+	}))
+
 	// Print execution plan
 	fmt.Printf("Execution Plan\n")
 	fmt.Printf("==============\n\n")
@@ -548,6 +594,13 @@ func (o *Orchestrator) dryRun(units []*discovery.Unit) (*Result, error) {
 	for i, unitID := range schedule.TopologicalOrder {
 		fmt.Printf("  %d. %s\n", i+1, unitID)
 	}
+
+	// Emit dry-run completed event
+	o.bus.Emit(events.NewEvent(events.OrchDryRunCompleted, ""))
+
+	// Brief delay to allow event bus subscribers to process events
+	// This is important for web UI to receive events before program exits
+	time.Sleep(100 * time.Millisecond)
 
 	return &Result{
 		TotalUnits: len(units),

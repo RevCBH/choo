@@ -97,7 +97,7 @@ func DiscoverUnit(unitDir string) (*Unit, error) {
 		PRNumber:  unitFrontmatter.OrchPRNumber,
 	}
 
-	// Parse orchestrator status
+	// Parse orchestrator status (will be overridden by task inference if not set)
 	if unitFrontmatter.OrchStatus != "" {
 		status, err := parseUnitStatus(unitFrontmatter.OrchStatus)
 		if err != nil {
@@ -107,6 +107,7 @@ func DiscoverUnit(unitDir string) (*Unit, error) {
 	} else {
 		unit.Status = UnitStatusPending
 	}
+	orchStatusExplicit := unitFrontmatter.OrchStatus != ""
 
 	// Parse orchestrator timestamps
 	if unitFrontmatter.OrchStartedAt != "" {
@@ -165,7 +166,52 @@ func DiscoverUnit(unitDir string) (*Unit, error) {
 		unit.Tasks = append(unit.Tasks, task)
 	}
 
+	// Infer unit status from task statuses when orch_status is not explicitly set
+	if !orchStatusExplicit && len(unit.Tasks) > 0 {
+		unit.Status = inferUnitStatusFromTasks(unit.Tasks)
+	}
+
 	return unit, nil
+}
+
+// inferUnitStatusFromTasks determines unit status based on task statuses
+func inferUnitStatusFromTasks(tasks []*Task) UnitStatus {
+	if len(tasks) == 0 {
+		return UnitStatusPending
+	}
+
+	completed := 0
+	inProgress := 0
+	failed := 0
+
+	for _, task := range tasks {
+		switch task.Status {
+		case TaskStatusComplete:
+			completed++
+		case TaskStatusInProgress:
+			inProgress++
+		case TaskStatusFailed:
+			failed++
+		}
+	}
+
+	// If any task failed, unit is failed
+	if failed > 0 {
+		return UnitStatusFailed
+	}
+
+	// If all tasks complete, unit is complete
+	if completed == len(tasks) {
+		return UnitStatusComplete
+	}
+
+	// If any task in progress or some completed, unit is in progress
+	if inProgress > 0 || completed > 0 {
+		return UnitStatusInProgress
+	}
+
+	// All tasks pending
+	return UnitStatusPending
 }
 
 // discoverTaskFiles finds all task files matching [0-9][0-9]-*.md pattern
