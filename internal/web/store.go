@@ -98,6 +98,10 @@ func (s *Store) HandleEvent(e *Event) {
 	case "unit.completed":
 		if unit, ok := s.units[e.Unit]; ok {
 			unit.Status = "complete"
+			// Set to last task (0-indexed) so display shows "N of N"
+			if unit.TotalTasks > 0 {
+				unit.CurrentTask = unit.TotalTasks - 1
+			}
 		}
 
 	case "unit.failed":
