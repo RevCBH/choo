@@ -122,7 +122,8 @@ func (p *SocketPusher) Start(ctx context.Context) error {
 			Time:    time.Now(),
 			Payload: p.graph,
 		}
-		p.writeWireEvent(wireEvent)
+		// Ignore error for initial graph push - not critical
+		_ = p.writeWireEvent(wireEvent)
 	}
 
 	return nil
@@ -179,8 +180,8 @@ func (p *SocketPusher) pushLoop(ctx context.Context) {
 						}
 						// Reconnected successfully, reset backoff
 						backoff = p.cfg.ReconnectBackoff
-						// Try to write the event again
-						p.writeEvent(e)
+						// Try to write the event again (ignore error, will retry on next event)
+						_ = p.writeEvent(e)
 						break
 					}
 					break
@@ -235,7 +236,9 @@ func (p *SocketPusher) writeWireEvent(wireEvent WireEvent) error {
 	}
 
 	// Set write deadline
-	conn.SetWriteDeadline(time.Now().Add(p.cfg.WriteTimeout))
+	if err := conn.SetWriteDeadline(time.Now().Add(p.cfg.WriteTimeout)); err != nil {
+		return err
+	}
 
 	// JSON encode with newline delimiter
 	data, err := json.Marshal(wireEvent)
