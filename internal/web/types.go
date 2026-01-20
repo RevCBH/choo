@@ -1,42 +1,9 @@
----
-task: 1
-status: complete
-backpressure: "go build ./internal/web/..."
-depends_on: []
----
-
-# Pusher Types
-
-**Parent spec**: `/specs/WEB-PUSHER.md`
-**Task**: #1 of 3
-
-## Objective
-
-Define the wire protocol types for event serialization and graph visualization payload structures.
-
-## Dependencies
-
-### Task Dependencies
-- None
-
-### Package Dependencies
-- `time` (standard library)
-
-## Deliverables
-
-### Files to Create
-
-```
-internal/web/
-└── types.go    # CREATE: Wire protocol types
-```
-
-### Types to Implement
-
-```go
 package web
 
-import "time"
+import (
+	"os"
+	"time"
+)
 
 // WireEvent is the JSON structure sent over the socket
 // Maps closely to events.Event but with explicit JSON serialization
@@ -59,10 +26,10 @@ type GraphPayload struct {
 
 // NodePayload represents a unit node in the graph
 type NodePayload struct {
-	ID       string   `json:"id"`
-	Label    string   `json:"label"`
-	Status   string   `json:"status"`
-	Tasks    int      `json:"tasks"`
+	ID        string   `json:"id"`
+	Label     string   `json:"label"`
+	Status    string   `json:"status"`
+	Tasks     int      `json:"tasks"`
 	DependsOn []string `json:"depends_on,omitempty"`
 }
 
@@ -104,39 +71,8 @@ func DefaultPusherConfig() PusherConfig {
 // DefaultSocketPath returns the default Unix socket path
 // Uses XDG_RUNTIME_DIR if available, otherwise /tmp
 func DefaultSocketPath() string {
-	// Implementation: check XDG_RUNTIME_DIR, fallback to /tmp/choo.sock
+	if xdgRuntime := os.Getenv("XDG_RUNTIME_DIR"); xdgRuntime != "" {
+		return xdgRuntime + "/choo.sock"
+	}
 	return "/tmp/choo.sock"
 }
-```
-
-### Implementation Notes
-
-1. `WireEvent` mirrors `events.Event` for JSON serialization
-2. `GraphPayload` provides visualization data for the web UI
-3. `NodePayload.Status` values: "pending", "running", "completed", "failed", "blocked"
-4. `DefaultSocketPath()` should check `os.Getenv("XDG_RUNTIME_DIR")` and use that if available
-
-## Backpressure
-
-### Validation Command
-
-```bash
-go build ./internal/web/...
-```
-
-### Must Pass
-| Check | Assertion |
-|-------|-----------|
-| Package compiles | No build errors |
-| Types exported | WireEvent, GraphPayload, NodePayload, EdgePayload, PusherConfig accessible |
-| Defaults work | DefaultPusherConfig() returns valid config |
-
-### CI Compatibility
-- [x] No external API keys
-- [x] No network access
-- [x] Runs in <60 seconds
-
-## NOT In Scope
-- SocketPusher struct (task #2)
-- Connection logic (task #2)
-- CLI integration (task #3)
