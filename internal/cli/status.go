@@ -1,13 +1,16 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/RevCBH/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/git"
 	"github.com/spf13/cobra"
 )
 
@@ -48,6 +51,12 @@ func (a *App) ShowStatus(opts StatusOptions) error {
 	units, err := discovery.Discover(opts.TasksDir)
 	if err != nil {
 		return fmt.Errorf("failed to load discovery: %w", err)
+	}
+
+	// Refresh task statuses from worktrees if they exist
+	wd, err := os.Getwd()
+	if err == nil {
+		refreshTaskStatusesFromWorktrees(context.Background(), wd, units)
 	}
 
 	// Convert to UnitDisplay
@@ -215,4 +224,41 @@ func convertToUnitDisplays(units []*discovery.Unit) []UnitDisplay {
 	}
 
 	return displays
+}
+
+// refreshTaskStatusesFromWorktrees checks for existing worktrees and refreshes
+// task statuses from them. This ensures status reflects actual progress in worktrees.
+func refreshTaskStatusesFromWorktrees(ctx context.Context, repoRoot string, units []*discovery.Unit) {
+	// Create worktree manager to find existing worktrees
+	wtManager := git.NewWorktreeManager(repoRoot, nil)
+
+	for _, unit := range units {
+		// Check if a worktree exists for this unit
+		wt, err := wtManager.GetWorktree(ctx, unit.ID)
+		if err != nil || wt == nil {
+			continue // No worktree for this unit
+		}
+
+		// Compute unit path relative to repo root
+		unitPath := unit.Path
+		if filepath.IsAbs(unitPath) {
+			relPath, err := filepath.Rel(repoRoot, unitPath)
+			if err != nil {
+				continue
+			}
+			unitPath = relPath
+		}
+
+		// Re-parse each task from the worktree
+		for _, task := range unit.Tasks {
+			taskPath := filepath.Join(wt.Path, unitPath, task.FilePath)
+			updated, err := discovery.ParseTaskFile(taskPath)
+			if err != nil {
+				continue // Could not parse, keep original status
+			}
+
+			// Update task status from worktree
+			task.Status = updated.Status
+		}
+	}
 }

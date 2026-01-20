@@ -72,14 +72,40 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 				opts.TasksDir = args[0]
 			}
 
+			// Create context
+			ctx := context.Background()
+
+			// If --target wasn't explicitly set, use current branch
+			wd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("failed to get working directory: %w", err)
+			}
+			if !cmd.Flags().Changed("target") {
+				currentBranch, err := git.GetCurrentBranch(ctx, wd)
+				if err != nil {
+					// Fall back to "main" if we can't detect current branch
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not detect current branch (%v), using 'main'\n", err)
+					opts.TargetBranch = "main"
+				} else {
+					opts.TargetBranch = currentBranch
+				}
+			}
+
+			// Ensure target branch exists on remote (auto-push if not)
+			if !opts.DryRun {
+				pushed, err := git.EnsureBranchOnRemote(ctx, wd, opts.TargetBranch)
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not verify target branch on remote: %v\n", err)
+				} else if pushed {
+					fmt.Fprintf(cmd.OutOrStdout(), "Pushed target branch '%s' to remote\n", opts.TargetBranch)
+				}
+			}
+
 			// Validate options
 			if err := opts.Validate(); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 				os.Exit(2)
 			}
-
-			// Create context
-			ctx := context.Background()
 
 			// Run orchestrator
 			return app.RunOrchestrator(ctx, opts)
@@ -88,7 +114,7 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 
 	// Add flags
 	cmd.Flags().IntVarP(&opts.Parallelism, "parallelism", "p", 4, "Max concurrent units")
-	cmd.Flags().StringVarP(&opts.TargetBranch, "target", "t", "main", "Branch PRs target")
+	cmd.Flags().StringVarP(&opts.TargetBranch, "target", "t", "main", "Branch PRs target (default: current branch)")
 	cmd.Flags().BoolVarP(&opts.DryRun, "dry-run", "n", false, "Show execution plan without running")
 	cmd.Flags().BoolVar(&opts.NoPR, "no-pr", false, "Skip PR creation")
 	cmd.Flags().StringVar(&opts.Unit, "unit", "", "Run only specified unit (single-unit mode)")

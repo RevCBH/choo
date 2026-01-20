@@ -98,14 +98,12 @@ func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker 
 
 // Run executes the unit through all phases: setup, task loop, baseline, PR
 func (w *Worker) Run(ctx context.Context) error {
-	// Track success to decide whether to cleanup worktree
-	// On failure, preserve worktree for debugging/resume
-	success := false
+	// NOTE: Worktrees are intentionally NOT cleaned up on success.
+	// They preserve task status information that `choo status` reads.
+	// Worktrees should only be removed after PR is merged (via `choo cleanup`).
 	defer func() {
-		if w.worktreePath != "" && success {
-			_ = w.cleanup(ctx)
-		} else if w.worktreePath != "" {
-			fmt.Fprintf(os.Stderr, "Preserving worktree for debugging: %s\n", w.worktreePath)
+		if w.worktreePath != "" {
+			fmt.Fprintf(os.Stderr, "Worktree preserved at: %s\n", w.worktreePath)
 		}
 	}()
 
@@ -173,9 +171,6 @@ func (w *Worker) Run(ctx context.Context) error {
 		evt := events.NewEvent(events.UnitCompleted, w.unit.ID)
 		w.events.Emit(evt)
 	}
-
-	// Mark success so worktree gets cleaned up
-	success = true
 
 	return nil
 }
@@ -322,6 +317,28 @@ func (w *Worker) runBaselinePhase(ctx context.Context) error {
 
 // createPR pushes branch and creates pull request
 func (w *Worker) createPR(ctx context.Context) error {
+	// Check if a PR already exists for this branch
+	checkCmd := exec.CommandContext(ctx, "gh", "pr", "list", "--head", w.branch, "--json", "number", "--limit", "1")
+	checkCmd.Dir = w.worktreePath
+	output, err := checkCmd.Output()
+	trimmedOutput := strings.TrimSpace(string(output))
+	if err == nil && trimmedOutput != "[]" && trimmedOutput != "" {
+		// PR already exists, skip creation
+		fmt.Fprintf(os.Stderr, "PR already exists for branch %s, skipping creation\n", w.branch)
+
+		// Still update unit status to pr_open
+		if err := w.updateUnitStatus(discovery.UnitStatusPROpen); err != nil {
+			return fmt.Errorf("failed to update unit status to pr_open: %w", err)
+		}
+
+		// Emit PRCreated event (for consistency)
+		if w.events != nil {
+			evt := events.NewEvent(events.PRCreated, w.unit.ID)
+			w.events.Emit(evt)
+		}
+		return nil
+	}
+
 	// Push branch to remote
 	if _, err := w.runner().Exec(ctx, w.worktreePath, "push", "-u", "origin", w.branch); err != nil {
 		return fmt.Errorf("failed to push branch: %w", err)
