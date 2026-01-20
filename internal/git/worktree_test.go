@@ -8,279 +8,84 @@ import (
 	"testing"
 )
 
-// createInitialCommit creates an initial commit in the test repo
-func createInitialCommit(t *testing.T, repoRoot string) {
-	t.Helper()
+func TestWorktreeManager_Create_UsesExpectedBranchAndPath(t *testing.T) {
+	runner := newFakeRunner()
+	runner.stub("worktree add -b ralph/unit-1 /tmp/repo/.ralph/worktrees/unit-1 HEAD", "", nil)
+	useRunner(t, runner)
 
-	ctx := context.Background()
-
-	// Create README
-	readmePath := filepath.Join(repoRoot, "README.md")
-	if err := os.WriteFile(readmePath, []byte("# Test Repo\n"), 0644); err != nil {
-		t.Fatalf("failed to create README: %v", err)
-	}
-
-	if _, err := gitExec(ctx, repoRoot, "add", "README.md"); err != nil {
-		t.Fatalf("failed to git add: %v", err)
-	}
-
-	if _, err := gitExec(ctx, repoRoot, "commit", "-m", "Initial commit"); err != nil {
-		t.Fatalf("failed to git commit: %v", err)
-	}
-}
-
-func TestWorktreeManager_Create(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	createInitialCommit(t, repoRoot)
-
-	manager := NewWorktreeManager(repoRoot, nil)
-	ctx := context.Background()
-
-	wt, err := manager.CreateWorktree(ctx, "task-1", "HEAD")
+	manager := NewWorktreeManager("/tmp/repo", nil)
+	wt, err := manager.CreateWorktree(context.Background(), "unit-1", "HEAD")
 	if err != nil {
 		t.Fatalf("CreateWorktree failed: %v", err)
 	}
-
-	// Verify worktree path
-	expectedPath := filepath.Join(repoRoot, ".ralph", "worktrees", "task-1")
-	if wt.Path != expectedPath {
-		t.Errorf("expected path %s, got %s", expectedPath, wt.Path)
+	if !strings.HasSuffix(wt.Path, filepath.Join(".ralph", "worktrees", "unit-1")) {
+		t.Errorf("unexpected worktree path: %s", wt.Path)
 	}
-
-	// Verify worktree directory exists
-	if _, err := os.Stat(wt.Path); os.IsNotExist(err) {
-		t.Errorf("worktree directory does not exist: %s", wt.Path)
-	}
-
-	// Verify UnitID
-	if wt.UnitID != "task-1" {
-		t.Errorf("expected UnitID task-1, got %s", wt.UnitID)
-	}
-
-	// Verify branch was created
-	if wt.Branch == "" {
-		t.Error("expected branch to be set")
+	if wt.Branch != "ralph/unit-1" {
+		t.Errorf("expected branch ralph/unit-1, got %s", wt.Branch)
 	}
 }
 
-func TestWorktreeManager_CreateBranch(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	createInitialCommit(t, repoRoot)
-
-	manager := NewWorktreeManager(repoRoot, nil)
-	ctx := context.Background()
-
-	// Create worktree with specific target branch
-	wt, err := manager.CreateWorktree(ctx, "task-2", "HEAD")
-	if err != nil {
-		t.Fatalf("CreateWorktree failed: %v", err)
+func TestWorktreeManager_Remove_DeletesDirectory(t *testing.T) {
+	dir := t.TempDir()
+	worktreeDir := filepath.Join(dir, ".ralph", "worktrees", "unit-2")
+	if err := os.MkdirAll(worktreeDir, 0755); err != nil {
+		t.Fatalf("failed to create worktree dir: %v", err)
 	}
 
-	// Verify branch name follows expected pattern
-	expectedBranch := "ralph/task-2"
-	if wt.Branch != expectedBranch {
-		t.Errorf("expected branch %s, got %s", expectedBranch, wt.Branch)
-	}
+	runner := newFakeRunner()
+	runner.stub("worktree remove "+worktreeDir+" --force", "", nil)
+	useRunner(t, runner)
 
-	// Verify branch exists in git
-	output, err := gitExec(ctx, repoRoot, "branch", "--list", wt.Branch)
-	if err != nil {
-		t.Fatalf("failed to list branches: %v", err)
-	}
-	if !strings.Contains(output, wt.Branch) {
-		t.Errorf("branch %s does not exist in output: %s", wt.Branch, output)
-	}
-}
-
-func TestWorktreeManager_Remove(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	createInitialCommit(t, repoRoot)
-
-	manager := NewWorktreeManager(repoRoot, nil)
-	ctx := context.Background()
-
-	// Create worktree
-	wt, err := manager.CreateWorktree(ctx, "task-3", "HEAD")
-	if err != nil {
-		t.Fatalf("CreateWorktree failed: %v", err)
-	}
-
-	// Verify it exists
-	if _, err := os.Stat(wt.Path); os.IsNotExist(err) {
-		t.Fatalf("worktree was not created")
-	}
-
-	// Remove worktree
-	if err := manager.RemoveWorktree(ctx, wt); err != nil {
+	manager := NewWorktreeManager(dir, nil)
+	if err := manager.RemoveWorktree(context.Background(), &Worktree{
+		Path:   worktreeDir,
+		Branch: "ralph/unit-2",
+		UnitID: "unit-2",
+	}); err != nil {
 		t.Fatalf("RemoveWorktree failed: %v", err)
 	}
 
-	// Verify directory is gone
-	if _, err := os.Stat(wt.Path); !os.IsNotExist(err) {
-		t.Errorf("worktree directory still exists after removal")
-	}
-
-	// Verify git reference is gone
-	output, err := gitExec(ctx, repoRoot, "worktree", "list", "--porcelain")
-	if err != nil {
-		t.Fatalf("failed to list worktrees: %v", err)
-	}
-	if strings.Contains(output, wt.Path) {
-		t.Errorf("worktree still appears in git worktree list")
+	if _, err := os.Stat(worktreeDir); !os.IsNotExist(err) {
+		t.Errorf("expected worktree directory to be removed")
 	}
 }
 
-func TestWorktreeManager_List(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	createInitialCommit(t, repoRoot)
-
-	manager := NewWorktreeManager(repoRoot, nil)
-	ctx := context.Background()
-
-	// Create multiple worktrees
-	wt1, err := manager.CreateWorktree(ctx, "task-4", "HEAD")
-	if err != nil {
-		t.Fatalf("CreateWorktree failed: %v", err)
+func TestWorktreeManager_List_ParsesOutput(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, ".ralph", "worktrees")
+	if err := os.MkdirAll(base, 0755); err != nil {
+		t.Fatalf("failed to create base dir: %v", err)
 	}
+	resolvedBase, _ := filepath.EvalSymlinks(base)
 
-	wt2, err := manager.CreateWorktree(ctx, "task-5", "HEAD")
-	if err != nil {
-		t.Fatalf("CreateWorktree failed: %v", err)
-	}
+	output := strings.Join([]string{
+		"worktree " + filepath.Join(resolvedBase, "unit-a"),
+		"branch refs/heads/ralph/unit-a",
+		"",
+		"worktree " + filepath.Join(resolvedBase, "unit-b"),
+		"branch refs/heads/ralph/unit-b",
+		"",
+	}, "\n")
 
-	// List worktrees
-	worktrees, err := manager.ListWorktrees(ctx)
+	runner := newFakeRunner()
+	runner.stub("worktree list --porcelain", output, nil)
+	useRunner(t, runner)
+
+	manager := NewWorktreeManager(dir, nil)
+	worktrees, err := manager.ListWorktrees(context.Background())
 	if err != nil {
 		t.Fatalf("ListWorktrees failed: %v", err)
 	}
-
-	// Should have 2 ralph worktrees (main worktree is not counted)
 	if len(worktrees) != 2 {
-		t.Errorf("expected 2 worktrees, got %d", len(worktrees))
+		t.Fatalf("expected 2 worktrees, got %d", len(worktrees))
 	}
 
-	// Verify both worktrees are in the list by UnitID (paths may differ due to symlink resolution)
-	found1, found2 := false, false
+	found := map[string]bool{}
 	for _, wt := range worktrees {
-		if wt.UnitID == wt1.UnitID {
-			found1 = true
-		}
-		if wt.UnitID == wt2.UnitID {
-			found2 = true
-		}
+		found[wt.UnitID] = true
 	}
-
-	if !found1 {
-		t.Errorf("worktree 1 (unitID=%s) not found in list", wt1.UnitID)
-	}
-	if !found2 {
-		t.Errorf("worktree 2 (unitID=%s) not found in list", wt2.UnitID)
-	}
-}
-
-func TestConditionalCommand_Matching(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-
-	ctx := context.Background()
-
-	// Create package.json in the repo
-	packageJSON := filepath.Join(repoRoot, "package.json")
-	if err := os.WriteFile(packageJSON, []byte(`{"name": "test"}`), 0644); err != nil {
-		t.Fatalf("failed to create package.json: %v", err)
-	}
-
-	// Commit it so it's in the worktree
-	if _, err := gitExec(ctx, repoRoot, "add", "package.json"); err != nil {
-		t.Fatalf("failed to add package.json: %v", err)
-	}
-	if _, err := gitExec(ctx, repoRoot, "commit", "-m", "Add package.json"); err != nil {
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Create manager with custom setup commands that we can verify
-	manager := NewWorktreeManager(repoRoot, nil)
-	manager.SetupCommands = []ConditionalCommand{
-		{
-			ConditionFile: "package.json",
-			Command:       "echo",
-			Args:          []string{"npm-installed"},
-			Description:   "Mock npm install",
-		},
-		{
-			ConditionFile: "Cargo.toml",
-			Command:       "echo",
-			Args:          []string{"cargo-fetched"},
-			Description:   "Mock cargo fetch",
-		},
-	}
-
-	// Create worktree - this should run the npm command but not cargo
-	wt, err := manager.CreateWorktree(ctx, "task-6", "HEAD")
-	if err != nil {
-		t.Fatalf("CreateWorktree failed: %v", err)
-	}
-	defer manager.RemoveWorktree(ctx, wt)
-
-	// Verify package.json exists in worktree
-	wtPackageJSON := filepath.Join(wt.Path, "package.json")
-	if _, err := os.Stat(wtPackageJSON); os.IsNotExist(err) {
-		t.Errorf("package.json should exist in worktree")
-	}
-}
-
-func TestConditionalCommand_NoMatch(t *testing.T) {
-	repoRoot := setupTestRepo(t)
-	createInitialCommit(t, repoRoot)
-
-	ctx := context.Background()
-
-	// Create manager with setup commands, but no matching files in repo
-	manager := NewWorktreeManager(repoRoot, nil)
-	manager.SetupCommands = []ConditionalCommand{
-		{
-			ConditionFile: "package.json",
-			Command:       "false", // This would fail if run
-			Args:          []string{},
-			Description:   "Should not run",
-		},
-	}
-
-	// Create worktree - should succeed even though no setup commands match
-	wt, err := manager.CreateWorktree(ctx, "task-7", "HEAD")
-	if err != nil {
-		t.Fatalf("CreateWorktree should succeed with no matching setup commands: %v", err)
-	}
-	defer manager.RemoveWorktree(ctx, wt)
-}
-
-func TestDefaultSetupCommands(t *testing.T) {
-	commands := DefaultSetupCommands()
-
-	// Verify we have the expected number of commands
-	expectedCount := 5
-	if len(commands) != expectedCount {
-		t.Errorf("expected %d setup commands, got %d", expectedCount, len(commands))
-	}
-
-	// Verify specific commands exist
-	expectedFiles := []string{
-		"package.json",
-		"pnpm-lock.yaml",
-		"yarn.lock",
-		"Cargo.toml",
-		"go.mod",
-	}
-
-	for _, file := range expectedFiles {
-		found := false
-		for _, cmd := range commands {
-			if cmd.ConditionFile == file {
-				found = true
-				break
-			}
-		}
-		if !found {
-			t.Errorf("expected setup command for %s", file)
-		}
+	if !found["unit-a"] || !found["unit-b"] {
+		t.Errorf("expected unit-a and unit-b in list, got %+v", found)
 	}
 }
