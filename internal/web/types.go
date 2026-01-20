@@ -50,6 +50,7 @@ type GraphData struct {
 type GraphNode struct {
 	ID    string `json:"id"`
 	Level int    `json:"level"`
+	Tasks int    `json:"tasks"`
 }
 
 // GraphEdge represents a dependency between two units.

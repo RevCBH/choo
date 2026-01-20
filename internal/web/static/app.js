@@ -1,6 +1,6 @@
 // app.js - Main application
 
-import { initGraph, updateNodeStatuses, highlightDependencies } from './graph.js';
+import { initGraph, updateNodeStatuses, highlightDependencies, updateTaskProgress } from './graph.js';
 
 // Application state
 const state = {
@@ -87,8 +87,19 @@ const eventHandlers = {
         const unit = state.units.find(u => u.id === event.unit);
         if (unit) {
             unit.status = "in_progress";
+            // Extract task info from payload if available
+            if (event.payload) {
+                unit.totalTasks = event.payload.total_tasks || unit.totalTasks || 0;
+                // For resume scenarios: completed_tasks tells us how many are already done
+                // Set both completedTasks and currentTask so progress is preserved
+                const completedCount = event.payload.completed_tasks || 0;
+                unit.completedTasks = completedCount;
+                unit.currentTask = completedCount > 0 ? completedCount - 1 : -1;
+            }
             updateSummary();
             updateGraphStatus(event.unit, "in_progress");
+            // Update graph progress blocks
+            updateTaskProgress(event.unit, unit.currentTask, unit.completedTasks || 0);
         }
         addEventLog(event);
     },
@@ -97,8 +108,14 @@ const eventHandlers = {
         const unit = state.units.find(u => u.id === event.unit);
         if (unit) {
             unit.status = "complete";
+            // Mark all tasks as complete
+            unit.completedTasks = unit.totalTasks || 0;
+            // Set currentTask to last task (0-indexed) so detail panel shows "Task N of N"
+            unit.currentTask = unit.completedTasks > 0 ? unit.completedTasks - 1 : 0;
             updateSummary();
             updateGraphStatus(event.unit, "complete");
+            // Update graph progress blocks (all complete, none current)
+            updateTaskProgress(event.unit, -1, unit.completedTasks);
         }
         addEventLog(event);
     },
@@ -117,16 +134,25 @@ const eventHandlers = {
 
     "task.started": (event) => {
         const unit = state.units.find(u => u.id === event.unit);
-        if (unit) {
-            unit.currentTask = event.task;
+        if (unit && event.task != null) {
+            // Convert 1-indexed task number to 0-indexed for display
+            unit.currentTask = event.task - 1;
+            // Update graph progress blocks (currentTask is the one being worked on)
+            updateTaskProgress(event.unit, unit.currentTask, unit.completedTasks || 0);
         }
         addEventLog(event);
     },
 
     "task.completed": (event) => {
         const unit = state.units.find(u => u.id === event.unit);
-        if (unit) {
-            unit.currentTask = event.task + 1;
+        if (unit && event.task != null) {
+            // Track completed tasks (1-indexed task number means tasks 1..N are done)
+            unit.completedTasks = event.task;
+            // Clear current task to stop the pulse animation on the completed block
+            // Next task.started will set a new currentTask
+            unit.currentTask = -1;
+            // Update graph progress blocks
+            updateTaskProgress(event.unit, -1, unit.completedTasks);
         }
         addEventLog(event);
     },
@@ -194,6 +220,32 @@ async function init() {
         // Initialize graph visualization
         const container = document.getElementById('graph-container');
         if (container && state.graph.nodes.length > 0) {
+            // Sync initial statuses and task progress from units to graph nodes
+            state.units.forEach(unit => {
+                const node = state.graph.nodes.find(n => n.id === unit.id);
+                if (node) {
+                    node.status = unit.status;
+                    // Sync task counts - node.tasks comes from graph, unit has currentTask/totalTasks
+                    if (unit.totalTasks) {
+                        node.tasks = unit.totalTasks;
+                    }
+                    // For completed units, show all tasks as complete (no pulsing current)
+                    if (unit.status === 'complete') {
+                        node.completedTasks = node.tasks || 0;
+                        node.currentTask = -1; // No current task for completed units
+                    } else if (unit.status === 'in_progress') {
+                        // Use completedTasks from unit if available, otherwise infer from currentTask
+                        node.completedTasks = unit.completedTasks ?? unit.currentTask ?? 0;
+                        // Only show current task if there's actually one in progress
+                        // (currentTask of -1 means between tasks or not started)
+                        node.currentTask = unit.currentTask ?? -1;
+                    } else {
+                        node.currentTask = -1;
+                        node.completedTasks = 0;
+                    }
+                }
+            });
+
             initGraph(container, state.graph, {
                 onClick: handleNodeClick,
                 onHover: handleNodeHover
