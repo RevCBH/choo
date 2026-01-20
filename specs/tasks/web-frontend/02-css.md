@@ -1,6 +1,6 @@
 ---
 task: 2
-status: pending
+status: complete
 backpressure: "test -f internal/web/static/style.css && grep -q '\\-\\-bg-primary' internal/web/static/style.css && grep -q '\\-\\-status-failed' internal/web/static/style.css"
 depends_on: [1]
 ---

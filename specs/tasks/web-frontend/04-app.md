@@ -1,6 +1,6 @@
 ---
 task: 4
-status: pending
+status: complete
 backpressure: "test -f internal/web/static/app.js && grep -q 'export.*state' internal/web/static/app.js && grep -q 'SSEClient' internal/web/static/app.js"
 depends_on: [1, 2, 3]
 ---
