@@ -86,20 +86,33 @@ func (h *Hub) Stop() {
 // Register adds a client to receive events.
 // Non-blocking - sends to register channel.
 func (h *Hub) Register(c *Client) {
-	h.register <- c
+	select {
+	case h.register <- c:
+	case <-h.done:
+		// Hub is stopped, close client immediately
+		close(c.events)
+	}
 }
 
 // Unregister removes a client.
 // Non-blocking - sends to unregister channel.
 func (h *Hub) Unregister(c *Client) {
-	h.unregister <- c
+	select {
+	case h.unregister <- c:
+	case <-h.done:
+		// Hub is stopped, nothing to do
+	}
 }
 
 // Broadcast sends an event to all connected clients.
 // Non-blocking - sends to broadcast channel.
 // If a client's buffer is full, the event is dropped for that client.
 func (h *Hub) Broadcast(e *Event) {
-	h.broadcast <- e
+	select {
+	case h.broadcast <- e:
+	case <-h.done:
+		// Hub is stopped, drop event
+	}
 }
 
 // Count returns the number of connected clients.

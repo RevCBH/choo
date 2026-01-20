@@ -60,6 +60,10 @@ func EventsHandler(hub *Hub) http.HandlerFunc {
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 
+		// Send initial comment to establish connection
+		fmt.Fprintf(w, ": connected\n\n")
+		flusher.Flush()
+
 		client := NewClient(generateID())
 		hub.Register(client)
 		defer hub.Unregister(client)
