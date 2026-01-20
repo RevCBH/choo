@@ -1,6 +1,6 @@
 ---
 task: 3
-status: pending
+status: complete
 backpressure: "go test ./internal/feature/... -run TestDrift"
 depends_on: [1]
 ---

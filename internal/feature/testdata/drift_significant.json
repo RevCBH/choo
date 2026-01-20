@@ -1,0 +1,12 @@
+{
+  "scenario": "significant_prd_change",
+  "description": "Significant changes to PRD that require implementation updates",
+  "original_body": "# Feature: User Authentication\n\n## Overview\nImplement user authentication using JWT tokens.\n\n## Requirements\n- User login endpoint\n- Token generation\n- Token validation middleware\n\n## Technical Details\nUse bcrypt for password hashing.",
+  "new_body": "# Feature: User Authentication with OAuth\n\n## Overview\nImplement user authentication using OAuth 2.0 with multiple providers (Google, GitHub).\n\n## Requirements\n- OAuth callback endpoints for each provider\n- Provider-specific token exchange\n- Session management with Redis\n- User profile synchronization\n\n## Technical Details\nUse OAuth 2.0 authorization code flow. Store sessions in Redis with 24h TTL.",
+  "in_progress_units": ["login_endpoint", "token_validation"],
+  "expected_assessment": {
+    "significant": true,
+    "affected_units": ["login_endpoint", "token_validation"],
+    "recommendation": "Major scope change from JWT to OAuth. Requires redesign of login_endpoint and token_validation units. Recommend pausing work and reassessing implementation plan."
+  }
+}
