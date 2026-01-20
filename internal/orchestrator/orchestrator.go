@@ -243,18 +243,19 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 		return o.dryRun(units)
 	}
 
-	// Emit orchestrator started event
-	o.bus.Emit(events.NewEvent(events.OrchStarted, "").WithPayload(map[string]any{
-		"unit_count":  len(units),
-		"parallelism": o.cfg.Parallelism,
-	}))
-
-	// 2. Build schedule
+	// 2. Build schedule (before emitting event so we can include the graph)
 	o.scheduler = scheduler.New(o.bus, o.cfg.Parallelism)
-	_, err = o.scheduler.Schedule(units)
+	schedule, err := o.scheduler.Schedule(units)
 	if err != nil {
 		return nil, fmt.Errorf("scheduling failed: %w", err)
 	}
+
+	// Emit orchestrator started event with graph for web UI
+	o.bus.Emit(events.NewEvent(events.OrchStarted, "").WithPayload(map[string]any{
+		"unit_count":  len(units),
+		"parallelism": o.cfg.Parallelism,
+		"graph":       buildGraphData(units, schedule.Levels),
+	}))
 
 	// 3. Initialize worker pool
 	workerCfg := worker.WorkerConfig{
@@ -464,6 +465,50 @@ func categorizeErrorType(err error) string {
 		return "baseline_failure"
 	default:
 		return "claude_failure"
+	}
+}
+
+// buildGraphData creates graph data for the web UI from units and levels
+func buildGraphData(units []*discovery.Unit, levels [][]string) map[string]any {
+	// Build level lookup for nodes
+	levelMap := make(map[string]int)
+	for i, level := range levels {
+		for _, unitID := range level {
+			levelMap[unitID] = i
+		}
+	}
+
+	// Build nodes
+	nodes := make([]map[string]any, 0, len(units))
+	for _, unit := range units {
+		nodes = append(nodes, map[string]any{
+			"id":    unit.ID,
+			"level": levelMap[unit.ID],
+		})
+	}
+
+	// Build edges (from depends_on)
+	var edges []map[string]any
+	for _, unit := range units {
+		for _, dep := range unit.DependsOn {
+			edges = append(edges, map[string]any{
+				"from": unit.ID,
+				"to":   dep,
+			})
+		}
+	}
+
+	// Build levels array
+	levelsData := make([][]string, len(levels))
+	for i, level := range levels {
+		levelsData[i] = make([]string, len(level))
+		copy(levelsData[i], level)
+	}
+
+	return map[string]any{
+		"nodes":  nodes,
+		"edges":  edges,
+		"levels": levelsData,
 	}
 }
 
