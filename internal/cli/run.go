@@ -24,6 +24,17 @@ type RunOptions struct {
 	Unit         string // Run only specified unit (single-unit mode)
 	SkipReview   bool   // Auto-merge without waiting for review
 	TasksDir     string // Path to specs/tasks/ directory
+	Web          bool   // Enable web UI event forwarding
+	WebSocket    string // Custom Unix socket path (optional)
+	NoTUI        bool   // Disable TUI even when stdout is a TTY
+
+	// Provider is the default provider for task execution
+	// Units without frontmatter override use this provider
+	Provider string
+
+	// ForceTaskProvider overrides all provider settings for task inner loops
+	// When set, ignores per-unit frontmatter provider field
+	ForceTaskProvider string
 }
 
 // Validate checks RunOptions for validity
@@ -34,19 +45,34 @@ func (opts RunOptions) Validate() error {
 	if opts.TasksDir == "" {
 		return fmt.Errorf("tasks directory must not be empty")
 	}
+
+	// Validate provider flags
+	if opts.Provider != "" {
+		if err := config.ValidateProviderType(opts.Provider); err != nil {
+			return fmt.Errorf("invalid --provider: %w", err)
+		}
+	}
+	if opts.ForceTaskProvider != "" {
+		if err := config.ValidateProviderType(opts.ForceTaskProvider); err != nil {
+			return fmt.Errorf("invalid --force-task-provider: %w", err)
+		}
+	}
+
 	return nil
 }
 
 // NewRunCmd creates the run command
 func NewRunCmd(app *App) *cobra.Command {
 	opts := RunOptions{
-		Parallelism:  4,
-		TargetBranch: "main",
-		DryRun:       false,
-		NoPR:         false,
-		Unit:         "",
-		SkipReview:   false,
-		TasksDir:     "specs/tasks",
+		Parallelism:       4,
+		TargetBranch:      "main",
+		DryRun:            false,
+		NoPR:              false,
+		Unit:              "",
+		SkipReview:        false,
+		TasksDir:          "specs/tasks",
+		Provider:          "", // Empty means use default from config/env
+		ForceTaskProvider: "", // Empty means respect per-unit settings
 	}
 
 	cmd := &cobra.Command{
@@ -83,6 +109,12 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 	cmd.Flags().BoolVar(&opts.NoPR, "no-pr", false, "Skip PR creation")
 	cmd.Flags().StringVar(&opts.Unit, "unit", "", "Run only specified unit (single-unit mode)")
 	cmd.Flags().BoolVar(&opts.SkipReview, "skip-review", false, "Auto-merge without waiting for review")
+
+	// Provider flags
+	cmd.Flags().StringVar(&opts.Provider, "provider", "",
+		"Default provider for task execution (claude, codex). Units without frontmatter override use this.")
+	cmd.Flags().StringVar(&opts.ForceTaskProvider, "force-task-provider", "",
+		"Force provider for ALL task execution, ignoring per-unit frontmatter (claude, codex)")
 
 	return cmd
 }
