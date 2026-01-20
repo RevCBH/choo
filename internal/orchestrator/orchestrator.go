@@ -75,6 +75,12 @@ type Config struct {
 
 	// SuppressOutput disables stdout/stderr tee in workers (TUI mode)
 	SuppressOutput bool
+
+	// FeatureBranch is the feature branch name when in feature mode
+	FeatureBranch string
+
+	// FeatureMode is true when operating in feature mode
+	FeatureMode bool
 }
 
 // Dependencies bundles external dependencies for injection
@@ -118,6 +124,15 @@ func New(cfg Config, deps Dependencies) *Orchestrator {
 		escalateCancel: escalateCancel,
 		escalateSem:    make(chan struct{}, MaxConcurrentEscalations),
 	}
+}
+
+// getTargetBranch returns the appropriate target branch for PRs
+// Returns FeatureBranch if in feature mode, otherwise TargetBranch
+func (o *Orchestrator) getTargetBranch() string {
+	if o.cfg.FeatureMode {
+		return o.cfg.FeatureBranch
+	}
+	return o.cfg.TargetBranch
 }
 
 // Close releases all resources held by the orchestrator
