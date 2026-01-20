@@ -235,8 +235,16 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 			w.currentTask = readyTasks[0]
 		}
 
-		// a. Emit TaskClaudeInvoke event (done inside invokeClaudeForTask)
-		// b. Invoke Claude
+		// a. Emit TaskStarted event for web UI
+		if w.events != nil && w.currentTask != nil {
+			evt := events.NewEvent(events.TaskStarted, w.unit.ID).WithTask(w.currentTask.Number).WithPayload(map[string]any{
+				"title": w.currentTask.Title,
+			})
+			w.events.Emit(evt)
+		}
+
+		// b. Emit TaskClaudeInvoke event (done inside invokeClaudeForTask)
+		// c. Invoke Claude
 		claudeErr := w.invokeClaudeForTask(ctx, prompt)
 
 		// c. Find which task was completed (scan all ready tasks)
@@ -272,6 +280,12 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 				if w.events != nil {
 					evt := events.NewEvent(events.TaskValidationOK, w.unit.ID).WithTask(completedTask.Number)
 					w.events.Emit(evt)
+
+					// Emit TaskCompleted for web UI
+					completedEvt := events.NewEvent(events.TaskCompleted, w.unit.ID).WithTask(completedTask.Number).WithPayload(map[string]any{
+						"title": completedTask.Title,
+					})
+					w.events.Emit(completedEvt)
 				}
 				return completedTask, nil
 			}
