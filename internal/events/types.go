@@ -38,6 +38,10 @@ const (
 	OrchStarted   EventType = "orch.started"
 	OrchCompleted EventType = "orch.completed"
 	OrchFailed    EventType = "orch.failed"
+
+	// Dry-run events (no actual execution)
+	OrchDryRunStarted   EventType = "orch.dryrun.started"
+	OrchDryRunCompleted EventType = "orch.dryrun.completed"
 )
 
 // Unit lifecycle events

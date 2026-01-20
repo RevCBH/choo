@@ -513,3 +513,187 @@ func TestDiscoverUnit_NotExists(t *testing.T) {
 		t.Error("expected nil unit for non-existent directory")
 	}
 }
+
+func TestInferUnitStatusFromTasks(t *testing.T) {
+	tests := []struct {
+		name     string
+		tasks    []*Task
+		expected UnitStatus
+	}{
+		{
+			name:     "empty tasks returns pending",
+			tasks:    []*Task{},
+			expected: UnitStatusPending,
+		},
+		{
+			name: "all pending returns pending",
+			tasks: []*Task{
+				{Status: TaskStatusPending},
+				{Status: TaskStatusPending},
+			},
+			expected: UnitStatusPending,
+		},
+		{
+			name: "all complete returns complete",
+			tasks: []*Task{
+				{Status: TaskStatusComplete},
+				{Status: TaskStatusComplete},
+			},
+			expected: UnitStatusComplete,
+		},
+		{
+			name: "any in_progress returns in_progress",
+			tasks: []*Task{
+				{Status: TaskStatusComplete},
+				{Status: TaskStatusInProgress},
+				{Status: TaskStatusPending},
+			},
+			expected: UnitStatusInProgress,
+		},
+		{
+			name: "some complete (no in_progress) returns in_progress",
+			tasks: []*Task{
+				{Status: TaskStatusComplete},
+				{Status: TaskStatusPending},
+			},
+			expected: UnitStatusInProgress,
+		},
+		{
+			name: "any failed returns failed",
+			tasks: []*Task{
+				{Status: TaskStatusComplete},
+				{Status: TaskStatusFailed},
+			},
+			expected: UnitStatusFailed,
+		},
+		{
+			name: "failed takes precedence over in_progress",
+			tasks: []*Task{
+				{Status: TaskStatusInProgress},
+				{Status: TaskStatusFailed},
+			},
+			expected: UnitStatusFailed,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result := inferUnitStatusFromTasks(tc.tasks)
+			if result != tc.expected {
+				t.Errorf("expected %v, got %v", tc.expected, result)
+			}
+		})
+	}
+}
+
+func TestDiscover_InfersUnitStatusFromTasks(t *testing.T) {
+	// Test that when orch_status is not set, unit status is inferred from tasks
+	tmpDir := t.TempDir()
+	tasksDir := filepath.Join(tmpDir, "specs", "tasks")
+	unitDir := filepath.Join(tasksDir, "complete-unit")
+	if err := os.MkdirAll(unitDir, 0755); err != nil {
+		t.Fatalf("failed to create unit dir: %v", err)
+	}
+
+	// Create IMPLEMENTATION_PLAN.md without orch_status
+	implPlan := `---
+unit: complete-unit
+depends_on: []
+---
+
+# Complete Unit
+`
+	if err := os.WriteFile(filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md"), []byte(implPlan), 0644); err != nil {
+		t.Fatalf("failed to write IMPLEMENTATION_PLAN.md: %v", err)
+	}
+
+	// Create tasks that are all complete
+	task01 := `---
+task: 1
+status: complete
+backpressure: go test
+---
+
+# Task 1
+`
+	if err := os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(task01), 0644); err != nil {
+		t.Fatalf("failed to write task: %v", err)
+	}
+
+	task02 := `---
+task: 2
+status: complete
+backpressure: go test
+---
+
+# Task 2
+`
+	if err := os.WriteFile(filepath.Join(unitDir, "02-task.md"), []byte(task02), 0644); err != nil {
+		t.Fatalf("failed to write task: %v", err)
+	}
+
+	units, err := Discover(tasksDir)
+	if err != nil {
+		t.Fatalf("Discover failed: %v", err)
+	}
+
+	if len(units) != 1 {
+		t.Fatalf("expected 1 unit, got %d", len(units))
+	}
+
+	unit := units[0]
+	if unit.Status != UnitStatusComplete {
+		t.Errorf("expected unit status to be inferred as complete, got %v", unit.Status)
+	}
+}
+
+func TestDiscover_ExplicitOrchStatusTakesPrecedence(t *testing.T) {
+	// Test that explicit orch_status takes precedence over task inference
+	tmpDir := t.TempDir()
+	tasksDir := filepath.Join(tmpDir, "specs", "tasks")
+	unitDir := filepath.Join(tasksDir, "explicit-unit")
+	if err := os.MkdirAll(unitDir, 0755); err != nil {
+		t.Fatalf("failed to create unit dir: %v", err)
+	}
+
+	// Create IMPLEMENTATION_PLAN.md with explicit orch_status
+	implPlan := `---
+unit: explicit-unit
+depends_on: []
+orch_status: in_progress
+---
+
+# Explicit Unit
+`
+	if err := os.WriteFile(filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md"), []byte(implPlan), 0644); err != nil {
+		t.Fatalf("failed to write IMPLEMENTATION_PLAN.md: %v", err)
+	}
+
+	// Create tasks that are all complete (would normally infer complete)
+	task01 := `---
+task: 1
+status: complete
+backpressure: go test
+---
+
+# Task 1
+`
+	if err := os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(task01), 0644); err != nil {
+		t.Fatalf("failed to write task: %v", err)
+	}
+
+	units, err := Discover(tasksDir)
+	if err != nil {
+		t.Fatalf("Discover failed: %v", err)
+	}
+
+	if len(units) != 1 {
+		t.Fatalf("expected 1 unit, got %d", len(units))
+	}
+
+	unit := units[0]
+	// Explicit orch_status should take precedence
+	if unit.Status != UnitStatusInProgress {
+		t.Errorf("expected explicit orch_status to take precedence, got %v", unit.Status)
+	}
+}

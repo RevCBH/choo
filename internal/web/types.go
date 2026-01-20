@@ -151,10 +151,12 @@ func DefaultPusherConfig() PusherConfig {
 }
 
 // DefaultSocketPath returns the default Unix socket path
-// Uses XDG_RUNTIME_DIR if available, otherwise /tmp
+// Uses $XDG_RUNTIME_DIR/choo/web.sock if set, otherwise ~/.choo/web.sock
+// This matches the default path used by the web server
 func DefaultSocketPath() string {
-	if xdgRuntime := os.Getenv("XDG_RUNTIME_DIR"); xdgRuntime != "" {
-		return xdgRuntime + "/choo.sock"
+	if xdg := os.Getenv("XDG_RUNTIME_DIR"); xdg != "" {
+		return xdg + "/choo/web.sock"
 	}
-	return "/tmp/choo.sock"
+	home, _ := os.UserHomeDir()
+	return home + "/.choo/web.sock"
 }
