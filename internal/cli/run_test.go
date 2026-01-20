@@ -108,6 +108,74 @@ func TestRunCmd_CustomFlags(t *testing.T) {
 	}
 }
 
+func TestRunOptions_WebFlag(t *testing.T) {
+	app := New()
+	cmd := NewRunCmd(app)
+
+	// Parse flags with --web
+	err := cmd.ParseFlags([]string{"--web"})
+	if err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	webFlag, err := cmd.Flags().GetBool("web")
+	if err != nil {
+		t.Fatalf("failed to get web flag: %v", err)
+	}
+	if !webFlag {
+		t.Error("Expected web to be true")
+	}
+}
+
+func TestRunOptions_WebSocketFlag(t *testing.T) {
+	app := New()
+	cmd := NewRunCmd(app)
+
+	// Parse flags with --web-socket
+	err := cmd.ParseFlags([]string{"--web-socket", "/custom/path.sock"})
+	if err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	webSocketFlag, err := cmd.Flags().GetString("web-socket")
+	if err != nil {
+		t.Fatalf("failed to get web-socket flag: %v", err)
+	}
+	if webSocketFlag != "/custom/path.sock" {
+		t.Errorf("Expected web-socket '/custom/path.sock', got %s", webSocketFlag)
+	}
+}
+
+func TestRunOptions_WebValidation(t *testing.T) {
+	// Test that --web-socket without --web is valid (but ignored at runtime)
+	app := New()
+	cmd := NewRunCmd(app)
+
+	// Parse flags with only --web-socket (no --web)
+	err := cmd.ParseFlags([]string{"--web-socket", "/custom/path.sock"})
+	if err != nil {
+		t.Fatalf("failed to parse flags: %v", err)
+	}
+
+	// Web should be false (not set)
+	webFlag, err := cmd.Flags().GetBool("web")
+	if err != nil {
+		t.Fatalf("failed to get web flag: %v", err)
+	}
+	if webFlag {
+		t.Error("Expected web to be false when only --web-socket is set")
+	}
+
+	// WebSocket should still have the value
+	webSocketFlag, err := cmd.Flags().GetString("web-socket")
+	if err != nil {
+		t.Fatalf("failed to get web-socket flag: %v", err)
+	}
+	if webSocketFlag != "/custom/path.sock" {
+		t.Errorf("Expected web-socket '/custom/path.sock', got %s", webSocketFlag)
+	}
+}
+
 func TestRunOptions_Validate_Valid(t *testing.T) {
 	opts := RunOptions{
 		Parallelism:  4,

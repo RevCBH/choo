@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/github"
 	"github.com/RevCBH/choo/internal/orchestrator"
+	"github.com/RevCBH/choo/internal/web"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -27,6 +29,8 @@ type RunOptions struct {
 	Unit         string // Run only specified unit (single-unit mode)
 	SkipReview   bool   // Auto-merge without waiting for review
 	TasksDir     string // Path to specs/tasks/ directory
+	Web          bool   // Enable web UI event forwarding
+	WebSocket    string // Custom Unix socket path (optional)
 	NoTUI        bool   // Disable TUI even when stdout is a TTY
 }
 
@@ -87,6 +91,8 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 	cmd.Flags().BoolVar(&opts.NoPR, "no-pr", false, "Skip PR creation")
 	cmd.Flags().StringVar(&opts.Unit, "unit", "", "Run only specified unit (single-unit mode)")
 	cmd.Flags().BoolVar(&opts.SkipReview, "skip-review", false, "Auto-merge without waiting for review")
+	cmd.Flags().BoolVar(&opts.Web, "web", false, "Enable web UI event forwarding")
+	cmd.Flags().StringVar(&opts.WebSocket, "web-socket", "", "Custom Unix socket path (default: /tmp/choo.sock)")
 	cmd.Flags().BoolVar(&opts.NoTUI, "no-tui", false, "Disable interactive TUI (use summary-only output)")
 
 	return cmd
@@ -125,6 +131,24 @@ func (a *App) RunOrchestrator(ctx context.Context, opts RunOptions) error {
 	// Create event bus
 	eventBus := events.NewBus(1000)
 	defer eventBus.Close()
+
+	// Create SocketPusher if --web flag is set
+	var pusher *web.SocketPusher
+	if opts.Web {
+		pusherCfg := web.DefaultPusherConfig()
+		if opts.WebSocket != "" {
+			pusherCfg.SocketPath = opts.WebSocket
+		}
+		pusher = web.NewSocketPusher(eventBus, pusherCfg)
+		defer pusher.Close()
+
+		// Start pusher - failure is non-fatal
+		if err := pusher.Start(ctx); err != nil {
+			log.Printf("WARN: failed to start web pusher: %v", err)
+			pusher = nil // Don't use a pusher that failed to start
+		}
+	}
+	_ = pusher // pusher is available for future graph integration
 
 	// Determine if we should use TUI
 	useTUI := !opts.NoTUI && !opts.DryRun && term.IsTerminal(int(os.Stdout.Fd()))
