@@ -1,6 +1,8 @@
 package feature
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -256,5 +258,279 @@ func TestComputeBodyHash_Different(t *testing.T) {
 
 	if hash1 == hash2 {
 		t.Errorf("hash1 = hash2 = %s, want different hashes for different content", hash1)
+	}
+}
+
+var featureAPRD = `---
+prd_id: feature-a
+title: Feature A
+status: draft
+---
+
+# Feature A
+`
+
+var featureBPRD = `---
+prd_id: feature-b
+title: Feature B
+status: approved
+---
+
+# Feature B
+`
+
+var featureCPRD = `---
+prd_id: feature-c
+title: Feature C
+status: draft
+---
+
+# Feature C
+`
+
+func TestDiscoverPRDs_Empty(t *testing.T) {
+	dir := t.TempDir()
+	prds, err := DiscoverPRDs(dir)
+	if err != nil {
+		t.Fatalf("DiscoverPRDs failed: %v", err)
+	}
+	if len(prds) != 0 {
+		t.Errorf("len(prds) = %d, want 0", len(prds))
+	}
+}
+
+func TestDiscoverPRDs_SingleFile(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "feature-a.md"), []byte(featureAPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	prds, err := DiscoverPRDs(dir)
+	if err != nil {
+		t.Fatalf("DiscoverPRDs failed: %v", err)
+	}
+	if len(prds) != 1 {
+		t.Fatalf("len(prds) = %d, want 1", len(prds))
+	}
+	if prds[0].ID != "feature-a" {
+		t.Errorf("prds[0].ID = %q, want %q", prds[0].ID, "feature-a")
+	}
+}
+
+func TestDiscoverPRDs_MultipleFiles(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "feature-a.md"), []byte(featureAPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	err = os.WriteFile(filepath.Join(dir, "feature-b.md"), []byte(featureBPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	prds, err := DiscoverPRDs(dir)
+	if err != nil {
+		t.Fatalf("DiscoverPRDs failed: %v", err)
+	}
+	if len(prds) != 2 {
+		t.Fatalf("len(prds) = %d, want 2", len(prds))
+	}
+
+	ids := make(map[string]bool)
+	for _, prd := range prds {
+		ids[prd.ID] = true
+	}
+	if !ids["feature-a"] || !ids["feature-b"] {
+		t.Errorf("prds IDs = %v, want feature-a and feature-b", ids)
+	}
+}
+
+func TestDiscoverPRDs_Recursive(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "feature-a.md"), []byte(featureAPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	nestedDir := filepath.Join(dir, "nested")
+	err = os.Mkdir(nestedDir, 0755)
+	if err != nil {
+		t.Fatalf("Mkdir failed: %v", err)
+	}
+	err = os.WriteFile(filepath.Join(nestedDir, "feature-c.md"), []byte(featureCPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	prds, err := DiscoverPRDs(dir)
+	if err != nil {
+		t.Fatalf("DiscoverPRDs failed: %v", err)
+	}
+	if len(prds) != 2 {
+		t.Fatalf("len(prds) = %d, want 2", len(prds))
+	}
+
+	ids := make(map[string]bool)
+	for _, prd := range prds {
+		ids[prd.ID] = true
+	}
+	if !ids["feature-a"] || !ids["feature-c"] {
+		t.Errorf("prds IDs = %v, want feature-a and feature-c", ids)
+	}
+}
+
+func TestDiscoverPRDs_SkipsReadme(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("# README\n"), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	err = os.WriteFile(filepath.Join(dir, "feature-a.md"), []byte(featureAPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	prds, err := DiscoverPRDs(dir)
+	if err != nil {
+		t.Fatalf("DiscoverPRDs failed: %v", err)
+	}
+	if len(prds) != 1 {
+		t.Fatalf("len(prds) = %d, want 1", len(prds))
+	}
+	if prds[0].ID != "feature-a" {
+		t.Errorf("prds[0].ID = %q, want %q", prds[0].ID, "feature-a")
+	}
+}
+
+func TestDiscoverPRDs_SkipsInvalid(t *testing.T) {
+	dir := t.TempDir()
+	invalidPRD := `---
+prd_id: [invalid yaml
+---
+
+# Invalid
+`
+	err := os.WriteFile(filepath.Join(dir, "invalid.md"), []byte(invalidPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	err = os.WriteFile(filepath.Join(dir, "feature-a.md"), []byte(featureAPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	prds, err := DiscoverPRDs(dir)
+	if err != nil {
+		t.Fatalf("DiscoverPRDs failed: %v", err)
+	}
+	// Should only include feature-a, invalid.md should be skipped with a warning
+	if len(prds) != 1 {
+		t.Fatalf("len(prds) = %d, want 1", len(prds))
+	}
+	if prds[0].ID != "feature-a" {
+		t.Errorf("prds[0].ID = %q, want %q", prds[0].ID, "feature-a")
+	}
+}
+
+func TestDiscoverPRDs_NonExistentDir(t *testing.T) {
+	dir := "/nonexistent/directory/path"
+	_, err := DiscoverPRDs(dir)
+	if err == nil {
+		t.Fatal("DiscoverPRDs succeeded, want error for non-existent directory")
+	}
+}
+
+func TestDiscoverPRDsWithFilter_NoFilter(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "feature-a.md"), []byte(featureAPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	err = os.WriteFile(filepath.Join(dir, "feature-b.md"), []byte(featureBPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	prds, err := DiscoverPRDsWithFilter(dir, []string{})
+	if err != nil {
+		t.Fatalf("DiscoverPRDsWithFilter failed: %v", err)
+	}
+	if len(prds) != 2 {
+		t.Fatalf("len(prds) = %d, want 2", len(prds))
+	}
+}
+
+func TestDiscoverPRDsWithFilter_SingleStatus(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "feature-a.md"), []byte(featureAPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	err = os.WriteFile(filepath.Join(dir, "feature-b.md"), []byte(featureBPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	prds, err := DiscoverPRDsWithFilter(dir, []string{"draft"})
+	if err != nil {
+		t.Fatalf("DiscoverPRDsWithFilter failed: %v", err)
+	}
+	if len(prds) != 1 {
+		t.Fatalf("len(prds) = %d, want 1", len(prds))
+	}
+	if prds[0].ID != "feature-a" {
+		t.Errorf("prds[0].ID = %q, want %q", prds[0].ID, "feature-a")
+	}
+	if prds[0].Status != "draft" {
+		t.Errorf("prds[0].Status = %q, want %q", prds[0].Status, "draft")
+	}
+}
+
+func TestDiscoverPRDsWithFilter_MultipleStatuses(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "feature-a.md"), []byte(featureAPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	err = os.WriteFile(filepath.Join(dir, "feature-b.md"), []byte(featureBPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+	err = os.WriteFile(filepath.Join(dir, "feature-c.md"), []byte(featureCPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	prds, err := DiscoverPRDsWithFilter(dir, []string{"draft", "approved"})
+	if err != nil {
+		t.Fatalf("DiscoverPRDsWithFilter failed: %v", err)
+	}
+	if len(prds) != 3 {
+		t.Fatalf("len(prds) = %d, want 3", len(prds))
+	}
+
+	statuses := make(map[string]int)
+	for _, prd := range prds {
+		statuses[prd.Status]++
+	}
+	if statuses["draft"] != 2 || statuses["approved"] != 1 {
+		t.Errorf("statuses = %v, want 2 draft and 1 approved", statuses)
+	}
+}
+
+func TestDiscoverPRDsWithFilter_NoMatches(t *testing.T) {
+	dir := t.TempDir()
+	err := os.WriteFile(filepath.Join(dir, "feature-a.md"), []byte(featureAPRD), 0644)
+	if err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	prds, err := DiscoverPRDsWithFilter(dir, []string{"complete"})
+	if err != nil {
+		t.Fatalf("DiscoverPRDsWithFilter failed: %v", err)
+	}
+	if len(prds) != 0 {
+		t.Errorf("len(prds) = %d, want 0", len(prds))
 	}
 }
