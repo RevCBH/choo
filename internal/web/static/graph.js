@@ -1,39 +1,3 @@
----
-task: 3
-status: complete
-backpressure: "test -f internal/web/static/graph.js && grep -q 'export.*initGraph' internal/web/static/graph.js && grep -q 'export.*updateNodeStatuses' internal/web/static/graph.js"
-depends_on: [1]
----
-
-# D3 Graph Module
-
-**Parent spec**: `/specs/WEB-FRONTEND.md`
-**Task**: #3 of 4
-
-## Objective
-
-Create the D3.js graph visualization module that renders the dependency graph with level-based layout, handles node/edge rendering, supports status color updates, and provides hover highlighting.
-
-## Dependencies
-
-### Task Dependencies
-- Task #1 (HTML must provide graph-container element)
-
-### External Dependencies
-- D3.js v7 (loaded from CDN in HTML)
-
-## Deliverables
-
-### Files to Create
-
-```
-internal/web/static/
-└── graph.js    # CREATE: D3 graph visualization module
-```
-
-### JavaScript Implementation
-
-```javascript
 // graph.js - D3.js DAG visualization
 
 const STATUS_COLORS = {
@@ -232,37 +196,3 @@ export function highlightDependencies(nodeId) {
 }
 
 export { STATUS_COLORS };
-```
-
-## Backpressure
-
-### Validation Command
-
-```bash
-test -f internal/web/static/graph.js && \
-grep -q 'export.*initGraph' internal/web/static/graph.js && \
-grep -q 'export.*updateNodeStatuses' internal/web/static/graph.js && \
-grep -q 'export.*highlightDependencies' internal/web/static/graph.js && \
-grep -q 'STATUS_COLORS' internal/web/static/graph.js
-```
-
-### Must Pass
-- File exists at `internal/web/static/graph.js`
-- Exports `initGraph` function
-- Exports `updateNodeStatuses` function
-- Exports `highlightDependencies` function
-- Exports `STATUS_COLORS` constant
-- Contains D3 SVG setup code
-- Contains level-based layout computation
-- Contains bezier path calculation for edges
-
-### CI Compatibility
-- [x] No external API keys required
-- [x] No network access required for validation
-- [x] Runs in <60 seconds
-
-## NOT In Scope
-- SSE connection handling (task #4)
-- State management (task #4)
-- Toast notifications (task #4)
-- Event log rendering (task #4)
