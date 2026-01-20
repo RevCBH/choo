@@ -1,6 +1,6 @@
 ---
 task: 5
-status: pending
+status: complete
 backpressure: "go test ./internal/cli/... -run TestNextFeature"
 depends_on: [1, 3, 4]
 ---
