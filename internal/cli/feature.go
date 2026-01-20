@@ -20,10 +20,8 @@ blocked states.`,
 	cmd.AddCommand(
 		NewFeatureStartCmd(app),
 		NewFeatureStatusCmd(app),
+		NewFeatureResumeCmd(app),
 	)
-	// cmd.AddCommand(
-	//     NewFeatureResumeCmd(app),
-	// )
 
 	return cmd
 }
