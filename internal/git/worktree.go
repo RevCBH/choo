@@ -66,8 +66,34 @@ func NewWorktreeManager(repoRoot string, claude interface{}) *WorktreeManager {
 	}
 }
 
-// CreateWorktree creates a new worktree for a unit
+// GetWorktree returns an existing worktree for a unit, or nil if none exists
+func (m *WorktreeManager) GetWorktree(ctx context.Context, unitID string) (*Worktree, error) {
+	worktrees, err := m.ListWorktrees(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, wt := range worktrees {
+		if wt.UnitID == unitID {
+			return wt, nil
+		}
+	}
+
+	return nil, nil
+}
+
+// CreateWorktree creates a new worktree for a unit, or returns the existing one if it already exists
 func (m *WorktreeManager) CreateWorktree(ctx context.Context, unitID, targetBranch string) (*Worktree, error) {
+	// Check if worktree already exists
+	existing, err := m.GetWorktree(ctx, unitID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check for existing worktree: %w", err)
+	}
+	if existing != nil {
+		// Worktree exists, return it for resumption
+		return existing, nil
+	}
+
 	// Create worktree path
 	worktreePath := filepath.Join(m.WorktreeBase, unitID)
 
@@ -80,7 +106,7 @@ func (m *WorktreeManager) CreateWorktree(ctx context.Context, unitID, targetBran
 	branchName := fmt.Sprintf("ralph/%s", unitID)
 
 	// Create the worktree
-	_, err := gitExec(ctx, m.RepoRoot, "worktree", "add", "-b", branchName, worktreePath, targetBranch)
+	_, err = gitExec(ctx, m.RepoRoot, "worktree", "add", "-b", branchName, worktreePath, targetBranch)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create worktree: %w", err)
 	}

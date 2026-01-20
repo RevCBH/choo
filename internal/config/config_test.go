@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,7 @@ func writeFile(t *testing.T, path, content string) {
 func TestLoadConfig_Defaults(t *testing.T) {
 	// Create temp directory with git repo (for GitHub detection)
 	dir := t.TempDir()
-	initGitRepo(t, dir, "https://github.com/testowner/testrepo.git")
+	stubGitRemote(t, "https://github.com/testowner/testrepo.git", nil)
 
 	// Load config with no file
 	cfg, err := LoadConfig(dir)
@@ -66,7 +67,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 
 func TestLoadConfig_FileOverrides(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir, "https://github.com/testowner/testrepo.git")
+	stubGitRemote(t, "https://github.com/testowner/testrepo.git", nil)
 
 	// Write config file
 	configContent := `
@@ -132,7 +133,7 @@ log_level: debug
 
 func TestLoadConfig_EnvOverrides(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir, "https://github.com/testowner/testrepo.git")
+	stubGitRemote(t, "https://github.com/testowner/testrepo.git", nil)
 
 	// Write config file
 	configContent := `
@@ -169,7 +170,7 @@ log_level: info
 
 func TestLoadConfig_PathResolution(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir, "https://github.com/testowner/testrepo.git")
+	stubGitRemote(t, "https://github.com/testowner/testrepo.git", nil)
 
 	// Write config with relative path
 	configContent := `
@@ -198,7 +199,7 @@ github:
 
 func TestLoadConfig_GitHubAutoDetect(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir, "git@github.com:detected/fromgit.git")
+	stubGitRemote(t, "git@github.com:detected/fromgit.git", nil)
 
 	// Config with auto values (default)
 	cfg, err := LoadConfig(dir)
@@ -217,7 +218,7 @@ func TestLoadConfig_GitHubAutoDetect(t *testing.T) {
 
 func TestLoadConfig_GitHubExplicit(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir, "https://github.com/detected/fromgit.git")
+	stubGitRemote(t, "https://github.com/detected/fromgit.git", nil)
 
 	// Write config with explicit values
 	configContent := `
@@ -243,7 +244,7 @@ github:
 
 func TestLoadConfig_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir, "https://github.com/testowner/testrepo.git")
+	stubGitRemote(t, "https://github.com/testowner/testrepo.git", nil)
 
 	// Write invalid YAML
 	writeFile(t, filepath.Join(dir, ".choo.yaml"), "invalid: yaml: content: [")
@@ -259,7 +260,7 @@ func TestLoadConfig_InvalidYAML(t *testing.T) {
 
 func TestLoadConfig_ValidationError(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir, "https://github.com/testowner/testrepo.git")
+	stubGitRemote(t, "https://github.com/testowner/testrepo.git", nil)
 
 	// Write config with invalid values
 	configContent := `
@@ -284,7 +285,7 @@ github:
 
 func TestLoadConfig_NoGitRemote(t *testing.T) {
 	dir := t.TempDir()
-	// Don't initialize git repo
+	stubGitRemote(t, "", errors.New("no git remote"))
 
 	// Config tries to auto-detect (default behavior)
 	_, err := LoadConfig(dir)
@@ -298,7 +299,7 @@ func TestLoadConfig_NoGitRemote(t *testing.T) {
 
 func TestLoadConfig_PartialConfig(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir, "https://github.com/testowner/testrepo.git")
+	stubGitRemote(t, "https://github.com/testowner/testrepo.git", nil)
 
 	// Write partial config (only some fields)
 	configContent := `
@@ -338,7 +339,7 @@ log_level: warn
 
 func TestLoadConfig_BaselineChecks(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir, "https://github.com/testowner/testrepo.git")
+	stubGitRemote(t, "https://github.com/testowner/testrepo.git", nil)
 
 	// Write config with baseline checks
 	configContent := `
@@ -385,7 +386,7 @@ baseline_checks:
 
 func TestLoadConfig_ConditionalCommands(t *testing.T) {
 	dir := t.TempDir()
-	initGitRepo(t, dir, "https://github.com/testowner/testrepo.git")
+	stubGitRemote(t, "https://github.com/testowner/testrepo.git", nil)
 
 	// Write config with conditional commands
 	configContent := `

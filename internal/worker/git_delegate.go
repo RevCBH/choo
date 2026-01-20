@@ -9,20 +9,28 @@ import (
 
 	"github.com/RevCBH/choo/internal/escalate"
 	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/git"
 )
 
 // prURLPattern matches GitHub PR URLs
+//
+//nolint:unused // WIP: used in integration tests for PR creation
 var prURLPattern = regexp.MustCompile(`https://github\.com/[^/]+/[^/]+/pull/\d+`)
+
+func (w *Worker) runner() git.Runner {
+	if w.gitRunner != nil {
+		return w.gitRunner
+	}
+	return git.DefaultRunner()
+}
 
 // getHeadRef returns the current HEAD commit SHA
 func (w *Worker) getHeadRef(ctx context.Context) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "HEAD")
-	cmd.Dir = w.worktreePath
-	out, err := cmd.Output()
+	out, err := w.runner().Exec(ctx, w.worktreePath, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return strings.TrimSpace(out), nil
 }
 
 // hasNewCommit checks if HEAD has moved since the given ref
@@ -36,26 +44,21 @@ func (w *Worker) hasNewCommit(ctx context.Context, sinceRef string) (bool, error
 
 // branchExistsOnRemote checks if a branch exists on the remote
 func (w *Worker) branchExistsOnRemote(ctx context.Context, branch string) (bool, error) {
-	cmd := exec.CommandContext(ctx, "git", "ls-remote", "--heads", "origin", branch)
-	cmd.Dir = w.worktreePath
-	out, err := cmd.Output()
+	out, err := w.runner().Exec(ctx, w.worktreePath, "ls-remote", "--heads", "origin", branch)
 	if err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(string(out)) != "", nil
+	return strings.TrimSpace(out) != "", nil
 }
 
 // getChangedFiles returns list of modified/added/deleted files
 func (w *Worker) getChangedFiles(ctx context.Context) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
-	cmd.Dir = w.worktreePath
-	out, err := cmd.Output()
+	out, err := w.runner().Exec(ctx, w.worktreePath, "status", "--porcelain")
 	if err != nil {
 		return nil, err
 	}
-
 	var files []string
-	lines := strings.Split(string(out), "\n")
+	lines := strings.Split(out, "\n")
 	for _, line := range lines {
 		if len(line) >= 3 {
 			// Format: "XY filename" where XY is status
@@ -168,6 +171,8 @@ func (w *Worker) invokeClaude(ctx context.Context, prompt string) error {
 }
 
 // invokeClaudeWithOutputImpl is the default implementation
+//
+//nolint:unused // WIP: used in integration tests for PR creation
 func (w *Worker) invokeClaudeWithOutputImpl(ctx context.Context, prompt string) (string, error) {
 	cmd := exec.CommandContext(ctx, "claude",
 		"--dangerously-skip-permissions",
@@ -184,12 +189,16 @@ func (w *Worker) invokeClaudeWithOutputImpl(ctx context.Context, prompt string) 
 }
 
 // extractPRURL extracts a GitHub PR URL from Claude's output
+//
+//nolint:unused // WIP: used in integration tests for PR creation
 func extractPRURL(output string) string {
 	match := prURLPattern.FindString(output)
 	return match
 }
 
 // createPRViaClaudeCode invokes Claude to create the PR
+//
+//nolint:unused // WIP: used in integration tests for PR creation
 func (w *Worker) createPRViaClaudeCode(ctx context.Context) (string, error) {
 	prompt := BuildPRPrompt(w.branch, w.config.TargetBranch, w.unit.ID)
 

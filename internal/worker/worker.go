@@ -25,6 +25,7 @@ type Worker struct {
 	config       WorkerConfig
 	events       *events.Bus
 	git          *git.WorktreeManager
+	gitRunner    git.Runner
 	github       *github.PRClient
 	claude       *ClaudeClient
 	escalator    escalate.Escalator
@@ -38,6 +39,7 @@ type Worker struct {
 
 	// invokeClaudeWithOutput is the function that invokes Claude and captures output
 	// Can be overridden for testing
+	//nolint:unused // WIP: used in integration tests for PR creation
 	invokeClaudeWithOutput func(ctx context.Context, prompt string) (string, error)
 }
 
@@ -52,6 +54,7 @@ type WorkerConfig struct {
 	BackpressureTimeout time.Duration
 	BaselineTimeout     time.Duration
 	NoPR                bool
+	SuppressOutput      bool // When true, don't tee Claude output to stdout (TUI mode)
 }
 
 // BaselineCheck represents a single baseline validation command
@@ -65,6 +68,7 @@ type BaselineCheck struct {
 type WorkerDeps struct {
 	Events    *events.Bus
 	Git       *git.WorktreeManager
+	GitRunner git.Runner
 	GitHub    *github.PRClient
 	Claude    *ClaudeClient
 	Escalator escalate.Escalator
@@ -76,11 +80,16 @@ type ClaudeClient any
 
 // NewWorker creates a worker for executing a unit
 func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker {
+	gitRunner := deps.GitRunner
+	if gitRunner == nil {
+		gitRunner = git.DefaultRunner()
+	}
 	return &Worker{
 		unit:      unit,
 		config:    cfg,
 		events:    deps.Events,
 		git:       deps.Git,
+		gitRunner: gitRunner,
 		github:    deps.GitHub,
 		claude:    deps.Claude,
 		escalator: deps.Escalator,
@@ -89,10 +98,14 @@ func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker 
 
 // Run executes the unit through all phases: setup, task loop, baseline, PR
 func (w *Worker) Run(ctx context.Context) error {
-	// Use defer for cleanup to ensure worktree removal even on error
+	// Track success to decide whether to cleanup worktree
+	// On failure, preserve worktree for debugging/resume
+	success := false
 	defer func() {
-		if w.worktreePath != "" {
+		if w.worktreePath != "" && success {
 			_ = w.cleanup(ctx)
+		} else if w.worktreePath != "" {
+			fmt.Fprintf(os.Stderr, "Preserving worktree for debugging: %s\n", w.worktreePath)
 		}
 	}()
 
@@ -110,9 +123,19 @@ func (w *Worker) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to update unit status: %w", err)
 	}
 
-	// Emit UnitStarted event
+	// Emit UnitStarted event with task count for TUI
 	if w.events != nil {
-		evt := events.NewEvent(events.UnitStarted, w.unit.ID)
+		// Count already-completed tasks (for resume scenarios)
+		completedTasks := 0
+		for _, task := range w.unit.Tasks {
+			if task.Status == discovery.TaskStatusComplete {
+				completedTasks++
+			}
+		}
+		evt := events.NewEvent(events.UnitStarted, w.unit.ID).WithPayload(map[string]any{
+			"total_tasks":     len(w.unit.Tasks),
+			"completed_tasks": completedTasks,
+		})
 		w.events.Emit(evt)
 	}
 
@@ -151,6 +174,9 @@ func (w *Worker) Run(ctx context.Context) error {
 		w.events.Emit(evt)
 	}
 
+	// Mark success so worktree gets cleaned up
+	success = true
+
 	return nil
 }
 
@@ -166,28 +192,81 @@ func (w *Worker) generateBranchName() string {
 	return fmt.Sprintf("ralph/%s-%s", w.unit.ID, hash[:6])
 }
 
-// setupWorktree creates the isolated worktree for this worker
+// setupWorktree creates the isolated worktree for this worker, or reuses an existing one
 func (w *Worker) setupWorktree(ctx context.Context) error {
-	// Generate branch name
-	w.branch = w.generateBranchName()
-
-	// Create worktree via git.WorktreeManager
+	// Create (or get existing) worktree via git.WorktreeManager
 	worktree, err := w.git.CreateWorktree(ctx, w.unit.ID, w.config.TargetBranch)
 	if err != nil {
 		return err
 	}
 
-	// Store worktree path and update branch to our generated one
+	// Store worktree path
 	w.worktreePath = worktree.Path
 
-	// Checkout our custom branch in the worktree
-	cmd := exec.CommandContext(ctx, "git", "checkout", "-b", w.branch)
-	cmd.Dir = w.worktreePath
-	if err := cmd.Run(); err != nil {
+	// Check if we're resuming an existing worktree by checking the current branch
+	currentBranch, err := w.getCurrentBranch(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	// If the current branch is a worker branch (ralph/<unit>-<hash>), reuse it
+	if strings.HasPrefix(currentBranch, fmt.Sprintf("ralph/%s-", w.unit.ID)) {
+		w.branch = currentBranch
+		fmt.Fprintf(os.Stderr, "Resuming existing worktree on branch %s\n", w.branch)
+
+		// Refresh task statuses from worktree since they may have progressed
+		if err := w.refreshTaskStatuses(); err != nil {
+			return fmt.Errorf("failed to refresh task statuses: %w", err)
+		}
+		return nil
+	}
+
+	// Generate a new branch name and checkout
+	w.branch = w.generateBranchName()
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "checkout", "-b", w.branch); err != nil {
 		return fmt.Errorf("failed to checkout branch %s: %w", w.branch, err)
 	}
 
 	return nil
+}
+
+// refreshTaskStatuses re-reads task statuses from the worktree to handle resumption
+func (w *Worker) refreshTaskStatuses() error {
+	// Compute unit path relative to worktree
+	unitPath := w.unit.Path
+	if filepath.IsAbs(unitPath) {
+		var err error
+		unitPath, err = filepath.Rel(w.config.RepoRoot, unitPath)
+		if err != nil {
+			return fmt.Errorf("failed to get relative unit path: %w", err)
+		}
+	}
+
+	// Re-parse each task from the worktree
+	for _, task := range w.unit.Tasks {
+		taskPath := filepath.Join(w.worktreePath, unitPath, task.FilePath)
+		updated, err := discovery.ParseTaskFile(taskPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to refresh status for task #%d: %v\n", task.Number, err)
+			continue
+		}
+
+		if task.Status != updated.Status {
+			fmt.Fprintf(os.Stderr, "Task #%d status refreshed: %s -> %s\n", task.Number, task.Status, updated.Status)
+			task.Status = updated.Status
+		}
+	}
+
+	return nil
+}
+
+// getCurrentBranch returns the currently checked out branch in the worktree
+func (w *Worker) getCurrentBranch(ctx context.Context) (string, error) {
+	output, err := w.runner().Exec(ctx, w.worktreePath, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output), nil
 }
 
 // runBaselinePhase executes baseline checks with retry loop
@@ -222,16 +301,13 @@ func (w *Worker) runBaselinePhase(ctx context.Context) error {
 		}
 
 		// Commit fixes with --no-verify
-		addCmd := exec.CommandContext(ctx, "git", "add", "-A")
-		addCmd.Dir = w.worktreePath
-		if err := addCmd.Run(); err != nil {
+		if _, err := w.runner().Exec(ctx, w.worktreePath, "add", "-A"); err != nil {
 			return fmt.Errorf("git add failed during baseline fix: %w", err)
 		}
 
-		commitCmd := exec.CommandContext(ctx, "git", "commit", "-m", "fix: baseline checks", "--no-verify")
-		commitCmd.Dir = w.worktreePath
+		_, err := w.runner().Exec(ctx, w.worktreePath, "commit", "-m", "fix: baseline checks", "--no-verify")
 		// Ignore error if nothing to commit
-		_ = commitCmd.Run()
+		_ = err
 
 		// Re-run baseline checks
 		passed, output = RunBaselineChecks(ctx, w.config.BaselineChecks, w.worktreePath, w.config.BaselineTimeout)
@@ -247,9 +323,7 @@ func (w *Worker) runBaselinePhase(ctx context.Context) error {
 // createPR pushes branch and creates pull request
 func (w *Worker) createPR(ctx context.Context) error {
 	// Push branch to remote
-	pushCmd := exec.CommandContext(ctx, "git", "push", "-u", "origin", w.branch)
-	pushCmd.Dir = w.worktreePath
-	if err := pushCmd.Run(); err != nil {
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "push", "-u", "origin", w.branch); err != nil {
 		return fmt.Errorf("failed to push branch: %w", err)
 	}
 
