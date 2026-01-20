@@ -88,6 +88,28 @@ const (
 	BranchPushed    EventType = "branch.pushed"
 )
 
+// Feature lifecycle events
+const (
+	FeatureStarted        EventType = "feature.started"
+	FeatureSpecsGenerated EventType = "feature.specs.generated"
+	FeatureSpecsReviewed  EventType = "feature.specs.reviewed"
+	FeatureSpecsCommitted EventType = "feature.specs.committed"
+	FeatureTasksGenerated EventType = "feature.tasks.generated"
+	FeatureUnitsComplete  EventType = "feature.units.complete"
+	FeaturePROpened       EventType = "feature.pr.opened"
+	FeatureCompleted      EventType = "feature.completed"
+	FeatureFailed         EventType = "feature.failed"
+)
+
+// PRD events
+const (
+	PRDDiscovered    EventType = "prd.discovered"
+	PRDSelected      EventType = "prd.selected"
+	PRDUpdated       EventType = "prd.updated"
+	PRDBodyChanged   EventType = "prd.body.changed"
+	PRDDriftDetected EventType = "prd.drift.detected"
+)
+
 // NewEvent creates an event with the given type and unit
 func NewEvent(eventType EventType, unit string) Event {
 	return Event{
