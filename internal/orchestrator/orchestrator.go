@@ -523,6 +523,7 @@ func buildGraphData(units []*discovery.Unit, levels [][]string) map[string]any {
 		nodes = append(nodes, map[string]any{
 			"id":    unit.ID,
 			"level": levelMap[unit.ID],
+			"tasks": len(unit.Tasks),
 		})
 	}
 

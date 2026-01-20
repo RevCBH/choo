@@ -13,10 +13,15 @@ const STATUS_COLORS = {
 };
 
 const LAYOUT = {
-    nodeRadius: 30,
-    levelSpacing: 150,
-    nodeSpacing: 80,
-    padding: 50
+    nodeWidth: 140,
+    nodeHeight: 50,
+    levelSpacing: 180,
+    nodeSpacing: 70,
+    padding: 90,  // Must be > nodeWidth/2 to prevent cutoff
+    // Progress block settings
+    blockSize: 8,
+    blockGap: 3,
+    blockMarginTop: 4
 };
 
 let svg, nodesGroup, edgesGroup;
@@ -100,28 +105,105 @@ function renderNodes() {
         .on("mouseenter", (event, d) => callbacks.onHover?.(d.id))
         .on("mouseleave", () => callbacks.onHover?.(null));
 
-    // Node circle
-    nodeEnter.append("circle")
-        .attr("r", LAYOUT.nodeRadius)
+    // Node rectangle
+    nodeEnter.append("rect")
+        .attr("x", -LAYOUT.nodeWidth / 2)
+        .attr("y", -LAYOUT.nodeHeight / 2)
+        .attr("width", LAYOUT.nodeWidth)
+        .attr("height", LAYOUT.nodeHeight)
+        .attr("rx", 6)
+        .attr("ry", 6)
         .attr("fill", d => STATUS_COLORS[d.status] || STATUS_COLORS.pending)
         .attr("stroke", "#374151")
         .attr("stroke-width", 2);
 
-    // Node label
+    // Node label (positioned higher to make room for progress blocks)
     nodeEnter.append("text")
+        .attr("class", "node-label")
         .attr("text-anchor", "middle")
-        .attr("dy", "0.35em")
+        .attr("dy", "-0.2em")
         .attr("fill", "white")
-        .attr("font-size", "12px")
+        .attr("font-size", "13px")
         .attr("font-weight", "500")
-        .text(d => truncateLabel(d.id, 8));
+        .text(d => truncateLabel(d.id, 18));
+
+    // Progress blocks container
+    nodeEnter.append("g")
+        .attr("class", "progress-blocks");
 
     // Update existing nodes
     const nodeMerge = nodeSelection.merge(nodeEnter);
 
-    nodeMerge.select("circle")
+    nodeMerge.select("rect")
         .attr("fill", d => STATUS_COLORS[d.status] || STATUS_COLORS.pending)
-        .classed("pulse", d => d.status === "in_progress");
+        .classed("pulse", d => d.status === "in_progress" && (!d.tasks || d.tasks === 0));
+
+    // Update progress blocks
+    nodeMerge.each(function(d) {
+        renderProgressBlocks(d3.select(this).select(".progress-blocks"), d);
+    });
+}
+
+/**
+ * Render progress blocks for a node.
+ * @param {d3.Selection} container - The progress-blocks group
+ * @param {Object} node - Node data with tasks, currentTask, completedTasks
+ */
+function renderProgressBlocks(container, node) {
+    const totalTasks = node.tasks || 0;
+    if (totalTasks === 0) {
+        container.selectAll("*").remove();
+        return;
+    }
+
+    const currentTask = node.currentTask ?? -1; // 0-indexed, -1 means none started
+    const completedTasks = node.completedTasks ?? 0;
+
+    // Calculate block positions (centered)
+    const totalWidth = totalTasks * LAYOUT.blockSize + (totalTasks - 1) * LAYOUT.blockGap;
+    const startX = -totalWidth / 2;
+    const y = LAYOUT.blockMarginTop + 4; // Position below the label
+
+    // Create data for blocks
+    const blockData = Array.from({ length: totalTasks }, (_, i) => ({
+        index: i,
+        isComplete: i < completedTasks,
+        isCurrent: i === currentTask,
+        isPending: i > currentTask && i >= completedTasks
+    }));
+
+    // Bind data
+    const blocks = container.selectAll(".progress-block")
+        .data(blockData, d => d.index);
+
+    // Remove old blocks
+    blocks.exit().remove();
+
+    // Add new blocks
+    const blocksEnter = blocks.enter()
+        .append("rect")
+        .attr("class", "progress-block")
+        .attr("width", LAYOUT.blockSize)
+        .attr("height", LAYOUT.blockSize)
+        .attr("rx", 1)
+        .attr("ry", 1);
+
+    // Update all blocks
+    blocks.merge(blocksEnter)
+        .attr("x", d => startX + d.index * (LAYOUT.blockSize + LAYOUT.blockGap))
+        .attr("y", y)
+        .attr("fill", d => {
+            if (d.isComplete) return "#22C55E"; // Green for complete
+            if (d.isCurrent) return "#FBBF24"; // Yellow for current
+            return "rgba(255,255,255,0.2)"; // Dim for pending
+        })
+        .attr("stroke", d => {
+            if (d.isComplete) return "#16A34A";
+            if (d.isCurrent) return "#D97706";
+            return "rgba(255,255,255,0.3)";
+        })
+        .attr("stroke-width", 1)
+        .classed("current-task", d => d.isCurrent);
 }
 
 function renderEdges() {
@@ -136,8 +218,10 @@ function renderEdges() {
         .append("path")
         .attr("class", "edge")
         .attr("d", d => {
-            const source = graphData.nodes.find(n => n.id === d.from);
-            const target = graphData.nodes.find(n => n.id === d.to);
+            // Edge "from" is the dependent, "to" is the dependency
+            // Draw arrow from dependency (to) to dependent (from) so it flows left-to-right
+            const source = graphData.nodes.find(n => n.id === d.to);   // dependency (left)
+            const target = graphData.nodes.find(n => n.id === d.from); // dependent (right)
             if (!source || !target) return "";
             return bezierPath(source, target);
         })
@@ -148,8 +232,12 @@ function renderEdges() {
 }
 
 function bezierPath(source, target) {
-    const midX = (source.x + target.x) / 2;
-    return `M ${source.x + LAYOUT.nodeRadius} ${source.y} C ${midX} ${source.y}, ${midX} ${target.y}, ${target.x - LAYOUT.nodeRadius - 10} ${target.y}`;
+    const sourceX = source.x + LAYOUT.nodeWidth / 2;
+    // Arrowhead marker has refX=8 with 10-unit path, so tip extends 2 units past path end
+    // End path 2 units before node edge so arrowhead tip touches the edge
+    const targetX = target.x - LAYOUT.nodeWidth / 2 - 2;
+    const midX = (sourceX + targetX) / 2;
+    return `M ${sourceX} ${source.y} C ${midX} ${source.y}, ${midX} ${target.y}, ${targetX} ${target.y}`;
 }
 
 function truncateLabel(text, maxLength) {
@@ -168,6 +256,21 @@ export function updateNodeStatuses(statusMap) {
         }
     });
     renderNodes();
+}
+
+/**
+ * Update task progress for a node.
+ * @param {string} nodeId - Unit ID
+ * @param {number} currentTask - Current task index (0-indexed)
+ * @param {number} completedTasks - Number of completed tasks
+ */
+export function updateTaskProgress(nodeId, currentTask, completedTasks) {
+    const node = graphData.nodes.find(n => n.id === nodeId);
+    if (node) {
+        node.currentTask = currentTask;
+        node.completedTasks = completedTasks;
+        renderNodes();
+    }
 }
 
 /**
