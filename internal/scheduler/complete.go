@@ -33,12 +33,18 @@ func (s *Scheduler) Complete(unitID string) {
 
 // Fail marks a unit as failed and propagates blocked status to dependents
 // Emits UnitFailed event and UnitBlocked for affected dependents
+// Idempotent: does nothing if unit is already in a terminal state
 func (s *Scheduler) Fail(unitID string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	state, exists := s.states[unitID]
 	if !exists {
+		return
+	}
+
+	// Skip if already in a terminal state (prevents infinite loop from event re-emission)
+	if state.Status.IsTerminal() {
 		return
 	}
 

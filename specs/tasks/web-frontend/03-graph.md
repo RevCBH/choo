@@ -1,6 +1,6 @@
 ---
 task: 3
-status: pending
+status: complete
 backpressure: "test -f internal/web/static/graph.js && grep -q 'export.*initGraph' internal/web/static/graph.js && grep -q 'export.*updateNodeStatuses' internal/web/static/graph.js"
 depends_on: [1]
 ---

@@ -2,11 +2,39 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/RevCBH/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/git"
 )
+
+type errorGitRunner struct{}
+
+func (errorGitRunner) Exec(ctx context.Context, dir string, args ...string) (string, error) {
+	return "", errors.New("git failed")
+}
+
+func (errorGitRunner) ExecWithStdin(ctx context.Context, dir string, stdin string, args ...string) (string, error) {
+	return "", errors.New("git failed")
+}
+
+type contextGitRunner struct{}
+
+func (contextGitRunner) Exec(ctx context.Context, dir string, args ...string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return "", nil
+}
+
+func (contextGitRunner) ExecWithStdin(ctx context.Context, dir string, stdin string, args ...string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	return "", nil
+}
 
 func TestExecute_Success(t *testing.T) {
 	deps := mockDeps(t)
@@ -37,6 +65,10 @@ func TestExecute_NilUnit(t *testing.T) {
 
 func TestExecute_PropagatesError(t *testing.T) {
 	deps := mockDeps(t)
+	git.SetDefaultRunner(errorGitRunner{})
+	t.Cleanup(func() {
+		git.SetDefaultRunner(nil)
+	})
 	// Use an invalid repo to cause an error during worktree creation
 	deps.Git.RepoRoot = "/nonexistent/repo"
 
@@ -54,6 +86,10 @@ func TestExecute_PropagatesError(t *testing.T) {
 
 func TestExecute_RespectsContext(t *testing.T) {
 	deps := mockDeps(t)
+	git.SetDefaultRunner(contextGitRunner{})
+	t.Cleanup(func() {
+		git.SetDefaultRunner(nil)
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately

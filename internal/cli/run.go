@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/RevCBH/choo/internal/cli/tui"
 	"github.com/RevCBH/choo/internal/config"
 	"github.com/RevCBH/choo/internal/escalate"
 	"github.com/RevCBH/choo/internal/events"
@@ -14,7 +15,9 @@ import (
 	"github.com/RevCBH/choo/internal/github"
 	"github.com/RevCBH/choo/internal/orchestrator"
 	"github.com/RevCBH/choo/internal/web"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 // RunOptions holds flags for the run command
@@ -28,6 +31,7 @@ type RunOptions struct {
 	TasksDir     string // Path to specs/tasks/ directory
 	Web          bool   // Enable web UI event forwarding
 	WebSocket    string // Custom Unix socket path (optional)
+	NoTUI        bool   // Disable TUI even when stdout is a TTY
 }
 
 // Validate checks RunOptions for validity
@@ -89,6 +93,7 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 	cmd.Flags().BoolVar(&opts.SkipReview, "skip-review", false, "Auto-merge without waiting for review")
 	cmd.Flags().BoolVar(&opts.Web, "web", false, "Enable web UI event forwarding")
 	cmd.Flags().StringVar(&opts.WebSocket, "web-socket", "", "Custom Unix socket path (default: /tmp/choo.sock)")
+	cmd.Flags().BoolVar(&opts.NoTUI, "no-tui", false, "Disable interactive TUI (use summary-only output)")
 
 	return cmd
 }
@@ -145,6 +150,29 @@ func (a *App) RunOrchestrator(ctx context.Context, opts RunOptions) error {
 	}
 	_ = pusher // pusher is available for future graph integration
 
+	// Determine if we should use TUI
+	useTUI := !opts.NoTUI && !opts.DryRun && term.IsTerminal(int(os.Stdout.Fd()))
+
+	// Set up TUI if enabled
+	var tuiProgram *tea.Program
+	var tuiBridge *tui.Bridge
+	if useTUI {
+		model := tui.NewModel(0, opts.Parallelism) // totalUnits set via OrchStarted event
+		tuiProgram = tea.NewProgram(model, tea.WithAltScreen())
+		tuiBridge = tui.NewBridge(tuiProgram)
+		eventBus.Subscribe(tuiBridge.Handler())
+
+		// Run TUI in background
+		go func() {
+			if _, err := tuiProgram.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "TUI error: %v\n", err)
+			}
+		}()
+		defer func() {
+			tuiBridge.SendDone()
+		}()
+	}
+
 	// Create Git WorktreeManager
 	gitManager := git.NewWorktreeManager(wd, nil)
 
@@ -185,6 +213,7 @@ func (a *App) RunOrchestrator(ctx context.Context, opts RunOptions) error {
 		SingleUnit:      opts.Unit,
 		DryRun:          opts.DryRun,
 		ShutdownTimeout: orchestrator.DefaultShutdownTimeout,
+		SuppressOutput:  useTUI,
 	}
 
 	// Create orchestrator

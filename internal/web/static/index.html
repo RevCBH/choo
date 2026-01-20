@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Choo Orchestrator</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <aside class="sidebar">
+            <div id="connection-status" class="status-card">
+                <div class="status-indicator"></div>
+                <span class="status-text">Connecting...</span>
+            </div>
+
+            <div id="summary-panel" class="summary-card">
+                <h3>Summary</h3>
+                <div class="summary-grid">
+                    <div class="stat" data-status="total">
+                        <span class="stat-value">0</span>
+                        <span class="stat-label">Total</span>
+                    </div>
+                    <div class="stat" data-status="pending">
+                        <span class="stat-value">0</span>
+                        <span class="stat-label">Pending</span>
+                    </div>
+                    <div class="stat" data-status="inProgress">
+                        <span class="stat-value">0</span>
+                        <span class="stat-label">In Progress</span>
+                    </div>
+                    <div class="stat" data-status="complete">
+                        <span class="stat-value">0</span>
+                        <span class="stat-label">Complete</span>
+                    </div>
+                    <div class="stat" data-status="failed">
+                        <span class="stat-value">0</span>
+                        <span class="stat-label">Failed</span>
+                    </div>
+                    <div class="stat" data-status="blocked">
+                        <span class="stat-value">0</span>
+                        <span class="stat-label">Blocked</span>
+                    </div>
+                </div>
+            </div>
+
+            <div id="toast-container"></div>
+        </aside>
+
+        <main class="main-content">
+            <div id="graph-container" class="graph-area"></div>
+
+            <div id="detail-panel" class="detail-panel hidden">
+                <div class="detail-header">
+                    <h3 id="detail-title">Unit Name</h3>
+                    <button id="detail-close" class="close-btn">&times;</button>
+                </div>
+                <div class="detail-body">
+                    <div id="detail-status" class="detail-status"></div>
+                    <div id="detail-progress" class="detail-progress"></div>
+                    <div id="detail-error" class="detail-error hidden"></div>
+                    <div id="detail-tasks" class="detail-tasks"></div>
+                </div>
+            </div>
+
+            <div id="event-log" class="event-log">
+                <h4>Event Log</h4>
+                <div id="event-list" class="event-list"></div>
+            </div>
+        </main>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>

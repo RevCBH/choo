@@ -1,6 +1,6 @@
 ---
 task: 1
-status: pending
+status: complete
 backpressure: "test -f internal/web/static/index.html && grep -q 'DOCTYPE html' internal/web/static/index.html && grep -q 'graph-container' internal/web/static/index.html"
 depends_on: []
 ---

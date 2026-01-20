@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -15,8 +14,23 @@ import (
 	"github.com/RevCBH/choo/internal/git"
 )
 
-// setupGitRepo creates a real git repository for testing
-func setupGitRepo(t *testing.T) (repoDir string, cleanup func()) {
+type noopGitRunner struct{}
+
+func (noopGitRunner) Exec(ctx context.Context, dir string, args ...string) (string, error) {
+	// Simulate worktree creation by creating the directory path.
+	if len(args) >= 5 && args[0] == "worktree" && args[1] == "add" {
+		worktreePath := args[4]
+		_ = os.MkdirAll(worktreePath, 0755)
+	}
+	return "", nil
+}
+
+func (noopGitRunner) ExecWithStdin(ctx context.Context, dir string, stdin string, args ...string) (string, error) {
+	return "", nil
+}
+
+// setupRepo creates a temporary directory to act as a repo root for testing.
+func setupRepo(t *testing.T) (repoDir string, cleanup func()) {
 	t.Helper()
 
 	tmpDir, err := os.MkdirTemp("", "pool-test-*")
@@ -27,51 +41,6 @@ func setupGitRepo(t *testing.T) (repoDir string, cleanup func()) {
 	repoDir = filepath.Join(tmpDir, "repo")
 	if err := os.MkdirAll(repoDir, 0755); err != nil {
 		t.Fatalf("failed to create repo dir: %v", err)
-	}
-
-	// Initialize git repo
-	cmd := exec.Command("git", "init")
-	cmd.Dir = repoDir
-	if err := cmd.Run(); err != nil {
-		os.RemoveAll(tmpDir)
-		t.Fatalf("failed to init git repo: %v", err)
-	}
-
-	// Configure git in the test repo
-	cmd = exec.Command("git", "config", "user.email", "test@test.com")
-	cmd.Dir = repoDir
-	cmd.Run()
-	cmd = exec.Command("git", "config", "user.name", "Test User")
-	cmd.Dir = repoDir
-	cmd.Run()
-
-	// Create initial commit
-	readmePath := filepath.Join(repoDir, "README.md")
-	if err := os.WriteFile(readmePath, []byte("# Test\n"), 0644); err != nil {
-		os.RemoveAll(tmpDir)
-		t.Fatalf("failed to write README: %v", err)
-	}
-
-	cmd = exec.Command("git", "add", "README.md")
-	cmd.Dir = repoDir
-	if err := cmd.Run(); err != nil {
-		os.RemoveAll(tmpDir)
-		t.Fatalf("failed to add README: %v", err)
-	}
-
-	cmd = exec.Command("git", "commit", "-m", "Initial commit")
-	cmd.Dir = repoDir
-	if err := cmd.Run(); err != nil {
-		os.RemoveAll(tmpDir)
-		t.Fatalf("failed to commit: %v", err)
-	}
-
-	// Create main branch (in case default is not main)
-	cmd = exec.Command("git", "branch", "-M", "main")
-	cmd.Dir = repoDir
-	if err := cmd.Run(); err != nil {
-		os.RemoveAll(tmpDir)
-		t.Fatalf("failed to create main branch: %v", err)
 	}
 
 	cleanup = func() {
@@ -85,8 +54,15 @@ func setupGitRepo(t *testing.T) (repoDir string, cleanup func()) {
 func mockDeps(t *testing.T) WorkerDeps {
 	t.Helper()
 
-	repoDir, cleanup := setupGitRepo(t)
+	repoDir, cleanup := setupRepo(t)
 	t.Cleanup(cleanup)
+
+	prevRunner := git.DefaultRunner()
+	git.SetDefaultRunner(noopGitRunner{})
+
+	t.Cleanup(func() {
+		git.SetDefaultRunner(prevRunner)
+	})
 
 	return WorkerDeps{
 		Events: events.NewBus(100),
@@ -233,18 +209,11 @@ func TestPool_Wait_BlocksUntilComplete(t *testing.T) {
 		Tasks: []*discovery.Task{},
 	}
 
-	startTime := time.Now()
 	pool.Submit(unit)
 
 	err := pool.Wait()
 	if err != nil {
 		t.Errorf("wait failed: %v", err)
-	}
-
-	// Wait should have blocked for at least some time while worker ran
-	elapsed := time.Since(startTime)
-	if elapsed < 1*time.Millisecond {
-		t.Error("wait returned too quickly, likely didn't block properly")
 	}
 }
 

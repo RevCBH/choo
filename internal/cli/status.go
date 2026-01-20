@@ -169,15 +169,26 @@ func convertToUnitDisplays(units []*discovery.Unit) []UnitDisplay {
 			Tasks:  make([]TaskDisplay, 0, len(unit.Tasks)),
 		}
 
-		// Calculate progress based on completed tasks
+		// Calculate progress based on completed tasks and infer unit status
 		if len(unit.Tasks) > 0 {
 			completed := 0
+			inProgress := 0
 			for _, task := range unit.Tasks {
-				if task.Status == discovery.TaskStatusComplete {
+				switch task.Status {
+				case discovery.TaskStatusComplete:
 					completed++
+				case discovery.TaskStatusInProgress:
+					inProgress++
 				}
 			}
 			display.Progress = float64(completed) / float64(len(unit.Tasks))
+
+			// Infer unit status from task status (orch_ fields are runtime-only)
+			if completed == len(unit.Tasks) {
+				display.Status = discovery.UnitStatusComplete
+			} else if inProgress > 0 || completed > 0 {
+				display.Status = discovery.UnitStatusInProgress
+			}
 		}
 
 		// Convert tasks
