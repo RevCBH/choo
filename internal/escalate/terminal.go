@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sync"
 )
 
 // Terminal writes escalations to stderr with visual severity indicators
-type Terminal struct{}
+type Terminal struct {
+	mu sync.Mutex // Protects concurrent writes to stderr
+}
 
 // NewTerminal creates a terminal escalator
 func NewTerminal() *Terminal {
@@ -29,6 +32,10 @@ func (t *Terminal) Escalate(ctx context.Context, e Escalation) error {
 	default:
 		prefix = "ℹ️  "
 	}
+
+	// Serialize writes to stderr to prevent concurrent write panics
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	fmt.Fprintf(os.Stderr, "\n%s[%s] %s\n", prefix, e.Severity, e.Title)
 	fmt.Fprintf(os.Stderr, "   Unit: %s\n", e.Unit)

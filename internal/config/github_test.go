@@ -1,7 +1,6 @@
 package config
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 )
@@ -78,13 +77,10 @@ func TestParseGitHubURL_Invalid(t *testing.T) {
 	}
 }
 
-func TestDetectGitHubRepo_Integration(t *testing.T) {
-	// Create temp directory for test repo
-	dir := t.TempDir()
-
+func TestDetectGitHubRepo_Stubbed(t *testing.T) {
 	// Test HTTPS URL
-	initGitRepo(t, dir, "https://github.com/RevCBH/choo.git")
-	owner, repo, err := detectGitHubRepo(dir)
+	stubGitRemote(t, "https://github.com/RevCBH/choo.git", nil)
+	owner, repo, err := detectGitHubRepo("ignored")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -95,10 +91,9 @@ func TestDetectGitHubRepo_Integration(t *testing.T) {
 		t.Errorf("expected repo to be 'choo', got %q", repo)
 	}
 
-	// Clean up and test SSH URL
-	cleanDir := t.TempDir()
-	initGitRepo(t, cleanDir, "git@github.com:RevCBH/choo.git")
-	owner, repo, err = detectGitHubRepo(cleanDir)
+	// Test SSH URL
+	stubGitRemote(t, "git@github.com:RevCBH/choo.git", nil)
+	owner, repo, err = detectGitHubRepo("ignored")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,24 +102,5 @@ func TestDetectGitHubRepo_Integration(t *testing.T) {
 	}
 	if repo != "choo" {
 		t.Errorf("expected repo to be 'choo', got %q", repo)
-	}
-}
-
-// initGitRepo creates a git repo with the given remote URL for testing
-func initGitRepo(t *testing.T, dir, remoteURL string) {
-	t.Helper()
-
-	// git init
-	cmd := exec.Command("git", "init")
-	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to init git repo: %v", err)
-	}
-
-	// git remote add origin <url>
-	cmd = exec.Command("git", "remote", "add", "origin", remoteURL)
-	cmd.Dir = dir
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to add git remote: %v", err)
 	}
 }

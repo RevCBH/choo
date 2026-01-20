@@ -309,6 +309,8 @@ Resolve all conflicts now.`, worktreePath, strings.Join(conflicts, "\n"))
 }
 
 // readConflictFile reads a file with conflict markers
+//
+//nolint:unused // WIP: will be used for conflict resolution
 func readConflictFile(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

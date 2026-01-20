@@ -36,6 +36,9 @@ type Orchestrator struct {
 	escalateCtx    context.Context
 	escalateCancel context.CancelFunc
 	closing        bool
+
+	// Bounded semaphore for escalation goroutines (prevents goroutine leak)
+	escalateSem chan struct{}
 }
 
 // Config holds orchestrator-specific configuration
@@ -69,6 +72,9 @@ type Config struct {
 
 	// ShutdownTimeout is the grace period for worker cleanup
 	ShutdownTimeout time.Duration
+
+	// SuppressOutput disables stdout/stderr tee in workers (TUI mode)
+	SuppressOutput bool
 }
 
 // Dependencies bundles external dependencies for injection
@@ -92,6 +98,9 @@ type Result struct {
 // DefaultShutdownTimeout is the default grace period for shutdown
 const DefaultShutdownTimeout = 30 * time.Second
 
+// MaxConcurrentEscalations limits concurrent escalation goroutines to prevent resource exhaustion
+const MaxConcurrentEscalations = 100
+
 // New creates an orchestrator with the given configuration and dependencies
 func New(cfg Config, deps Dependencies) *Orchestrator {
 	if cfg.ShutdownTimeout == 0 {
@@ -107,6 +116,7 @@ func New(cfg Config, deps Dependencies) *Orchestrator {
 		unitMap:        make(map[string]*discovery.Unit),
 		escalateCtx:    escalateCtx,
 		escalateCancel: escalateCancel,
+		escalateSem:    make(chan struct{}, MaxConcurrentEscalations),
 	}
 }
 
@@ -233,25 +243,29 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 		return o.dryRun(units)
 	}
 
-	// Emit orchestrator started event
-	o.bus.Emit(events.NewEvent(events.OrchStarted, "").WithPayload(map[string]any{
-		"unit_count":  len(units),
-		"parallelism": o.cfg.Parallelism,
-	}))
-
-	// 2. Build schedule
+	// 2. Build schedule (before emitting event so we can include the graph)
 	o.scheduler = scheduler.New(o.bus, o.cfg.Parallelism)
-	_, err = o.scheduler.Schedule(units)
+	schedule, err := o.scheduler.Schedule(units)
 	if err != nil {
 		return nil, fmt.Errorf("scheduling failed: %w", err)
 	}
 
+	// Emit orchestrator started event with graph for web UI
+	o.bus.Emit(events.NewEvent(events.OrchStarted, "").WithPayload(map[string]any{
+		"unit_count":  len(units),
+		"parallelism": o.cfg.Parallelism,
+		"graph":       buildGraphData(units, schedule.Levels),
+	}))
+
 	// 3. Initialize worker pool
 	workerCfg := worker.WorkerConfig{
-		RepoRoot:     o.cfg.RepoRoot,
-		TargetBranch: o.cfg.TargetBranch,
-		WorktreeBase: o.cfg.WorktreeBase,
-		NoPR:         o.cfg.NoPR,
+		RepoRoot:            o.cfg.RepoRoot,
+		TargetBranch:        o.cfg.TargetBranch,
+		WorktreeBase:        o.cfg.WorktreeBase,
+		NoPR:                o.cfg.NoPR,
+		BackpressureTimeout: 5 * time.Minute,
+		MaxClaudeRetries:    3,
+		SuppressOutput:      o.cfg.SuppressOutput,
 	}
 
 	workerDeps := worker.WorkerDeps{
@@ -366,24 +380,54 @@ func (o *Orchestrator) handleEvent(e events.Event) {
 			}
 
 			// Escalate asynchronously to avoid blocking event dispatch
+			// Use semaphore to limit concurrent escalations and prevent goroutine leak
 			o.escalateMu.Lock()
 			if o.closing {
 				o.escalateMu.Unlock()
 				return
 			}
-			o.escalateWg.Add(1)
-			o.escalateMu.Unlock()
-			go func() {
-				defer o.escalateWg.Done()
-				// Use escalateCtx if available, otherwise background context
-				parentCtx := o.escalateCtx
-				if parentCtx == nil {
-					parentCtx = context.Background()
+
+			// If semaphore is initialized, use it to limit concurrency
+			if o.escalateSem != nil {
+				// Try to acquire semaphore (non-blocking)
+				select {
+				case o.escalateSem <- struct{}{}:
+					// Acquired semaphore, spawn goroutine
+					o.escalateWg.Add(1)
+					o.escalateMu.Unlock()
+					go func() {
+						defer func() {
+							<-o.escalateSem // Release semaphore
+							o.escalateWg.Done()
+						}()
+						// Use escalateCtx if available, otherwise background context
+						parentCtx := o.escalateCtx
+						if parentCtx == nil {
+							parentCtx = context.Background()
+						}
+						ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
+						defer cancel()
+						_ = o.escalator.Escalate(ctx, issue)
+					}()
+				default:
+					// Semaphore full, drop this escalation to prevent goroutine explosion
+					o.escalateMu.Unlock()
 				}
-				ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
-				defer cancel()
-				_ = o.escalator.Escalate(ctx, issue)
-			}()
+			} else {
+				// No semaphore (legacy/test mode), spawn goroutine directly
+				o.escalateWg.Add(1)
+				o.escalateMu.Unlock()
+				go func() {
+					defer o.escalateWg.Done()
+					parentCtx := o.escalateCtx
+					if parentCtx == nil {
+						parentCtx = context.Background()
+					}
+					ctx, cancel := context.WithTimeout(parentCtx, 30*time.Second)
+					defer cancel()
+					_ = o.escalator.Escalate(ctx, issue)
+				}()
+			}
 		}
 	}
 }
@@ -421,6 +465,50 @@ func categorizeErrorType(err error) string {
 		return "baseline_failure"
 	default:
 		return "claude_failure"
+	}
+}
+
+// buildGraphData creates graph data for the web UI from units and levels
+func buildGraphData(units []*discovery.Unit, levels [][]string) map[string]any {
+	// Build level lookup for nodes
+	levelMap := make(map[string]int)
+	for i, level := range levels {
+		for _, unitID := range level {
+			levelMap[unitID] = i
+		}
+	}
+
+	// Build nodes
+	nodes := make([]map[string]any, 0, len(units))
+	for _, unit := range units {
+		nodes = append(nodes, map[string]any{
+			"id":    unit.ID,
+			"level": levelMap[unit.ID],
+		})
+	}
+
+	// Build edges (from depends_on)
+	var edges []map[string]any
+	for _, unit := range units {
+		for _, dep := range unit.DependsOn {
+			edges = append(edges, map[string]any{
+				"from": unit.ID,
+				"to":   dep,
+			})
+		}
+	}
+
+	// Build levels array
+	levelsData := make([][]string, len(levels))
+	for i, level := range levels {
+		levelsData[i] = make([]string, len(level))
+		copy(levelsData[i], level)
+	}
+
+	return map[string]any{
+		"nodes":  nodes,
+		"edges":  edges,
+		"levels": levelsData,
 	}
 }
 
