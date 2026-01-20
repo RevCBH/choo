@@ -98,3 +98,49 @@ These specs close the gaps between v0.1 components and a fully operational self-
 
 1. **WEB** (depends on v0.1 EVENTS and CLI)
 2. **WEB-PUSHER** + **WEB-FRONTEND** (parallel, both depend on WEB)
+
+## Feature Workflow Specs (v0.4)
+
+These specs enable PRD-based automated feature development:
+
+| Spec | Description | Dependencies |
+|------|-------------|--------------|
+| **[FEATURE-DISCOVERY](FEATURE-DISCOVERY.md)** | PRD frontmatter parsing, discovery, feature event types | - |
+| **[FEATURE-PRIORITIZER](FEATURE-PRIORITIZER.md)** | PRD prioritization + `choo next-feature` command | FEATURE-DISCOVERY |
+| **[FEATURE-BRANCH](FEATURE-BRANCH.md)** | Feature branch creation and management | FEATURE-DISCOVERY, GIT |
+| **[SPEC-REVIEW](SPEC-REVIEW.md)** | Review loop with schema validation and feedback | FEATURE-DISCOVERY |
+| **[FEATURE-WORKFLOW](FEATURE-WORKFLOW.md)** | State machine, commit step, drift detection, auto-completion | FEATURE-DISCOVERY, FEATURE-BRANCH, SPEC-REVIEW |
+| **[FEATURE-CLI](FEATURE-CLI.md)** | CLI commands (start, status, resume) | FEATURE-WORKFLOW |
+
+### Dependency Graph
+
+```
+              ┌───────────────────┐
+              │ FEATURE-DISCOVERY │
+              └─────────┬─────────┘
+                        │
+       ┌────────────────┼────────────────┐
+       │                │                │
+       ▼                ▼                ▼
+┌─────────────┐  ┌──────────────┐  ┌───────────┐
+│FEATURE-     │  │FEATURE-BRANCH│  │SPEC-REVIEW│
+│PRIORITIZER  │  └──────┬───────┘  └─────┬─────┘
+└─────────────┘         │                │
+                        └────────┬───────┘
+                                 ▼
+                    ┌────────────────────┐
+                    │  FEATURE-WORKFLOW  │
+                    └──────────┬─────────┘
+                               │
+                               ▼
+                       ┌─────────────┐
+                       │ FEATURE-CLI │
+                       └─────────────┘
+```
+
+### Implementation Order
+
+1. **FEATURE-DISCOVERY** (foundational, no dependencies)
+2. **FEATURE-PRIORITIZER** + **FEATURE-BRANCH** + **SPEC-REVIEW** (parallel, depend on FEATURE-DISCOVERY)
+3. **FEATURE-WORKFLOW** (depends on FEATURE-DISCOVERY, FEATURE-BRANCH, SPEC-REVIEW)
+4. **FEATURE-CLI** (depends on FEATURE-WORKFLOW)
