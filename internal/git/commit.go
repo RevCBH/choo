@@ -5,6 +5,11 @@ import (
 	"strings"
 )
 
+// Client wraps a git worktree path for git operations
+type Client struct {
+	WorktreePath string
+}
+
 // CommitOptions configures a commit operation
 type CommitOptions struct {
 	// Message is the commit message
@@ -66,4 +71,19 @@ func GetStagedFiles(ctx context.Context, worktreePath string) ([]string, error) 
 	}
 
 	return files, nil
+}
+
+// Push pushes the current branch to remote
+func Push(ctx context.Context, worktreePath string) error {
+	_, err := gitExec(ctx, worktreePath, "push")
+	return err
+}
+
+// GetCommitHash retrieves the current HEAD commit hash
+func GetCommitHash(ctx context.Context, worktreePath string) (string, error) {
+	output, err := gitExec(ctx, worktreePath, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output), nil
 }
