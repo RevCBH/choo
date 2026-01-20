@@ -1,6 +1,6 @@
 ---
 task: 6
-status: pending
+status: complete
 backpressure: "go test ./internal/feature/... -run TestWorkflow"
 depends_on: [1, 2, 3, 4, 5]
 ---
