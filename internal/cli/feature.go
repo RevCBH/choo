@@ -17,9 +17,11 @@ blocked states.`,
 	}
 
 	// Subcommands will be added in their respective tasks (#4, #5, #6)
+	cmd.AddCommand(
+		NewFeatureStatusCmd(app),
+	)
 	// cmd.AddCommand(
 	//     NewFeatureStartCmd(app),
-	//     NewFeatureStatusCmd(app),
 	//     NewFeatureResumeCmd(app),
 	// )
 
