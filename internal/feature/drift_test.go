@@ -23,9 +23,9 @@ func (m *mockClaudeClient) AssessDrift(ctx context.Context, req AssessDriftReque
 }
 
 func TestDriftDetector_NoDrift(t *testing.T) {
-	prd := &PRD{
+	prd := &DriftPRD{
 		Body: "Original PRD content",
-		Units: []Unit{
+		Units: []DriftUnit{
 			{Name: "unit1", Status: "in_progress"},
 		},
 	}
@@ -44,9 +44,9 @@ func TestDriftDetector_NoDrift(t *testing.T) {
 }
 
 func TestDriftDetector_DetectsDrift(t *testing.T) {
-	prd := &PRD{
+	prd := &DriftPRD{
 		Body: "Original PRD content",
-		Units: []Unit{
+		Units: []DriftUnit{
 			{Name: "unit1", Status: "in_progress"},
 		},
 	}
@@ -77,9 +77,9 @@ func TestDriftDetector_DetectsDrift(t *testing.T) {
 }
 
 func TestDriftDetector_HashComparison(t *testing.T) {
-	prd := &PRD{
+	prd := &DriftPRD{
 		Body: "Original PRD content that is reasonably long to simulate a real PRD document with multiple sections and details",
-		Units: []Unit{
+		Units: []DriftUnit{
 			{Name: "unit1", Status: "in_progress"},
 		},
 	}
@@ -101,9 +101,9 @@ func TestDriftDetector_HashComparison(t *testing.T) {
 }
 
 func TestDriftDetector_SignificantDrift(t *testing.T) {
-	prd := &PRD{
+	prd := &DriftPRD{
 		Body: "Original PRD content",
-		Units: []Unit{
+		Units: []DriftUnit{
 			{Name: "unit1", Status: "in_progress"},
 			{Name: "unit2", Status: "in_progress"},
 		},
@@ -139,9 +139,9 @@ func TestDriftDetector_SignificantDrift(t *testing.T) {
 }
 
 func TestDriftDetector_MinorDrift(t *testing.T) {
-	prd := &PRD{
+	prd := &DriftPRD{
 		Body: "Original PRD content",
-		Units: []Unit{
+		Units: []DriftUnit{
 			{Name: "unit1", Status: "in_progress"},
 		},
 	}
@@ -176,9 +176,9 @@ func TestDriftDetector_MinorDrift(t *testing.T) {
 }
 
 func TestDriftDetector_UpdateBaseline(t *testing.T) {
-	prd := &PRD{
+	prd := &DriftPRD{
 		Body: "Original PRD content",
-		Units: []Unit{
+		Units: []DriftUnit{
 			{Name: "unit1", Status: "in_progress"},
 		},
 	}

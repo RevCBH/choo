@@ -230,7 +230,7 @@ func TestWorkflow_DriftCheckIntegration(t *testing.T) {
 	}
 
 	// Modify PRD body to trigger drift
-	w.prd.Body = "modified-feature"
+	w.drift.SetBody("modified-feature")
 
 	result, err = w.drift.CheckDrift(ctx)
 	if err != nil {

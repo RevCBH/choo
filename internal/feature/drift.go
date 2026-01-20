@@ -113,6 +113,11 @@ func (d *DriftDetector) UpdateBaseline() {
 	d.lastBodyHash = hashBody(d.prd.Body)
 }
 
+// SetBody updates the PRD body (for testing or when PRD is modified externally)
+func (d *DriftDetector) SetBody(body string) {
+	d.prd.Body = body
+}
+
 // getInProgressUnits returns list of units currently in progress
 func (d *DriftDetector) getInProgressUnits() []string {
 	var inProgress []string
