@@ -1,6 +1,6 @@
 ---
 task: 5
-status: pending
+status: complete
 backpressure: "go test ./internal/web/... -run TestHandler"
 depends_on: [1, 2, 3]
 ---

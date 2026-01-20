@@ -1,6 +1,6 @@
 ---
 task: 7
-status: pending
+status: complete
 backpressure: "go build ./... && ./choo web --help"
 depends_on: [6]
 ---
