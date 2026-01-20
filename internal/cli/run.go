@@ -11,6 +11,7 @@ import (
 	"github.com/RevCBH/choo/internal/config"
 	"github.com/RevCBH/choo/internal/escalate"
 	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/feature"
 	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/github"
 	"github.com/RevCBH/choo/internal/orchestrator"
@@ -32,6 +33,7 @@ type RunOptions struct {
 	Web          bool   // Enable web UI event forwarding
 	WebSocket    string // Custom Unix socket path (optional)
 	NoTUI        bool   // Disable TUI even when stdout is a TTY
+	Feature      string // PRD ID to work on in feature mode
 }
 
 // Validate checks RunOptions for validity
@@ -94,6 +96,7 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 	cmd.Flags().BoolVar(&opts.Web, "web", false, "Enable web UI event forwarding")
 	cmd.Flags().StringVar(&opts.WebSocket, "web-socket", "", "Custom Unix socket path (default: ~/.choo/web.sock)")
 	cmd.Flags().BoolVar(&opts.NoTUI, "no-tui", false, "Disable interactive TUI (use summary-only output)")
+	cmd.Flags().StringVar(&opts.Feature, "feature", "", "PRD ID for feature mode (targets feature branch)")
 
 	return cmd
 }
@@ -214,6 +217,27 @@ func (a *App) RunOrchestrator(ctx context.Context, opts RunOptions) error {
 		DryRun:          opts.DryRun,
 		ShutdownTimeout: orchestrator.DefaultShutdownTimeout,
 		SuppressOutput:  useTUI,
+	}
+
+	// Configure feature mode if --feature flag provided
+	if opts.Feature != "" {
+		gitClient := git.NewClient(wd)
+		branchMgr := feature.NewBranchManager(gitClient, cfg.Feature.BranchPrefix)
+
+		orchCfg.FeatureMode = true
+		orchCfg.FeatureBranch = branchMgr.GetBranchName(opts.Feature)
+
+		// Ensure feature branch exists
+		exists, err := branchMgr.Exists(ctx, opts.Feature)
+		if err != nil {
+			return fmt.Errorf("checking feature branch: %w", err)
+		}
+		if !exists {
+			// Create the feature branch from main
+			if err := branchMgr.Create(ctx, opts.Feature, orchCfg.TargetBranch); err != nil {
+				return fmt.Errorf("creating feature branch: %w", err)
+			}
+		}
 	}
 
 	// Create orchestrator

@@ -1,6 +1,6 @@
 ---
 task: 4
-status: pending
+status: complete
 backpressure: "go build ./cmd/oslo/..."
 depends_on: [2, 3]
 ---
