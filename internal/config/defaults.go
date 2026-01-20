@@ -6,11 +6,26 @@ const (
 	DefaultWorktreeBasePath   = ".ralph/worktrees/"
 	DefaultClaudeCommand      = "claude"
 	DefaultClaudeMaxTurns     = 0 // unlimited
+	DefaultCodexCommand       = "codex"
 	DefaultMaxConflictRetries = 3
 	DefaultReviewTimeout      = "2h"
 	DefaultReviewPollInterval = "30s"
 	DefaultLogLevel           = "info"
 )
+
+// DefaultProviderType is the default provider when none is specified
+var DefaultProviderType ProviderType = ProviderClaude
+
+// DefaultProviderConfig returns provider config with default values.
+func DefaultProviderConfig() ProviderConfig {
+	return ProviderConfig{
+		Type: DefaultProviderType,
+		Providers: map[ProviderType]ProviderSettings{
+			ProviderClaude: {Command: DefaultClaudeCommand},
+			ProviderCodex:  {Command: DefaultCodexCommand},
+		},
+	}
+}
 
 // DefaultConfig returns a Config with all default values applied.
 func DefaultConfig() *Config {
@@ -24,6 +39,7 @@ func DefaultConfig() *Config {
 		Worktree: WorktreeConfig{
 			BasePath: DefaultWorktreeBasePath,
 		},
+		Provider: DefaultProviderConfig(),
 		Claude: ClaudeConfig{
 			Command:  DefaultClaudeCommand,
 			MaxTurns: DefaultClaudeMaxTurns,

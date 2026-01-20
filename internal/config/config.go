@@ -24,7 +24,10 @@ type Config struct {
 	// Worktree contains worktree management settings
 	Worktree WorktreeConfig `yaml:"worktree"`
 
-	// Claude contains Claude CLI settings
+	// Provider contains provider selection and configuration
+	Provider ProviderConfig `yaml:"provider"`
+
+	// Claude contains Claude CLI settings (legacy, still supported)
 	Claude ClaudeConfig `yaml:"claude"`
 
 	// BaselineChecks are validation commands run after all tasks complete
@@ -79,6 +82,33 @@ type ClaudeConfig struct {
 
 	// MaxTurns limits Claude's agentic loop iterations (0 = unlimited)
 	MaxTurns int `yaml:"max_turns"`
+}
+
+// ProviderType represents a supported LLM provider for task execution.
+type ProviderType string
+
+const (
+	ProviderClaude ProviderType = "claude"
+	ProviderCodex  ProviderType = "codex"
+)
+
+// ProviderConfig holds settings for provider selection and configuration.
+type ProviderConfig struct {
+	// Type is the default provider type: "claude" (default) or "codex"
+	Type ProviderType `yaml:"type"`
+
+	// Command overrides the default CLI binary path for the primary provider
+	// Deprecated: use Providers map instead
+	Command string `yaml:"command,omitempty"`
+
+	// Providers contains per-provider settings
+	Providers map[ProviderType]ProviderSettings `yaml:"providers,omitempty"`
+}
+
+// ProviderSettings holds configuration for a specific provider.
+type ProviderSettings struct {
+	// Command is the CLI binary path or name for this provider
+	Command string `yaml:"command"`
 }
 
 // BaselineCheck is a validation command run after unit completion.
