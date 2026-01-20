@@ -31,6 +31,15 @@ type PRD struct {
 	FilePath string `yaml:"-"`
 	Body     string `yaml:"-"` // Markdown content after frontmatter
 	BodyHash string `yaml:"-"` // SHA-256 for drift detection
+
+	// Runtime tracking (not persisted)
+	Units []Unit `yaml:"-"` // Units associated with this PRD
+}
+
+// Unit represents a work unit associated with a PRD
+type Unit struct {
+	Name   string
+	Status string
 }
 
 // PRDStatus values for the status field

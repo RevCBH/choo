@@ -94,16 +94,19 @@ func gitExecWithStdin(ctx context.Context, dir string, stdin string, args ...str
 	return runner.ExecWithStdin(ctx, dir, stdin, args...)
 }
 
-// Client provides git operations for a specific repository
+// Client provides git operations for a specific repository or worktree
 type Client struct {
 	// RepoPath is the root directory of the git repository
 	RepoPath string
+	// WorktreePath is an alias for RepoPath (for worktree operations)
+	WorktreePath string
 }
 
 // NewClient creates a new git client for the given repository path
 func NewClient(repoPath string) *Client {
 	return &Client{
-		RepoPath: repoPath,
+		RepoPath:     repoPath,
+		WorktreePath: repoPath, // Alias for worktree operations
 	}
 }
 

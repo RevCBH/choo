@@ -8,14 +8,14 @@ import (
 	"strings"
 )
 
-// PRD represents a Product Requirements Document
-type PRD struct {
+// DriftPRD represents a simplified PRD for drift detection
+type DriftPRD struct {
 	Body  string
-	Units []Unit
+	Units []DriftUnit
 }
 
-// Unit represents a work unit in the PRD
-type Unit struct {
+// DriftUnit represents a work unit for drift detection
+type DriftUnit struct {
 	Name   string
 	Status string
 }
@@ -27,7 +27,7 @@ type ClaudeClient interface {
 
 // DriftDetector monitors PRD changes and assesses impact
 type DriftDetector struct {
-	prd          *PRD
+	prd          *DriftPRD
 	lastBodyHash string
 	lastBody     string
 	claude       ClaudeClient
@@ -58,7 +58,7 @@ type DriftAssessment struct {
 }
 
 // NewDriftDetector creates a drift detector for the given PRD
-func NewDriftDetector(prd *PRD, claudeClient ClaudeClient) *DriftDetector {
+func NewDriftDetector(prd *DriftPRD, claudeClient ClaudeClient) *DriftDetector {
 	currentBody := prd.Body
 	return &DriftDetector{
 		prd:          prd,
@@ -66,6 +66,15 @@ func NewDriftDetector(prd *PRD, claudeClient ClaudeClient) *DriftDetector {
 		lastBody:     currentBody,
 		claude:       claudeClient,
 	}
+}
+
+// NewDriftDetectorFromPRD creates a drift detector from a canonical PRD
+func NewDriftDetectorFromPRD(prd *PRD, claudeClient ClaudeClient) *DriftDetector {
+	driftPRD := &DriftPRD{
+		Body:  prd.Body,
+		Units: nil, // Units will be populated separately if needed
+	}
+	return NewDriftDetector(driftPRD, claudeClient)
 }
 
 // CheckDrift compares current PRD body to last known state

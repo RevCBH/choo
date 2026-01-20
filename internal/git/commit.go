@@ -5,11 +5,6 @@ import (
 	"strings"
 )
 
-// Client wraps a git worktree path for git operations
-type Client struct {
-	WorktreePath string
-}
-
 // CommitOptions configures a commit operation
 type CommitOptions struct {
 	// Message is the commit message

@@ -11,11 +11,6 @@ import (
 	"github.com/RevCBH/choo/internal/github"
 )
 
-// BranchManager handles feature branch operations (placeholder - from FEATURE-BRANCH spec)
-type BranchManager struct {
-	// Will be implemented in FEATURE-BRANCH spec
-}
-
 // Workflow manages the feature development lifecycle
 type Workflow struct {
 	prd                 *PRD
@@ -69,7 +64,7 @@ func NewWorkflow(prd *PRD, cfg WorkflowConfig, deps WorkflowDeps) *Workflow {
 	}
 
 	// Initialize drift detector
-	w.drift = NewDriftDetector(prd, deps.Claude)
+	w.drift = NewDriftDetectorFromPRD(prd, deps.Claude)
 
 	// Initialize completion checker
 	if deps.GitHub != nil {
