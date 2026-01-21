@@ -1,9 +1,11 @@
 package client
 
 import (
+	"encoding/json"
 	"time"
 
 	apiv1 "github.com/RevCBH/choo/pkg/api/v1"
+	"github.com/RevCBH/choo/internal/events"
 )
 
 // jobConfigToProto converts client JobConfig to protobuf StartJobRequest
@@ -82,4 +84,24 @@ func protoToHealthInfo(resp *apiv1.HealthResponse) *HealthInfo {
 		ActiveJobs: int(resp.GetActiveJobs()),
 		Version:    resp.GetVersion(),
 	}
+}
+
+// protoToEvent converts a protobuf JobEvent to the internal Event type.
+// Handles all event type variants (job started, unit progress, etc.)
+func protoToEvent(p *apiv1.JobEvent) events.Event {
+	ev := events.Event{
+		Time: p.GetTimestamp().AsTime(),
+		Type: events.EventType(p.GetEventType()),
+		Unit: p.GetUnitId(),
+	}
+
+	// Parse payload JSON if present
+	if p.GetPayloadJson() != "" {
+		var payload map[string]interface{}
+		if err := json.Unmarshal([]byte(p.GetPayloadJson()), &payload); err == nil {
+			ev.Payload = payload
+		}
+	}
+
+	return ev
 }
