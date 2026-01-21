@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -191,4 +192,159 @@ func ExtractPRDTitle(content []byte) string {
 	}
 
 	return "" // No H1 heading found
+}
+
+// PRDStore handles PRD file operations
+type PRDStore struct {
+	baseDir string
+}
+
+// PRDMetadata represents parsed PRD frontmatter
+type PRDMetadata struct {
+	Title            string                 `yaml:"title"`
+	FeatureStatus    FeatureStatus          `yaml:"feature_status,omitempty"`
+	Branch           string                 `yaml:"branch,omitempty"`
+	StartedAt        *time.Time             `yaml:"started_at,omitempty"`
+	ReviewIterations int                    `yaml:"review_iterations,omitempty"`
+	MaxReviewIter    int                    `yaml:"max_review_iter,omitempty"`
+	LastFeedback     string                 `yaml:"last_feedback,omitempty"`
+	SpecCount        int                    `yaml:"spec_count,omitempty"`
+	TaskCount        int                    `yaml:"task_count,omitempty"`
+	Extra            map[string]interface{} `yaml:",inline"`
+}
+
+// NewPRDStore creates a PRD store for the given directory
+func NewPRDStore(baseDir string) *PRDStore {
+	return &PRDStore{
+		baseDir: baseDir,
+	}
+}
+
+// Load reads and parses a PRD file, returning metadata and body separately
+func (s *PRDStore) Load(prdID string) (*PRDMetadata, string, error) {
+	// Construct path: baseDir/<prd-id>.md
+	path := s.prdPath(prdID)
+
+	// Read entire file
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read PRD file: %w", err)
+	}
+
+	// Split frontmatter from body
+	frontmatterBytes, bodyBytes, err := parseFrontmatter(content)
+	if err != nil {
+		return nil, "", err
+	}
+
+	// Parse frontmatter as YAML into PRDMetadata
+	var metadata PRDMetadata
+	if err := yaml.Unmarshal(frontmatterBytes, &metadata); err != nil {
+		return nil, "", fmt.Errorf("failed to parse frontmatter YAML: %w", err)
+	}
+
+	return &metadata, string(bodyBytes), nil
+}
+
+// UpdateStatus atomically updates only the feature_status field
+func (s *PRDStore) UpdateStatus(prdID string, status FeatureStatus) error {
+	// Load current file
+	metadata, body, err := s.Load(prdID)
+	if err != nil {
+		return err
+	}
+
+	// Update only the status field
+	metadata.FeatureStatus = status
+
+	// Serialize frontmatter with YAML
+	frontmatterStr, err := serializeFrontmatter(metadata)
+	if err != nil {
+		return err
+	}
+
+	// Write complete file (frontmatter + body)
+	fullContent := frontmatterStr + body
+
+	// Write back atomically (write-to-temp + rename)
+	path := s.prdPath(prdID)
+	tmpPath := path + ".tmp"
+
+	if err := os.WriteFile(tmpPath, []byte(fullContent), 0644); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath) // Clean up temp file on error
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	return nil
+}
+
+// UpdateState atomically updates full feature state in frontmatter
+func (s *PRDStore) UpdateState(prdID string, state FeatureState) error {
+	// Load current file (preserving extra fields)
+	metadata, body, err := s.Load(prdID)
+	if err != nil {
+		return err
+	}
+
+	// Merge state fields into metadata
+	metadata.FeatureStatus = state.Status
+	metadata.Branch = state.Branch
+	metadata.StartedAt = &state.StartedAt
+	metadata.ReviewIterations = state.ReviewIterations
+	metadata.MaxReviewIter = state.MaxReviewIter
+	metadata.LastFeedback = state.LastFeedback
+	metadata.SpecCount = state.SpecCount
+	metadata.TaskCount = state.TaskCount
+
+	// Serialize frontmatter with YAML
+	frontmatterStr, err := serializeFrontmatter(metadata)
+	if err != nil {
+		return err
+	}
+
+	// Write complete file (frontmatter + body)
+	fullContent := frontmatterStr + body
+
+	// Write back atomically (write-to-temp + rename)
+	path := s.prdPath(prdID)
+	tmpPath := path + ".tmp"
+
+	if err := os.WriteFile(tmpPath, []byte(fullContent), 0644); err != nil {
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath) // Clean up temp file on error
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+
+	return nil
+}
+
+// Exists checks if a PRD file exists
+func (s *PRDStore) Exists(prdID string) bool {
+	path := s.prdPath(prdID)
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// prdPath returns the full path for a PRD ID
+func (s *PRDStore) prdPath(prdID string) string {
+	return filepath.Join(s.baseDir, prdID+".md")
+}
+
+// serializeFrontmatter converts metadata back to YAML with --- markers
+func serializeFrontmatter(meta *PRDMetadata) (string, error) {
+	// Marshal metadata to YAML
+	yamlBytes, err := yaml.Marshal(meta)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal metadata to YAML: %w", err)
+	}
+
+	// Wrap with --- markers
+	return "---\n" + string(yamlBytes) + "---\n", nil
 }

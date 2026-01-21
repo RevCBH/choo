@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestLoadPRDs_Valid(t *testing.T) {
@@ -328,4 +329,282 @@ Just some content.
 	if prds[0].Title != "untitled" {
 		t.Errorf("Expected title 'untitled' (from filename), got '%s'", prds[0].Title)
 	}
+}
+
+// PRDStore tests
+
+func TestPRDStore_Load(t *testing.T) {
+	store := NewPRDStore("testdata")
+
+	metadata, body, err := store.Load("valid")
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	if metadata == nil {
+		t.Fatal("Expected non-nil metadata")
+	}
+
+	if metadata.Title != "Valid Feature PRD" {
+		t.Errorf("Expected title 'Valid Feature PRD', got '%s'", metadata.Title)
+	}
+
+	if metadata.FeatureStatus != StatusGeneratingSpecs {
+		t.Errorf("Expected status %s, got %s", StatusGeneratingSpecs, metadata.FeatureStatus)
+	}
+
+	if metadata.Branch != "feature/test-feature" {
+		t.Errorf("Expected branch 'feature/test-feature', got '%s'", metadata.Branch)
+	}
+
+	if metadata.ReviewIterations != 1 {
+		t.Errorf("Expected review_iterations 1, got %d", metadata.ReviewIterations)
+	}
+
+	if metadata.MaxReviewIter != 3 {
+		t.Errorf("Expected max_review_iter 3, got %d", metadata.MaxReviewIter)
+	}
+
+	if metadata.SpecCount != 5 {
+		t.Errorf("Expected spec_count 5, got %d", metadata.SpecCount)
+	}
+
+	if metadata.TaskCount != 12 {
+		t.Errorf("Expected task_count 12, got %d", metadata.TaskCount)
+	}
+
+	if body == "" {
+		t.Error("Expected non-empty body")
+	}
+}
+
+func TestPRDStore_Load_NotFound(t *testing.T) {
+	store := NewPRDStore("testdata")
+
+	_, _, err := store.Load("nonexistent")
+	if err == nil {
+		t.Fatal("Expected error for missing file, got nil")
+	}
+}
+
+func TestPRDStore_Load_NoFrontmatter(t *testing.T) {
+	store := NewPRDStore("testdata")
+
+	_, _, err := store.Load("no-frontmatter")
+	if err == nil {
+		t.Fatal("Expected error for PRD without frontmatter, got nil")
+	}
+}
+
+func TestPRDStore_UpdateStatus(t *testing.T) {
+	// Create temp directory for test
+	tmpDir := t.TempDir()
+	store := NewPRDStore(tmpDir)
+
+	// Create initial PRD file
+	initialContent := `---
+title: Test PRD
+feature_status: generating_specs
+branch: feature/test
+review_iterations: 1
+spec_count: 5
+---
+
+# Test PRD
+
+Body content here.
+`
+	testPath := filepath.Join(tmpDir, "test.md")
+	if err := os.WriteFile(testPath, []byte(initialContent), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Update status
+	if err := store.UpdateStatus("test", StatusReviewingSpecs); err != nil {
+		t.Fatalf("UpdateStatus failed: %v", err)
+	}
+
+	// Reload and verify
+	metadata, body, err := store.Load("test")
+	if err != nil {
+		t.Fatalf("Load after update failed: %v", err)
+	}
+
+	// Status should be updated
+	if metadata.FeatureStatus != StatusReviewingSpecs {
+		t.Errorf("Expected status %s, got %s", StatusReviewingSpecs, metadata.FeatureStatus)
+	}
+
+	// Other fields should be preserved
+	if metadata.Title != "Test PRD" {
+		t.Errorf("Title not preserved: got '%s'", metadata.Title)
+	}
+
+	if metadata.Branch != "feature/test" {
+		t.Errorf("Branch not preserved: got '%s'", metadata.Branch)
+	}
+
+	if metadata.ReviewIterations != 1 {
+		t.Errorf("ReviewIterations not preserved: got %d", metadata.ReviewIterations)
+	}
+
+	if metadata.SpecCount != 5 {
+		t.Errorf("SpecCount not preserved: got %d", metadata.SpecCount)
+	}
+
+	// Body should be preserved
+	if body == "" || body != "\n# Test PRD\n\nBody content here.\n" {
+		t.Errorf("Body not preserved correctly, got: %q", body)
+	}
+}
+
+func TestPRDStore_UpdateState(t *testing.T) {
+	// Create temp directory for test
+	tmpDir := t.TempDir()
+	store := NewPRDStore(tmpDir)
+
+	// Create initial PRD file
+	initialContent := `---
+title: Test PRD
+feature_status: generating_specs
+---
+
+# Test PRD
+
+Body content here.
+`
+	testPath := filepath.Join(tmpDir, "test.md")
+	if err := os.WriteFile(testPath, []byte(initialContent), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Create new state
+	now := time.Now()
+	state := FeatureState{
+		PRDID:            "test",
+		Status:           StatusReviewingSpecs,
+		Branch:           "feature/updated",
+		StartedAt:        now,
+		ReviewIterations: 2,
+		MaxReviewIter:    5,
+		LastFeedback:     "Please add more details",
+		SpecCount:        10,
+		TaskCount:        25,
+	}
+
+	// Update state
+	if err := store.UpdateState("test", state); err != nil {
+		t.Fatalf("UpdateState failed: %v", err)
+	}
+
+	// Reload and verify
+	metadata, body, err := store.Load("test")
+	if err != nil {
+		t.Fatalf("Load after update failed: %v", err)
+	}
+
+	// All state fields should be updated
+	if metadata.FeatureStatus != StatusReviewingSpecs {
+		t.Errorf("Expected status %s, got %s", StatusReviewingSpecs, metadata.FeatureStatus)
+	}
+
+	if metadata.Branch != "feature/updated" {
+		t.Errorf("Expected branch 'feature/updated', got '%s'", metadata.Branch)
+	}
+
+	if metadata.StartedAt == nil {
+		t.Fatal("Expected non-nil StartedAt")
+	}
+
+	if metadata.ReviewIterations != 2 {
+		t.Errorf("Expected review_iterations 2, got %d", metadata.ReviewIterations)
+	}
+
+	if metadata.MaxReviewIter != 5 {
+		t.Errorf("Expected max_review_iter 5, got %d", metadata.MaxReviewIter)
+	}
+
+	if metadata.LastFeedback != "Please add more details" {
+		t.Errorf("Expected last_feedback 'Please add more details', got '%s'", metadata.LastFeedback)
+	}
+
+	if metadata.SpecCount != 10 {
+		t.Errorf("Expected spec_count 10, got %d", metadata.SpecCount)
+	}
+
+	if metadata.TaskCount != 25 {
+		t.Errorf("Expected task_count 25, got %d", metadata.TaskCount)
+	}
+
+	// Title should be preserved (Extra field)
+	if metadata.Title != "Test PRD" {
+		t.Errorf("Title not preserved: got '%s'", metadata.Title)
+	}
+
+	// Body should be preserved
+	if body == "" {
+		t.Error("Body should be preserved")
+	}
+}
+
+func TestPRDStore_Exists(t *testing.T) {
+	store := NewPRDStore("testdata")
+
+	// Test existing file
+	if !store.Exists("valid") {
+		t.Error("Expected Exists to return true for valid.md")
+	}
+
+	// Test non-existent file
+	if store.Exists("nonexistent") {
+		t.Error("Expected Exists to return false for nonexistent file")
+	}
+}
+
+func TestParseFrontmatter(t *testing.T) {
+	content := []byte(`---
+title: Test
+status: ready
+---
+
+# Body content
+
+This is the body.
+`)
+
+	frontmatter, body, err := parseFrontmatter(content)
+	if err != nil {
+		t.Fatalf("parseFrontmatter failed: %v", err)
+	}
+
+	frontmatterStr := string(frontmatter)
+	if !contains(frontmatterStr, "title: Test") {
+		t.Errorf("Frontmatter should contain 'title: Test', got: %s", frontmatterStr)
+	}
+
+	if !contains(frontmatterStr, "status: ready") {
+		t.Errorf("Frontmatter should contain 'status: ready', got: %s", frontmatterStr)
+	}
+
+	bodyStr := string(body)
+	if !contains(bodyStr, "# Body content") {
+		t.Errorf("Body should contain '# Body content', got: %s", bodyStr)
+	}
+
+	if !contains(bodyStr, "This is the body.") {
+		t.Errorf("Body should contain 'This is the body.', got: %s", bodyStr)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)] == substr || s[len(s)-len(substr):] == substr || containsInMiddle(s, substr)))
+}
+
+func containsInMiddle(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
