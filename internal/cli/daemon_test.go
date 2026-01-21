@@ -98,9 +98,28 @@ func TestDaemonStartCmd_Basic(t *testing.T) {
 	if cmd.Short == "" {
 		t.Error("Expected Short description to be set")
 	}
+}
 
-	// Verify no flags are added (it should be a simple command)
-	if cmd.Flags().NFlag() != 0 {
-		t.Errorf("Expected no flags for start command, got %d", cmd.Flags().NFlag())
+func TestDaemonStartCmd_ForegroundFlag(t *testing.T) {
+	// Verifies --foreground flag exists with default false
+	app := New()
+	cmd := newDaemonStartCmd(app)
+
+	// Check --foreground flag
+	foregroundFlag := cmd.Flags().Lookup("foreground")
+	if foregroundFlag == nil {
+		t.Error("Expected --foreground flag to exist")
+	} else {
+		if foregroundFlag.DefValue != "false" {
+			t.Errorf("Expected --foreground default to be 'false', got: %s", foregroundFlag.DefValue)
+		}
+	}
+}
+
+func TestIsDaemonRunning_NoDaemon(t *testing.T) {
+	// When no daemon is running, isDaemonRunning should return false
+	// This is the normal case in tests where no daemon is started
+	if isDaemonRunning() {
+		t.Error("Expected isDaemonRunning to return false when no daemon is running")
 	}
 }

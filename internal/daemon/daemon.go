@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	apiv1 "github.com/RevCBH/choo/pkg/api/v1"
 	"github.com/RevCBH/choo/internal/daemon/db"
+	"github.com/RevCBH/choo/internal/web"
 	"google.golang.org/grpc"
 )
 
@@ -21,6 +23,7 @@ type Daemon struct {
 	grpcServer *grpc.Server
 	listener   net.Listener
 	pidFile    *PIDFile
+	webServer  *web.Server
 
 	shutdownCh chan struct{}
 	wg         sync.WaitGroup
@@ -91,9 +94,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	// 4. Create and register gRPC server
 	d.grpcServer = grpc.NewServer()
-	// Note: GRPCServer implementation is handled by DAEMON-GRPC spec
-	// For now, we create a basic server without service registration
-	// The full gRPC service will be wired up in a later task
+	adapter := newJobManagerAdapter(d.jobManager, d.db)
+	grpcImpl := NewGRPCServer(d.db, adapter, "dev", d.Shutdown) // TODO: pass actual version
+	apiv1.RegisterDaemonServiceServer(d.grpcServer, grpcImpl)
 
 	// 5. Start gRPC server in goroutine
 	d.wg.Add(1)
@@ -104,10 +107,27 @@ func (d *Daemon) Start(ctx context.Context) error {
 		}
 	}()
 
-	// 6. Log startup message
+	// 6. Start web server
+	webCfg := web.Config{
+		Addr:       d.cfg.WebAddr,
+		SocketPath: d.cfg.WebSocketPath,
+	}
+	webSrv, err := web.New(webCfg)
+	if err != nil {
+		log.Printf("Warning: failed to create web server: %v", err)
+	} else {
+		if err := webSrv.Start(); err != nil {
+			log.Printf("Warning: failed to start web server: %v", err)
+		} else {
+			d.webServer = webSrv
+			log.Printf("Web server listening on http://localhost%s", d.cfg.WebAddr)
+		}
+	}
+
+	// 7. Log startup message
 	log.Printf("Daemon started on %s (PID: %d)", d.cfg.SocketPath, os.Getpid())
 
-	// 7. Wait for shutdown signal
+	// 8. Wait for shutdown signal
 	select {
 	case <-ctx.Done():
 		log.Println("Received context cancellation")
@@ -136,7 +156,15 @@ func (d *Daemon) Shutdown() {
 func (d *Daemon) gracefulShutdown(ctx context.Context) error {
 	log.Println("Starting graceful shutdown...")
 
-	// 1. Stop accepting new gRPC connections
+	// 1. Stop web server first (it's the user-facing endpoint)
+	if d.webServer != nil {
+		log.Println("Stopping web server...")
+		if err := d.webServer.Stop(ctx); err != nil {
+			log.Printf("Error stopping web server: %v", err)
+		}
+	}
+
+	// 2. Stop accepting new gRPC connections
 	if d.grpcServer != nil {
 		stopped := make(chan struct{})
 		go func() {

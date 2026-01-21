@@ -140,7 +140,7 @@ func (m *mockJobManager) setJobStatus(id string, status string) {
 
 func TestGRPC_JobStartJob_ValidatesRequiredFields(t *testing.T) {
 	jm := newMockJobManager()
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	tests := []struct {
 		name    string
@@ -188,7 +188,7 @@ func TestGRPC_JobStartJob_ValidatesRequiredFields(t *testing.T) {
 
 func TestGRPC_JobStartJob_RejectsWhenShuttingDown(t *testing.T) {
 	jm := newMockJobManager()
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 	server.setShuttingDown()
 
 	req := &apiv1.StartJobRequest{
@@ -205,7 +205,7 @@ func TestGRPC_JobStartJob_RejectsWhenShuttingDown(t *testing.T) {
 func TestGRPC_JobStopJob_GracefulStop(t *testing.T) {
 	jm := newMockJobManager()
 	jm.addJob("job-123", "running")
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	resp, err := server.StopJob(context.Background(), &apiv1.StopJobRequest{
 		JobId: "job-123",
@@ -221,7 +221,7 @@ func TestGRPC_JobStopJob_GracefulStop(t *testing.T) {
 func TestGRPC_JobStopJob_ForceStop(t *testing.T) {
 	jm := newMockJobManager()
 	jm.addJob("job-456", "running")
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	resp, err := server.StopJob(context.Background(), &apiv1.StopJobRequest{
 		JobId: "job-456",
@@ -235,7 +235,7 @@ func TestGRPC_JobStopJob_ForceStop(t *testing.T) {
 
 func TestGRPC_JobStopJob_NotFound(t *testing.T) {
 	jm := newMockJobManager()
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	_, err := server.StopJob(context.Background(), &apiv1.StopJobRequest{
 		JobId: "nonexistent",
@@ -248,7 +248,7 @@ func TestGRPC_JobStopJob_NotFound(t *testing.T) {
 func TestGRPC_JobStopJob_AlreadyStopped(t *testing.T) {
 	jm := newMockJobManager()
 	jm.addJob("job-done", "completed")
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	_, err := server.StopJob(context.Background(), &apiv1.StopJobRequest{
 		JobId: "job-done",
@@ -261,7 +261,7 @@ func TestGRPC_JobStopJob_AlreadyStopped(t *testing.T) {
 func TestGRPC_JobGetJobStatus(t *testing.T) {
 	jm := newMockJobManager()
 	jm.addJob("job-status", "running")
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	resp, err := server.GetJobStatus(context.Background(), &apiv1.GetJobStatusRequest{
 		JobId: "job-status",
@@ -276,7 +276,7 @@ func TestGRPC_JobListJobs_NoFilter(t *testing.T) {
 	jm := newMockJobManager()
 	jm.addJob("job-1", "running")
 	jm.addJob("job-2", "completed")
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	resp, err := server.ListJobs(context.Background(), &apiv1.ListJobsRequest{})
 
@@ -289,7 +289,7 @@ func TestGRPC_JobListJobs_WithFilter(t *testing.T) {
 	jm.addJob("job-1", "running")
 	jm.addJob("job-2", "completed")
 	jm.addJob("job-3", "running")
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	resp, err := server.ListJobs(context.Background(), &apiv1.ListJobsRequest{
 		StatusFilter: []string{"running"},
@@ -344,7 +344,7 @@ func (m *mockWatchStream) getEvents() []*apiv1.JobEvent {
 
 func TestGRPC_WatchJob_ValidatesJobID(t *testing.T) {
 	jm := newMockJobManager()
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 	stream := newMockWatchStream()
 
 	err := server.WatchJob(&apiv1.WatchJobRequest{
@@ -357,7 +357,7 @@ func TestGRPC_WatchJob_ValidatesJobID(t *testing.T) {
 
 func TestGRPC_WatchJob_JobNotFound(t *testing.T) {
 	jm := newMockJobManager()
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 	stream := newMockWatchStream()
 
 	err := server.WatchJob(&apiv1.WatchJobRequest{
@@ -383,7 +383,7 @@ func TestGRPC_WatchJob_StreamsEvents(t *testing.T) {
 		return eventsCh, func() {}
 	}
 
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 	stream := newMockWatchStream()
 
 	err := server.WatchJob(&apiv1.WatchJobRequest{
@@ -416,7 +416,7 @@ func TestGRPC_WatchJob_ReplayFromSequence(t *testing.T) {
 		return eventsCh, func() {}
 	}
 
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 	stream := newMockWatchStream()
 
 	err := server.WatchJob(&apiv1.WatchJobRequest{
@@ -441,7 +441,7 @@ func TestGRPC_WatchJob_ClientDisconnect(t *testing.T) {
 		return blockingCh, func() { close(blockingCh) }
 	}
 
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 	stream := newMockWatchStream()
 
 	// Start watching in goroutine
@@ -474,7 +474,7 @@ func TestGRPC_WatchJob_ServerShutdown(t *testing.T) {
 		return blockingCh, func() { close(blockingCh) }
 	}
 
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 	stream := newMockWatchStream()
 
 	errCh := make(chan error, 1)
@@ -508,7 +508,7 @@ func TestGRPC_WatchJob_SendError(t *testing.T) {
 		return eventsCh, func() { close(eventsCh) }
 	}
 
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 	stream := newMockWatchStream()
 	stream.sendErr = errors.New("connection reset")
 
@@ -523,7 +523,7 @@ func TestGRPC_WatchJob_SendError(t *testing.T) {
 func TestGRPC_WatchJob_CompletedJobNoReplay(t *testing.T) {
 	jm := newMockJobManager()
 	jm.addJob("job-done", "completed")
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 	stream := newMockWatchStream()
 
 	err := server.WatchJob(&apiv1.WatchJobRequest{
@@ -542,7 +542,7 @@ func TestGRPC_LifecycleHealth_ReturnsStatus(t *testing.T) {
 	jm.addJob("job-2", "running")
 	jm.addJob("job-3", "completed")
 
-	server := NewGRPCServer(nil, jm, "v1.2.3")
+	server := NewGRPCServer(nil, jm, "v1.2.3", nil)
 
 	resp, err := server.Health(context.Background(), &apiv1.HealthRequest{})
 
@@ -554,7 +554,7 @@ func TestGRPC_LifecycleHealth_ReturnsStatus(t *testing.T) {
 
 func TestGRPC_LifecycleHealth_UnhealthyDuringShutdown(t *testing.T) {
 	jm := newMockJobManager()
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 	server.setShuttingDown()
 
 	resp, err := server.Health(context.Background(), &apiv1.HealthRequest{})
@@ -565,7 +565,7 @@ func TestGRPC_LifecycleHealth_UnhealthyDuringShutdown(t *testing.T) {
 
 func TestGRPC_LifecycleShutdown_NoJobs(t *testing.T) {
 	jm := newMockJobManager()
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	resp, err := server.Shutdown(context.Background(), &apiv1.ShutdownRequest{
 		WaitForJobs: false,
@@ -582,7 +582,7 @@ func TestGRPC_LifecycleShutdown_ForceStopJobs(t *testing.T) {
 	jm.addJob("job-1", "running")
 	jm.addJob("job-2", "running")
 
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	// Track the jobs so they show in activeJobs
 	server.trackJob("job-1", func() {})
@@ -601,7 +601,7 @@ func TestGRPC_LifecycleShutdown_WaitForJobs(t *testing.T) {
 	jm := newMockJobManager()
 	jm.addJob("job-wait", "running")
 
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 	server.trackJob("job-wait", func() {})
 
 	// Simulate job completing during wait
@@ -624,7 +624,7 @@ func TestGRPC_LifecycleShutdown_WaitTimeout(t *testing.T) {
 	jm := newMockJobManager()
 	jm.addJob("job-slow", "running")
 
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 	server.trackJob("job-slow", func() {})
 
 	// Job never completes, timeout will trigger
@@ -640,7 +640,7 @@ func TestGRPC_LifecycleShutdown_WaitTimeout(t *testing.T) {
 
 func TestGRPC_LifecycleShutdown_AlreadyShuttingDown(t *testing.T) {
 	jm := newMockJobManager()
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	// First shutdown
 	_, err := server.Shutdown(context.Background(), &apiv1.ShutdownRequest{})
@@ -656,7 +656,7 @@ func TestGRPC_LifecycleShutdown_CancelsJobContexts(t *testing.T) {
 	jm := newMockJobManager()
 	jm.addJob("job-ctx", "running")
 
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	// Track job with a cancel function we can verify
 	cancelled := false
@@ -672,7 +672,7 @@ func TestGRPC_LifecycleShutdown_CancelsJobContexts(t *testing.T) {
 
 func TestGRPC_LifecycleHealth_ZeroActiveJobs(t *testing.T) {
 	jm := newMockJobManager()
-	server := NewGRPCServer(nil, jm, "v1.0.0")
+	server := NewGRPCServer(nil, jm, "v1.0.0", nil)
 
 	resp, err := server.Health(context.Background(), &apiv1.HealthRequest{})
 

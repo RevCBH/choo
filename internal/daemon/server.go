@@ -45,7 +45,7 @@ func NewServer(cfg ServerConfig, database *db.DB, jobMgr JobManager) *Server {
 		socketPath = DefaultSocketPath
 	}
 
-	grpcImpl := NewGRPCServer(database, jobMgr, cfg.Version)
+	grpcImpl := NewGRPCServer(database, jobMgr, cfg.Version, nil)
 	grpcServer := grpc.NewServer()
 	apiv1.RegisterDaemonServiceServer(grpcServer, grpcImpl)
 

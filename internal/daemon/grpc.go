@@ -20,10 +20,11 @@ type GRPCServer struct {
 	version    string
 
 	// Shutdown coordination
-	mu           sync.RWMutex
-	shuttingDown bool
-	shutdownCh   chan struct{}
-	activeJobs   map[string]context.CancelFunc
+	mu             sync.RWMutex
+	shuttingDown   bool
+	shutdownCh     chan struct{}
+	activeJobs     map[string]context.CancelFunc
+	onShutdown     func() // Callback to signal daemon shutdown
 }
 
 // JobManager defines the interface for job lifecycle management
@@ -100,14 +101,16 @@ type Event struct {
 	Timestamp   time.Time
 }
 
-// NewGRPCServer creates a new gRPC server instance
-func NewGRPCServer(db *db.DB, jm JobManager, version string) *GRPCServer {
+// NewGRPCServer creates a new gRPC server instance.
+// The onShutdown callback is called when a shutdown request is received via gRPC.
+func NewGRPCServer(db *db.DB, jm JobManager, version string, onShutdown func()) *GRPCServer {
 	return &GRPCServer{
 		db:         db,
 		jobManager: jm,
 		version:    version,
 		shutdownCh: make(chan struct{}),
 		activeJobs: make(map[string]context.CancelFunc),
+		onShutdown: onShutdown,
 	}
 }
 
@@ -371,6 +374,11 @@ func (s *GRPCServer) Shutdown(ctx context.Context, req *apiv1.ShutdownRequest) (
 			jobsStopped++
 			_ = s.jobManager.Stop(ctx, jobID, true)
 		}
+	}
+
+	// Signal the daemon to shutdown
+	if s.onShutdown != nil {
+		go s.onShutdown()
 	}
 
 	return &apiv1.ShutdownResponse{
