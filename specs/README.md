@@ -185,3 +185,47 @@ These specs enable PRD-based automated feature development:
 2. **FEATURE-PRIORITIZER** + **FEATURE-BRANCH** + **SPEC-REVIEW** (parallel, depend on FEATURE-DISCOVERY)
 3. **FEATURE-WORKFLOW** (depends on FEATURE-DISCOVERY, FEATURE-BRANCH, SPEC-REVIEW)
 4. **FEATURE-CLI** (depends on FEATURE-WORKFLOW)
+
+## Daemon Architecture Specs (v0.5)
+
+These specs convert Charlotte from CLI-based to daemon-based architecture:
+
+| Spec | Description | Dependencies |
+|------|-------------|--------------|
+| **[DAEMON-DB](DAEMON-DB.md)** | SQLite database layer for persistent state storage | - |
+| **[DAEMON-GRPC](DAEMON-GRPC.md)** | gRPC interface and protocol buffer definitions | DAEMON-DB |
+| **[DAEMON-CORE](DAEMON-CORE.md)** | Daemon process lifecycle, job manager, resume logic | DAEMON-DB, DAEMON-GRPC |
+| **[DAEMON-CLIENT](DAEMON-CLIENT.md)** | gRPC client wrapper for CLI communication | DAEMON-GRPC |
+| **[DAEMON-CLI](DAEMON-CLI.md)** | CLI commands for daemon management and job control | DAEMON-CLIENT, DAEMON-CORE |
+
+### Dependency Graph
+
+```
+              ┌───────────┐
+              │ DAEMON-DB │
+              └─────┬─────┘
+                    │
+                    ▼
+             ┌────────────┐
+             │DAEMON-GRPC │
+             └──────┬─────┘
+                    │
+       ┌────────────┼────────────┐
+       ▼                         ▼
+┌─────────────┐           ┌─────────────┐
+│DAEMON-CORE  │           │DAEMON-CLIENT│
+└──────┬──────┘           └──────┬──────┘
+       │                         │
+       └────────────┬────────────┘
+                    ▼
+              ┌───────────┐
+              │DAEMON-CLI │
+              └───────────┘
+```
+
+### Implementation Order
+
+1. **DAEMON-DB** (foundational, no dependencies)
+2. **DAEMON-GRPC** (depends on DAEMON-DB)
+3. **DAEMON-CORE** + **DAEMON-CLIENT** (parallel, depend on DAEMON-GRPC)
+4. **DAEMON-CLI** (depends on DAEMON-CORE and DAEMON-CLIENT)
