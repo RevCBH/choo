@@ -1015,3 +1015,418 @@ func TestUnitListByStatus(t *testing.T) {
 		t.Errorf("Expected 1 running unit, got %d", len(running))
 	}
 }
+
+// TestEventAppend verifies that AppendEvent inserts event with auto-assigned sequence
+func TestEventAppend(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Append an event
+	err = db.AppendEvent(run.ID, "test_event", nil, nil)
+	if err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+
+	// List events to verify it was inserted
+	events, err := db.ListEvents(run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(events))
+	}
+
+	if events[0].RunID != run.ID {
+		t.Errorf("Expected run_id %s, got %s", run.ID, events[0].RunID)
+	}
+	if events[0].EventType != "test_event" {
+		t.Errorf("Expected event_type 'test_event', got %s", events[0].EventType)
+	}
+	if events[0].Sequence != 1 {
+		t.Errorf("Expected sequence 1, got %d", events[0].Sequence)
+	}
+}
+
+// TestEventSequencing verifies that multiple AppendEvent calls produce consecutive sequences starting at 1
+func TestEventSequencing(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Append multiple events
+	for i := 0; i < 5; i++ {
+		err = db.AppendEvent(run.ID, "test_event", nil, nil)
+		if err != nil {
+			t.Fatalf("AppendEvent failed: %v", err)
+		}
+	}
+
+	// List events to verify sequences
+	events, err := db.ListEvents(run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+
+	if len(events) != 5 {
+		t.Fatalf("Expected 5 events, got %d", len(events))
+	}
+
+	// Verify consecutive sequences starting at 1
+	for i, event := range events {
+		expectedSeq := i + 1
+		if event.Sequence != expectedSeq {
+			t.Errorf("Expected sequence %d, got %d", expectedSeq, event.Sequence)
+		}
+	}
+}
+
+// TestEventWithPayload verifies that AppendEvent serializes payload to JSON
+func TestEventWithPayload(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Append an event with a payload
+	payload := map[string]interface{}{
+		"key1": "value1",
+		"key2": 42,
+	}
+
+	err = db.AppendEvent(run.ID, "test_event", nil, payload)
+	if err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+
+	// List events to verify payload
+	events, err := db.ListEvents(run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(events))
+	}
+
+	if events[0].PayloadJSON == nil {
+		t.Fatal("Expected payload_json to be set")
+	}
+
+	// Verify JSON content
+	expectedJSON := `{"key1":"value1","key2":42}`
+	if *events[0].PayloadJSON != expectedJSON {
+		t.Errorf("Expected payload_json %s, got %s", expectedJSON, *events[0].PayloadJSON)
+	}
+}
+
+// TestEventWithUnitID verifies that AppendEvent stores optional unit ID
+func TestEventWithUnitID(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Append an event with a unit ID
+	unitID := "task-1"
+	err = db.AppendEvent(run.ID, "test_event", &unitID, nil)
+	if err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+
+	// List events to verify unit ID
+	events, err := db.ListEvents(run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(events))
+	}
+
+	if events[0].UnitID == nil {
+		t.Fatal("Expected unit_id to be set")
+	}
+
+	if *events[0].UnitID != unitID {
+		t.Errorf("Expected unit_id %s, got %s", unitID, *events[0].UnitID)
+	}
+}
+
+// TestEventWithoutRun verifies that AppendEvent returns error for non-existent run
+func TestEventWithoutRun(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Try to append an event for a non-existent run
+	err = db.AppendEvent("nonexistent-run", "test_event", nil, nil)
+	if err == nil {
+		t.Fatal("Expected error for event without parent run, got nil")
+	}
+}
+
+// TestEventList verifies that ListEvents returns all events in sequence order
+func TestEventList(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Append multiple events with different types
+	eventTypes := []string{"event1", "event2", "event3"}
+	for _, eventType := range eventTypes {
+		err = db.AppendEvent(run.ID, eventType, nil, nil)
+		if err != nil {
+			t.Fatalf("AppendEvent failed: %v", err)
+		}
+	}
+
+	// List all events
+	events, err := db.ListEvents(run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+
+	if len(events) != 3 {
+		t.Fatalf("Expected 3 events, got %d", len(events))
+	}
+
+	// Verify events are in sequence order
+	for i, event := range events {
+		expectedSeq := i + 1
+		if event.Sequence != expectedSeq {
+			t.Errorf("Expected sequence %d, got %d", expectedSeq, event.Sequence)
+		}
+		if event.EventType != eventTypes[i] {
+			t.Errorf("Expected event_type %s, got %s", eventTypes[i], event.EventType)
+		}
+	}
+}
+
+// TestEventListSince verifies that ListEventsSince returns only events after given sequence
+func TestEventListSince(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Append 5 events
+	for i := 0; i < 5; i++ {
+		err = db.AppendEvent(run.ID, "test_event", nil, nil)
+		if err != nil {
+			t.Fatalf("AppendEvent failed: %v", err)
+		}
+	}
+
+	// List events since sequence 2
+	events, err := db.ListEventsSince(run.ID, 2)
+	if err != nil {
+		t.Fatalf("ListEventsSince failed: %v", err)
+	}
+
+	// Should get events with sequence 3, 4, 5
+	if len(events) != 3 {
+		t.Fatalf("Expected 3 events, got %d", len(events))
+	}
+
+	// Verify sequences are > 2
+	for _, event := range events {
+		if event.Sequence <= 2 {
+			t.Errorf("Expected sequence > 2, got %d", event.Sequence)
+		}
+	}
+
+	// Verify first event has sequence 3
+	if events[0].Sequence != 3 {
+		t.Errorf("Expected first event to have sequence 3, got %d", events[0].Sequence)
+	}
+}
+
+// TestEventGetNextSequence verifies that GetNextSequence returns 1 for new run, increments after each event
+func TestEventGetNextSequence(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Get next sequence for a new run (should be 1)
+	nextSeq, err := db.GetNextSequence(run.ID)
+	if err != nil {
+		t.Fatalf("GetNextSequence failed: %v", err)
+	}
+
+	if nextSeq != 1 {
+		t.Errorf("Expected next sequence 1 for new run, got %d", nextSeq)
+	}
+
+	// Append an event
+	err = db.AppendEvent(run.ID, "test_event", nil, nil)
+	if err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+
+	// Get next sequence (should be 2)
+	nextSeq, err = db.GetNextSequence(run.ID)
+	if err != nil {
+		t.Fatalf("GetNextSequence failed: %v", err)
+	}
+
+	if nextSeq != 2 {
+		t.Errorf("Expected next sequence 2 after one event, got %d", nextSeq)
+	}
+
+	// Append another event
+	err = db.AppendEvent(run.ID, "test_event", nil, nil)
+	if err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+
+	// Get next sequence (should be 3)
+	nextSeq, err = db.GetNextSequence(run.ID)
+	if err != nil {
+		t.Fatalf("GetNextSequence failed: %v", err)
+	}
+
+	if nextSeq != 3 {
+		t.Errorf("Expected next sequence 3 after two events, got %d", nextSeq)
+	}
+}
