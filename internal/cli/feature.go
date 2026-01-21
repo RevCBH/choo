@@ -17,6 +17,7 @@ feature workflow state.`,
 	// Add subcommands
 	cmd.AddCommand(
 		NewFeatureStartCmd(app),
+		NewFeatureStatusCmd(app),
 	)
 
 	return cmd
