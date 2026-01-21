@@ -75,6 +75,12 @@ type Config struct {
 
 	// SuppressOutput disables stdout/stderr tee in workers (TUI mode)
 	SuppressOutput bool
+
+	// FeatureBranch is the feature branch name when in feature mode
+	FeatureBranch string
+
+	// FeatureMode is true when operating in feature mode
+	FeatureMode bool
 }
 
 // Dependencies bundles external dependencies for injection

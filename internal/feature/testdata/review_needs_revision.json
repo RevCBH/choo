@@ -1,0 +1,21 @@
+{
+  "verdict": "needs_revision",
+  "score": {
+    "completeness": 75,
+    "consistency": 80,
+    "testability": 60,
+    "architecture": 70
+  },
+  "feedback": [
+    {
+      "section": "API Design",
+      "issue": "Missing error handling for edge cases",
+      "suggestion": "Add explicit error handling for null inputs"
+    },
+    {
+      "section": "Testing",
+      "issue": "Insufficient test coverage for error paths",
+      "suggestion": "Add tests for error conditions"
+    }
+  ]
+}

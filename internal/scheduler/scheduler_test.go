@@ -394,11 +394,10 @@ func TestScheduler_ActiveCount(t *testing.T) {
 		t.Errorf("ActiveCount() after 1 in_progress = %d, want 1", count)
 	}
 
-	// Transition b to pr_open (also active)
+	// Transition b to in_progress (also active)
 	s.Transition("b", StatusInProgress)
-	s.Transition("b", StatusPROpen)
 	if count := s.ActiveCount(); count != 2 {
-		t.Errorf("ActiveCount() with in_progress + pr_open = %d, want 2", count)
+		t.Errorf("ActiveCount() with 2 in_progress = %d, want 2", count)
 	}
 
 	// Transition a to complete (no longer active)

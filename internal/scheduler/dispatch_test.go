@@ -272,52 +272,8 @@ func TestDispatch_AllBlocked(t *testing.T) {
 	}
 }
 
-func TestDispatch_ParallelismIncludesPRPhase(t *testing.T) {
-	bus := events.NewBus(10)
-	defer bus.Close()
-
-	s := New(bus, 2)
-
-	units := []*discovery.Unit{
-		{ID: "unit1", DependsOn: []string{}},
-		{ID: "unit2", DependsOn: []string{}},
-		{ID: "unit3", DependsOn: []string{}},
-	}
-
-	_, err := s.Schedule(units)
-	if err != nil {
-		t.Fatalf("Schedule failed: %v", err)
-	}
-
-	// Dispatch unit1 and transition to pr_open
-	s.Dispatch()
-	err = s.Transition("unit1", StatusPROpen)
-	if err != nil {
-		t.Fatalf("Transition failed: %v", err)
-	}
-
-	// Dispatch unit2 and transition through pr_open to in_review
-	s.Dispatch()
-	err = s.Transition("unit2", StatusPROpen)
-	if err != nil {
-		t.Fatalf("Transition to pr_open failed: %v", err)
-	}
-	err = s.Transition("unit2", StatusInReview)
-	if err != nil {
-		t.Fatalf("Transition to in_review failed: %v", err)
-	}
-
-	// Both units are in PR phases (pr_open, in_review)
-	// These should count against parallelism limit
-	result := s.Dispatch()
-
-	if result.Dispatched {
-		t.Error("Expected Dispatched=false when PR phases consume parallelism")
-	}
-	if result.Reason != ReasonAtCapacity {
-		t.Errorf("Expected Reason=at_capacity, got %q", result.Reason)
-	}
-}
+// TestDispatch_ParallelismIncludesPRPhase removed - PR phases no longer exist in simplified flow
+// In the new flow, only StatusInProgress consumes parallelism slots
 
 func TestDispatch_Sequential(t *testing.T) {
 	bus := events.NewBus(10)
