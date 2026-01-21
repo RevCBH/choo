@@ -272,13 +272,30 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 		}
 	}
 
+	// Store all discovered units before filtering (for PR creation)
+	allDiscoveredUnits := units
+
 	// Filter out already-complete units (they don't need to be re-executed)
 	units = filterOutCompleteUnits(units)
 	if len(units) == 0 {
-		// All units already complete - nothing to do
+		// All units already complete - create PR if in feature mode
+		if o.cfg.FeatureMode && !o.cfg.NoPR {
+			// Collect unit IDs from the original list
+			var unitIDs []string
+			for _, u := range allDiscoveredUnits {
+				unitIDs = append(unitIDs, u.ID)
+			}
+			prURL, err := o.createFeaturePR(ctx, unitIDs...)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create PR: %w", err)
+			}
+			if prURL != "" {
+				fmt.Printf("\nPR created: %s\n", prURL)
+			}
+		}
 		return &Result{
-			TotalUnits:     0,
-			CompletedUnits: 0,
+			TotalUnits:     len(allDiscoveredUnits),
+			CompletedUnits: len(allDiscoveredUnits),
 		}, nil
 	}
 
@@ -633,7 +650,8 @@ func (o *Orchestrator) dryRun(units []*discovery.Unit) (*Result, error) {
 var prURLPattern = regexp.MustCompile(`https://github\.com/[^/]+/[^/]+/pull/\d+`)
 
 // createFeaturePR creates a PR for the feature branch using Claude
-func (o *Orchestrator) createFeaturePR(ctx context.Context) (string, error) {
+// If completedUnitIDs is nil, it uses o.units to get the list
+func (o *Orchestrator) createFeaturePR(ctx context.Context, completedUnitIDs ...string) (string, error) {
 	if !o.cfg.FeatureMode || o.cfg.FeatureBranch == "" {
 		return "", nil // Not in feature mode, nothing to do
 	}
@@ -649,8 +667,12 @@ func (o *Orchestrator) createFeaturePR(ctx context.Context) (string, error) {
 
 	// Collect completed unit names
 	var completedUnits []string
-	for _, unit := range o.units {
-		completedUnits = append(completedUnits, unit.ID)
+	if len(completedUnitIDs) > 0 {
+		completedUnits = completedUnitIDs
+	} else {
+		for _, unit := range o.units {
+			completedUnits = append(completedUnits, unit.ID)
+		}
 	}
 
 	// Build prompt for Claude

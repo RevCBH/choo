@@ -826,9 +826,12 @@ backpressure: "echo ok"
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// All units complete, so TotalUnits should be 0
-	if result.TotalUnits != 0 {
-		t.Errorf("expected 0 units when all are complete, got %d", result.TotalUnits)
+	// All units complete - TotalUnits should reflect the discovered units
+	if result.TotalUnits != 1 {
+		t.Errorf("expected 1 unit discovered, got %d", result.TotalUnits)
+	}
+	if result.CompletedUnits != 1 {
+		t.Errorf("expected 1 completed unit, got %d", result.CompletedUnits)
 	}
 }
 
