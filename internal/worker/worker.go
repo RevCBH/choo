@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/RevCBH/choo/internal/discovery"
@@ -28,6 +29,7 @@ type Worker struct {
 	github       *github.PRClient
 	claude       *ClaudeClient
 	escalator    escalate.Escalator
+	mergeMu      *sync.Mutex // Shared mutex for serializing merge operations
 	worktreePath string
 	branch       string
 	currentTask  *discovery.Task
@@ -71,6 +73,7 @@ type WorkerDeps struct {
 	GitHub    *github.PRClient
 	Claude    *ClaudeClient
 	Escalator escalate.Escalator
+	MergeMu   *sync.Mutex // Shared mutex for serializing merge operations
 }
 
 // ClaudeClient is a placeholder interface for the Claude client
@@ -92,6 +95,7 @@ func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker 
 		github:    deps.GitHub,
 		claude:    deps.Claude,
 		escalator: deps.Escalator,
+		mergeMu:   deps.MergeMu,
 	}
 }
 
@@ -323,6 +327,13 @@ func (w *Worker) runBaselinePhase(ctx context.Context) error {
 func (w *Worker) mergeToFeatureBranch(ctx context.Context) error {
 	// 1. Review placeholder (log what would be reviewed)
 	w.logReviewPlaceholder(ctx)
+
+	// 2-4 are serialized via mergeMu to prevent concurrent merge conflicts
+	// Acquire merge lock - only one worker can merge at a time
+	if w.mergeMu != nil {
+		w.mergeMu.Lock()
+		defer w.mergeMu.Unlock()
+	}
 
 	// 2. Fetch latest feature branch to ensure we're rebasing onto latest
 	if _, err := w.runner().Exec(ctx, w.worktreePath, "fetch", "origin", w.config.TargetBranch); err != nil {

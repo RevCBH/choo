@@ -21,6 +21,7 @@ type Pool struct {
 	claude     *ClaudeClient
 	workers    map[string]*Worker
 	mu         sync.Mutex
+	mergeMu    sync.Mutex // Serializes merge operations to prevent conflicts
 	wg         sync.WaitGroup
 	sem        chan struct{} // Semaphore for concurrency control
 	firstErr   error         // First error encountered
@@ -66,10 +67,11 @@ func (p *Pool) Submit(unit *discovery.Unit) error {
 
 	// Create worker for unit
 	worker := NewWorker(unit, p.config, WorkerDeps{
-		Events: p.events,
-		Git:    p.git,
-		GitHub: p.github,
-		Claude: p.claude,
+		Events:  p.events,
+		Git:     p.git,
+		GitHub:  p.github,
+		Claude:  p.claude,
+		MergeMu: &p.mergeMu,
 	})
 
 	// Add to workers map
