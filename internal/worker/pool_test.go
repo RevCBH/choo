@@ -65,10 +65,10 @@ func mockDeps(t *testing.T) WorkerDeps {
 	})
 
 	return WorkerDeps{
-		Events: events.NewBus(100),
-		Git:    git.NewWorktreeManager(repoDir, nil),
-		GitHub: nil,
-		Claude: nil,
+		Events:   events.NewBus(100),
+		Git:      git.NewWorktreeManager(repoDir, nil),
+		GitHub:   nil,
+		Provider: nil,
 	}
 }
 
