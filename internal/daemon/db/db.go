@@ -1,78 +1,58 @@
----
-task: 2
-status: complete
-backpressure: "go test ./internal/daemon/db/... -run TestOpen"
-depends_on: [1]
----
+package db
 
-# Connection and Migrations
+import (
+	"database/sql"
+	"fmt"
 
-**Parent spec**: `specs/DAEMON-DB.md`
-**Task**: #2 of 6 in implementation plan
+	_ "modernc.org/sqlite"
+)
 
-## Objective
-
-Implement database connection management with WAL mode, foreign key enforcement, and schema migrations.
-
-## Dependencies
-
-### Task Dependencies (within this unit)
-- Task #1 must be complete (types are referenced in schema)
-
-### Package Dependencies
-- `modernc.org/sqlite` - Pure Go SQLite implementation
-- `database/sql` - Standard database interface
-
-## Deliverables
-
-### Files to Create/Modify
-
-```
-internal/daemon/db/
-├── db.go       # CREATE: Connection management and migrations
-└── db_test.go  # CREATE: Basic connection tests
-```
-
-### Types to Implement
-
-```go
 // DB wraps the SQLite connection with daemon-specific operations
 type DB struct {
-    conn *sql.DB
+	conn *sql.DB
 }
-```
 
-### Functions to Implement
-
-```go
 // Open creates or opens a SQLite database at the given path.
 // It enables WAL mode, foreign keys, and runs migrations.
 func Open(path string) (*DB, error) {
-    // 1. Open connection with modernc.org/sqlite driver
-    // 2. Enable WAL mode: PRAGMA journal_mode=WAL
-    // 3. Enable foreign keys: PRAGMA foreign_keys=ON
-    // 4. Run migrations
-    // 5. Return wrapped DB
+	// 1. Open connection with modernc.org/sqlite driver
+	conn, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	// 2. Enable WAL mode: PRAGMA journal_mode=WAL
+	if _, err := conn.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to enable WAL mode: %w", err)
+	}
+
+	// 3. Enable foreign keys: PRAGMA foreign_keys=ON
+	if _, err := conn.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to enable foreign keys: %w", err)
+	}
+
+	db := &DB{conn: conn}
+
+	// 4. Run migrations
+	if err := db.migrate(); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to run migrations: %w", err)
+	}
+
+	// 5. Return wrapped DB
+	return db, nil
 }
 
 // Close closes the database connection
 func (db *DB) Close() error {
-    // Close underlying sql.DB connection
+	return db.conn.Close()
 }
 
 // migrate creates or updates the database schema
 func (db *DB) migrate() error {
-    // Execute CREATE TABLE IF NOT EXISTS for:
-    // - runs table with unique constraint on (feature_branch, repo_path)
-    // - units table with foreign key to runs, cascade delete
-    // - events table with foreign key to runs, cascade delete
-    // - All required indexes
-}
-```
-
-### Schema SQL
-
-```sql
+	schema := `
 -- Runs table: Top-level workflow executions
 CREATE TABLE IF NOT EXISTS runs (
     id              TEXT PRIMARY KEY,
@@ -121,29 +101,12 @@ CREATE INDEX IF NOT EXISTS idx_units_run_id ON units(run_id);
 CREATE INDEX IF NOT EXISTS idx_units_status ON units(status);
 CREATE INDEX IF NOT EXISTS idx_events_run_id ON events(run_id);
 CREATE INDEX IF NOT EXISTS idx_events_sequence ON events(run_id, sequence);
-```
+`
 
-## Backpressure
+	_, err := db.conn.Exec(schema)
+	if err != nil {
+		return fmt.Errorf("failed to execute schema: %w", err)
+	}
 
-### Validation Command
-
-```bash
-go test ./internal/daemon/db/... -run TestOpen
-```
-
-### Must Pass
-
-| Test | Assertion |
-|------|-----------|
-| `TestOpen` | Opens in-memory database without error |
-| `TestOpenWALMode` | WAL mode is enabled after open |
-| `TestOpenForeignKeys` | Foreign keys are enabled after open |
-| `TestOpenMigration` | All tables exist after open |
-| `TestClose` | Close returns no error |
-
-## NOT In Scope
-
-- Run CRUD operations (Task #3)
-- Unit CRUD operations (Task #4)
-- Event operations (Task #5)
-- Integration tests (Task #6)
+	return nil
+}
