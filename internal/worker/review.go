@@ -216,10 +216,10 @@ func (w *Worker) cleanupWorktree(ctx context.Context) {
 		// Continue with cleanup
 	}
 
-	// 3. Restore modified files (git restore .)
-	if _, err := w.runner().Exec(ctx, w.worktreePath, "restore", "."); err != nil {
+	// 3. Restore modified files (git checkout .)
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "checkout", "."); err != nil {
 		if w.reviewConfig != nil && w.reviewConfig.Verbose {
-			fmt.Fprintf(os.Stderr, "Warning: git restore failed: %v\n", err)
+			fmt.Fprintf(os.Stderr, "Warning: git checkout failed: %v\n", err)
 		}
 	}
 }

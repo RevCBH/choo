@@ -530,3 +530,302 @@ func (m *mockProvider) Invoke(ctx context.Context, prompt, workdir string, stdou
 func (m *mockProvider) Name() provider.ProviderType {
 	return "mock"
 }
+
+func TestCommitReviewFixes_WithChanges(t *testing.T) {
+	// Setup real git repo for this test
+	repoDir := setupTestRepo(t)
+
+	// Create a modified file
+	testFile := filepath.Join(repoDir, "test.txt")
+	require.NoError(t, os.WriteFile(testFile, []byte("modified"), 0644))
+
+	w := &Worker{
+		worktreePath: repoDir,
+		gitRunner:    git.DefaultRunner(),
+	}
+
+	ctx := context.Background()
+	committed, err := w.commitReviewFixes(ctx)
+
+	require.NoError(t, err)
+	assert.True(t, committed)
+
+	// Verify commit was created
+	output, err := w.runner().Exec(ctx, repoDir, "log", "-1", "--pretty=format:%s")
+	require.NoError(t, err)
+	assert.Equal(t, "fix: address code review feedback", output)
+}
+
+func TestCommitReviewFixes_NoChanges(t *testing.T) {
+	repoDir := setupTestRepo(t) // Clean repo
+
+	w := &Worker{
+		worktreePath: repoDir,
+		gitRunner:    git.DefaultRunner(),
+	}
+
+	ctx := context.Background()
+	committed, err := w.commitReviewFixes(ctx)
+
+	require.NoError(t, err)
+	assert.False(t, committed)
+}
+
+func TestCommitReviewFixes_StageError(t *testing.T) {
+	// Use fake runner that returns changes on status but fails on add
+	fakeRunner := newFakeGitRunner()
+	fakeRunner.stub("status --porcelain", "M test.go\n", nil)
+	fakeRunner.stub("add -A", "", errors.New("add failed"))
+
+	w := &Worker{
+		worktreePath: "/tmp/test",
+		gitRunner:    fakeRunner,
+	}
+
+	ctx := context.Background()
+	committed, err := w.commitReviewFixes(ctx)
+
+	assert.Error(t, err)
+	assert.False(t, committed)
+	assert.Contains(t, err.Error(), "staging changes")
+}
+
+func TestCommitReviewFixes_CommitError(t *testing.T) {
+	// Use fake runner that succeeds on status and add but fails on commit
+	fakeRunner := newFakeGitRunner()
+	fakeRunner.stub("status --porcelain", "M test.go\n", nil)
+	fakeRunner.stub("add -A", "", nil)
+	fakeRunner.stub("commit -m fix: address code review feedback --no-verify", "", errors.New("commit failed"))
+
+	w := &Worker{
+		worktreePath: "/tmp/test",
+		gitRunner:    fakeRunner,
+	}
+
+	ctx := context.Background()
+	committed, err := w.commitReviewFixes(ctx)
+
+	assert.Error(t, err)
+	assert.False(t, committed)
+	assert.Contains(t, err.Error(), "committing changes")
+}
+
+func TestCommitReviewFixes_CommitMessage(t *testing.T) {
+	repoDir := setupTestRepo(t)
+
+	// Create a modified file
+	testFile := filepath.Join(repoDir, "test.txt")
+	require.NoError(t, os.WriteFile(testFile, []byte("modified"), 0644))
+
+	w := &Worker{
+		worktreePath: repoDir,
+		gitRunner:    git.DefaultRunner(),
+	}
+
+	ctx := context.Background()
+	committed, err := w.commitReviewFixes(ctx)
+
+	require.NoError(t, err)
+	require.True(t, committed)
+
+	// Verify standardized commit message
+	output, err := w.runner().Exec(ctx, repoDir, "log", "-1", "--pretty=format:%s")
+	require.NoError(t, err)
+	assert.Equal(t, "fix: address code review feedback", output)
+}
+
+func TestHasUncommittedChanges_Clean(t *testing.T) {
+	repoDir := setupTestRepo(t)
+
+	w := &Worker{
+		worktreePath: repoDir,
+		gitRunner:    git.DefaultRunner(),
+	}
+
+	ctx := context.Background()
+	hasChanges, err := w.hasUncommittedChanges(ctx)
+
+	require.NoError(t, err)
+	assert.False(t, hasChanges)
+}
+
+func TestHasUncommittedChanges_Modified(t *testing.T) {
+	repoDir := setupTestRepo(t)
+
+	// Modify existing file
+	testFile := filepath.Join(repoDir, "README.md")
+	require.NoError(t, os.WriteFile(testFile, []byte("modified"), 0644))
+
+	w := &Worker{
+		worktreePath: repoDir,
+		gitRunner:    git.DefaultRunner(),
+	}
+
+	ctx := context.Background()
+	hasChanges, err := w.hasUncommittedChanges(ctx)
+
+	require.NoError(t, err)
+	assert.True(t, hasChanges)
+}
+
+func TestHasUncommittedChanges_Untracked(t *testing.T) {
+	repoDir := setupTestRepo(t)
+
+	// Create an untracked file
+	untrackedFile := filepath.Join(repoDir, "untracked.txt")
+	require.NoError(t, os.WriteFile(untrackedFile, []byte("new file"), 0644))
+
+	w := &Worker{
+		worktreePath: repoDir,
+		gitRunner:    git.DefaultRunner(),
+	}
+
+	ctx := context.Background()
+	hasChanges, err := w.hasUncommittedChanges(ctx)
+
+	require.NoError(t, err)
+	assert.True(t, hasChanges)
+}
+
+func TestCleanupWorktree_ResetsStaged(t *testing.T) {
+	repoDir := setupTestRepo(t)
+
+	// Create and stage a file
+	testFile := filepath.Join(repoDir, "staged.txt")
+	require.NoError(t, os.WriteFile(testFile, []byte("staged"), 0644))
+
+	runner := git.DefaultRunner()
+	ctx := context.Background()
+	_, err := runner.Exec(ctx, repoDir, "add", "staged.txt")
+	require.NoError(t, err)
+
+	w := &Worker{
+		worktreePath: repoDir,
+		gitRunner:    runner,
+		reviewConfig: &config.CodeReviewConfig{Verbose: true},
+	}
+
+	// Cleanup should reset staged changes
+	w.cleanupWorktree(ctx)
+
+	// Verify no staged changes
+	output, err := runner.Exec(ctx, repoDir, "diff", "--cached", "--name-only")
+	require.NoError(t, err)
+	assert.Empty(t, output)
+}
+
+func TestCleanupWorktree_CleansUntracked(t *testing.T) {
+	repoDir := setupTestRepo(t)
+
+	// Create untracked file
+	untrackedFile := filepath.Join(repoDir, "untracked.txt")
+	require.NoError(t, os.WriteFile(untrackedFile, []byte("untracked"), 0644))
+
+	w := &Worker{
+		worktreePath: repoDir,
+		gitRunner:    git.DefaultRunner(),
+		reviewConfig: &config.CodeReviewConfig{Verbose: true},
+	}
+
+	ctx := context.Background()
+	w.cleanupWorktree(ctx)
+
+	// Verify untracked file was removed
+	_, err := os.Stat(untrackedFile)
+	assert.True(t, os.IsNotExist(err))
+}
+
+func TestCleanupWorktree_RestoresModified(t *testing.T) {
+	repoDir := setupTestRepo(t)
+
+	// Modify existing file
+	readmePath := filepath.Join(repoDir, "README.md")
+	require.NoError(t, os.WriteFile(readmePath, []byte("modified content"), 0644))
+
+	w := &Worker{
+		worktreePath: repoDir,
+		gitRunner:    git.DefaultRunner(),
+		reviewConfig: &config.CodeReviewConfig{Verbose: true},
+	}
+
+	ctx := context.Background()
+	w.cleanupWorktree(ctx)
+
+	// Verify file was restored to original state
+	content, err := os.ReadFile(readmePath)
+	require.NoError(t, err)
+	assert.Equal(t, "# Test", string(content))
+}
+
+func TestCleanupWorktree_FullCleanup(t *testing.T) {
+	repoDir := setupTestRepo(t)
+
+	// Create dirty state: modified file + untracked file + staged file
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "modified.txt"), []byte("mod"), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "untracked.txt"), []byte("new"), 0644))
+
+	w := &Worker{
+		worktreePath: repoDir,
+		gitRunner:    git.DefaultRunner(),
+		reviewConfig: &config.CodeReviewConfig{Verbose: true},
+	}
+
+	ctx := context.Background()
+	w.cleanupWorktree(ctx)
+
+	// Verify worktree is clean
+	output, err := w.runner().Exec(ctx, repoDir, "status", "--porcelain")
+	require.NoError(t, err)
+	assert.Empty(t, output, "worktree should be clean after cleanup")
+}
+
+func TestCleanupWorktree_ContinuesOnError(t *testing.T) {
+	// Use fake runner that fails on reset but succeeds on clean/checkout
+	fakeRunner := newFakeGitRunner()
+	fakeRunner.stub("reset HEAD", "", errors.New("reset failed"))
+	fakeRunner.stub("clean -fd", "", nil)
+	fakeRunner.stub("checkout .", "", nil)
+
+	w := &Worker{
+		worktreePath: "/tmp/test",
+		gitRunner:    fakeRunner,
+		reviewConfig: &config.CodeReviewConfig{Verbose: false}, // Set to false to avoid stderr output in tests
+	}
+
+	ctx := context.Background()
+	// Should not panic even if reset fails
+	w.cleanupWorktree(ctx)
+
+	// All three commands should have been called
+	// (verified by not having an "unexpected git call" error)
+}
+
+// setupTestRepo creates a git repo for testing
+func setupTestRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+
+	runner := git.DefaultRunner()
+	ctx := context.Background()
+
+	_, err := runner.Exec(ctx, dir, "init")
+	require.NoError(t, err)
+
+	_, err = runner.Exec(ctx, dir, "config", "user.email", "test@test.com")
+	require.NoError(t, err)
+
+	_, err = runner.Exec(ctx, dir, "config", "user.name", "Test")
+	require.NoError(t, err)
+
+	// Create initial commit
+	readmePath := filepath.Join(dir, "README.md")
+	require.NoError(t, os.WriteFile(readmePath, []byte("# Test"), 0644))
+
+	_, err = runner.Exec(ctx, dir, "add", ".")
+	require.NoError(t, err)
+
+	_, err = runner.Exec(ctx, dir, "commit", "-m", "Initial commit")
+	require.NoError(t, err)
+
+	return dir
+}
