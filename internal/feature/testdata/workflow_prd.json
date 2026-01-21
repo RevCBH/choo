@@ -1,0 +1,13 @@
+{
+  "body": "Implement user authentication feature",
+  "units": [
+    {
+      "name": "auth-service",
+      "status": "pending"
+    },
+    {
+      "name": "login-ui",
+      "status": "pending"
+    }
+  ]
+}

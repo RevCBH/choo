@@ -8,6 +8,62 @@ import (
 	"strings"
 )
 
+// GetCurrentBranch returns the name of the currently checked out branch.
+// Returns an error if in detached HEAD state or if the command fails.
+func GetCurrentBranch(ctx context.Context, repoDir string) (string, error) {
+	output, err := gitExec(ctx, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("failed to get current branch: %w", err)
+	}
+
+	branch := strings.TrimSpace(output)
+	if branch == "HEAD" {
+		return "", fmt.Errorf("repository is in detached HEAD state")
+	}
+
+	return branch, nil
+}
+
+// BranchExistsOnRemote checks if a branch exists on the remote (origin).
+func BranchExistsOnRemote(ctx context.Context, repoDir, branch string) (bool, error) {
+	output, err := gitExec(ctx, repoDir, "ls-remote", "--heads", "origin", branch)
+	if err != nil {
+		return false, fmt.Errorf("failed to check remote branch: %w", err)
+	}
+
+	// If output is non-empty, the branch exists
+	return strings.TrimSpace(output) != "", nil
+}
+
+// PushBranch pushes a local branch to the remote with upstream tracking.
+func PushBranch(ctx context.Context, repoDir, branch string) error {
+	_, err := gitExec(ctx, repoDir, "push", "-u", "origin", branch)
+	if err != nil {
+		return fmt.Errorf("failed to push branch %s: %w", branch, err)
+	}
+	return nil
+}
+
+// EnsureBranchOnRemote checks if the target branch exists on the remote,
+// and pushes it if not. Returns true if the branch was pushed.
+func EnsureBranchOnRemote(ctx context.Context, repoDir, branch string) (pushed bool, err error) {
+	exists, err := BranchExistsOnRemote(ctx, repoDir, branch)
+	if err != nil {
+		return false, err
+	}
+
+	if exists {
+		return false, nil
+	}
+
+	// Branch doesn't exist on remote, push it
+	if err := PushBranch(ctx, repoDir, branch); err != nil {
+		return false, err
+	}
+
+	return true, nil
+}
+
 // Branch represents a git branch with its metadata
 type Branch struct {
 	// Name is the full branch name (e.g., "ralph/deck-list-sunset-harbor")

@@ -9,10 +9,7 @@ const (
 	StatusPending    UnitStatus = "pending"
 	StatusReady      UnitStatus = "ready"
 	StatusInProgress UnitStatus = "in_progress"
-	StatusPROpen     UnitStatus = "pr_open"
-	StatusInReview   UnitStatus = "in_review"
-	StatusMerging    UnitStatus = "merging"
-	StatusComplete   UnitStatus = "complete"
+	StatusComplete   UnitStatus = "complete" // Terminal: all tasks done and merged to feature branch
 	StatusFailed     UnitStatus = "failed"
 	StatusBlocked    UnitStatus = "blocked"
 )
@@ -28,13 +25,11 @@ type UnitState struct {
 }
 
 // ValidTransitions defines allowed state transitions
+// Simplified flow: pending -> ready -> in_progress -> complete (merged to feature branch)
 var ValidTransitions = map[UnitStatus][]UnitStatus{
 	StatusPending:    {StatusReady, StatusBlocked},
 	StatusReady:      {StatusInProgress, StatusBlocked},
-	StatusInProgress: {StatusPROpen, StatusComplete, StatusFailed},
-	StatusPROpen:     {StatusInReview, StatusComplete, StatusFailed},
-	StatusInReview:   {StatusMerging, StatusPROpen, StatusFailed},
-	StatusMerging:    {StatusComplete, StatusFailed},
+	StatusInProgress: {StatusComplete, StatusFailed},
 	StatusComplete:   {},
 	StatusFailed:     {},
 	StatusBlocked:    {},
@@ -47,7 +42,7 @@ func (s UnitStatus) IsTerminal() bool {
 
 // IsActive returns true if the unit is consuming a parallelism slot
 func (s UnitStatus) IsActive() bool {
-	return s == StatusInProgress || s == StatusPROpen || s == StatusInReview || s == StatusMerging
+	return s == StatusInProgress
 }
 
 // CanTransition checks if a transition from -> to is valid

@@ -8,12 +8,18 @@ import (
 
 // Complete marks a unit as complete and re-evaluates pending units
 // Emits UnitCompleted event and potentially UnitQueued for dependents
+// Idempotent: does nothing if unit is already in a terminal state
 func (s *Scheduler) Complete(unitID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	state, exists := s.states[unitID]
 	if !exists {
+		return
+	}
+
+	// Skip if already in a terminal state (prevents infinite loop from event re-emission)
+	if state.Status.IsTerminal() {
 		return
 	}
 

@@ -1,2 +1,13 @@
 claude:
   max_turns: 50
+
+# Baseline checks mirror CI (.github/workflows/ci.yml)
+baseline_checks:
+  - name: build
+    command: go build -v ./...
+  - name: vet
+    command: go vet ./...
+  - name: lint
+    command: golangci-lint run
+  - name: test
+    command: go test -v -race ./...
