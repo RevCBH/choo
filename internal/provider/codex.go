@@ -2,11 +2,16 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"os/exec"
 )
 
-// CodexProvider implements Provider using the OpenAI Codex CLI
+// CodexProvider implements Provider using the OpenAI Codex CLI.
+// Uses exec subcommand with --yolo flag for autonomous execution.
 type CodexProvider struct {
+	// command is the path to the codex executable.
+	// Defaults to "codex" (resolved via PATH).
 	command string
 }
 
@@ -19,10 +24,24 @@ func NewCodex(command string) *CodexProvider {
 	return &CodexProvider{command: command}
 }
 
-// Invoke executes the Codex CLI with the given prompt.
-// NOTE: Full implementation deferred to provider-implementations unit.
+// Invoke executes Codex CLI with the given prompt.
+// The command runs in workdir with stdout/stderr connected to the provided writers.
+// Returns when the subprocess exits or context is cancelled.
 func (p *CodexProvider) Invoke(ctx context.Context, prompt string, workdir string, stdout, stderr io.Writer) error {
-	// Placeholder - full implementation in provider-implementations unit
+	args := []string{
+		"exec",
+		"--yolo",
+		prompt,
+	}
+
+	cmd := exec.CommandContext(ctx, p.command, args...)
+	cmd.Dir = workdir
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("codex invocation failed: %w", err)
+	}
 	return nil
 }
 

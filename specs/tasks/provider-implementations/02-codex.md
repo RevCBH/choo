@@ -1,9 +1,8 @@
 ---
 task: 2
-status: pending
-backpressure: "go test ./internal/provider/... -run Provider"
-depends_on:
-  - 1
+status: complete
+backpressure: "go test ./internal/provider/... -run Codex"
+depends_on: []
 ---
 
 # Codex Provider Implementation
