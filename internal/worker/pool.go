@@ -9,6 +9,7 @@ import (
 	"github.com/RevCBH/choo/internal/events"
 	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/github"
+	"github.com/RevCBH/choo/internal/provider"
 )
 
 // Pool manages a collection of workers executing units in parallel
@@ -18,7 +19,7 @@ type Pool struct {
 	events     *events.Bus
 	git        *git.WorktreeManager
 	github     *github.PRClient
-	claude     *ClaudeClient
+	provider   provider.Provider
 	workers    map[string]*Worker
 	mu         sync.Mutex
 	mergeMu    sync.Mutex // Serializes merge operations to prevent conflicts
@@ -47,7 +48,7 @@ func NewPool(maxWorkers int, cfg WorkerConfig, deps WorkerDeps) *Pool {
 		events:     deps.Events,
 		git:        deps.Git,
 		github:     deps.GitHub,
-		claude:     deps.Claude,
+		provider:   deps.Provider,
 		workers:    make(map[string]*Worker),
 		sem:        make(chan struct{}, maxWorkers),
 		cancelCtx:  ctx,
@@ -67,11 +68,11 @@ func (p *Pool) Submit(unit *discovery.Unit) error {
 
 	// Create worker for unit
 	worker := NewWorker(unit, p.config, WorkerDeps{
-		Events:  p.events,
-		Git:     p.git,
-		GitHub:  p.github,
-		Claude:  p.claude,
-		MergeMu: &p.mergeMu,
+		Events:   p.events,
+		Git:      p.git,
+		GitHub:   p.github,
+		Provider: p.provider,
+		MergeMu:  &p.mergeMu,
 	})
 
 	// Add to workers map

@@ -16,6 +16,7 @@ import (
 	"github.com/RevCBH/choo/internal/events"
 	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/github"
+	"github.com/RevCBH/choo/internal/provider"
 	"gopkg.in/yaml.v3"
 )
 
@@ -27,7 +28,7 @@ type Worker struct {
 	git          *git.WorktreeManager
 	gitRunner    git.Runner
 	github       *github.PRClient
-	claude       *ClaudeClient
+	provider     provider.Provider
 	escalator    escalate.Escalator
 	mergeMu      *sync.Mutex // Shared mutex for serializing merge operations
 	worktreePath string
@@ -71,13 +72,14 @@ type WorkerDeps struct {
 	Git       *git.WorktreeManager
 	GitRunner git.Runner
 	GitHub    *github.PRClient
-	Claude    *ClaudeClient
+	Provider  provider.Provider
 	Escalator escalate.Escalator
 	MergeMu   *sync.Mutex // Shared mutex for serializing merge operations
 }
 
-// ClaudeClient is a placeholder interface for the Claude client
-// This will be replaced when the claude package is implemented
+// ClaudeClient is deprecated - use Provider instead
+// Kept for backward compatibility during migration
+// Deprecated: Use Provider field in WorkerDeps instead
 type ClaudeClient any
 
 // NewWorker creates a worker for executing a unit
@@ -93,7 +95,7 @@ func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker 
 		git:       deps.Git,
 		gitRunner: gitRunner,
 		github:    deps.GitHub,
-		claude:    deps.Claude,
+		provider:  deps.Provider,
 		escalator: deps.Escalator,
 		mergeMu:   deps.MergeMu,
 	}
