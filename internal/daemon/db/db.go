@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS runs (
     tasks_dir       TEXT NOT NULL,
     parallelism     INTEGER NOT NULL,
     status          TEXT NOT NULL,
+    daemon_version  TEXT NOT NULL,
     started_at      DATETIME,
     completed_at    DATETIME,
     error           TEXT,
