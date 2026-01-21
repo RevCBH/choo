@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -435,5 +436,183 @@ worktree:
 	}
 	if cfg.Worktree.TeardownCommands[0].If != "Makefile" {
 		t.Errorf("expected TeardownCommands[0].If to be 'Makefile', got %q", cfg.Worktree.TeardownCommands[0].If)
+	}
+}
+
+func TestCodeReviewConfig_Validate_ValidCodex(t *testing.T) {
+	cfg := CodeReviewConfig{
+		Enabled:          true,
+		Provider:         ReviewProviderCodex,
+		MaxFixIterations: 1,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestCodeReviewConfig_Validate_ValidClaude(t *testing.T) {
+	cfg := CodeReviewConfig{
+		Enabled:          true,
+		Provider:         ReviewProviderClaude,
+		MaxFixIterations: 3,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() error = %v, want nil", err)
+	}
+}
+
+func TestCodeReviewConfig_Validate_DisabledInvalidProvider(t *testing.T) {
+	cfg := CodeReviewConfig{
+		Enabled:  false,
+		Provider: "invalid",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() error = %v, want nil (invalid provider allowed when disabled)", err)
+	}
+}
+
+func TestCodeReviewConfig_Validate_InvalidProvider(t *testing.T) {
+	cfg := CodeReviewConfig{
+		Enabled:  true,
+		Provider: "gpt4",
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("Validate() error = nil, want error for invalid provider")
+	}
+	if !strings.Contains(err.Error(), "invalid review provider") {
+		t.Errorf("error should mention 'invalid review provider', got: %v", err)
+	}
+}
+
+func TestCodeReviewConfig_Validate_NegativeIterations(t *testing.T) {
+	cfg := CodeReviewConfig{
+		Enabled:          true,
+		Provider:         ReviewProviderCodex,
+		MaxFixIterations: -1,
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Error("Validate() error = nil, want error for negative iterations")
+	}
+	if !strings.Contains(err.Error(), "negative") {
+		t.Errorf("error should mention 'negative', got: %v", err)
+	}
+}
+
+func TestCodeReviewConfig_Validate_ZeroIterations(t *testing.T) {
+	cfg := CodeReviewConfig{
+		Enabled:          true,
+		Provider:         ReviewProviderCodex,
+		MaxFixIterations: 0,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() error = %v, want nil (0 iterations is valid review-only mode)", err)
+	}
+}
+
+func TestCodeReviewConfig_IsReviewOnlyMode(t *testing.T) {
+	tests := []struct {
+		iterations int
+		want       bool
+	}{
+		{0, true},
+		{1, false},
+		{5, false},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("iterations=%d", tt.iterations), func(t *testing.T) {
+			cfg := CodeReviewConfig{MaxFixIterations: tt.iterations}
+			if got := cfg.IsReviewOnlyMode(); got != tt.want {
+				t.Errorf("IsReviewOnlyMode() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDefaultCodeReviewConfig(t *testing.T) {
+	cfg := DefaultCodeReviewConfig()
+
+	if !cfg.Enabled {
+		t.Error("expected Enabled to be true by default")
+	}
+	if cfg.Provider != ReviewProviderCodex {
+		t.Errorf("expected Provider to be %q, got %q", ReviewProviderCodex, cfg.Provider)
+	}
+	if cfg.MaxFixIterations != 1 {
+		t.Errorf("expected MaxFixIterations to be 1, got %d", cfg.MaxFixIterations)
+	}
+	if !cfg.Verbose {
+		t.Error("expected Verbose to be true by default (noisy)")
+	}
+	if cfg.Command != "" {
+		t.Errorf("expected Command to be empty, got %q", cfg.Command)
+	}
+}
+
+func TestLoadConfig_MissingCodeReview(t *testing.T) {
+	dir := t.TempDir()
+	stubGitRemote(t, "https://github.com/testowner/testrepo.git", nil)
+
+	// Write config with no code_review section
+	configContent := `
+github:
+  owner: test
+  repo: test
+parallelism: 4
+`
+	writeFile(t, filepath.Join(dir, ".choo.yaml"), configContent)
+
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	// Should have defaults applied
+	if !cfg.CodeReview.Enabled {
+		t.Error("expected CodeReview.Enabled to default to true")
+	}
+	if cfg.CodeReview.Provider != ReviewProviderCodex {
+		t.Errorf("expected CodeReview.Provider to default to %q, got %q", ReviewProviderCodex, cfg.CodeReview.Provider)
+	}
+	if cfg.CodeReview.MaxFixIterations != 1 {
+		t.Errorf("expected CodeReview.MaxFixIterations to default to 1, got %d", cfg.CodeReview.MaxFixIterations)
+	}
+}
+
+func TestLoadConfig_PartialCodeReview(t *testing.T) {
+	dir := t.TempDir()
+	stubGitRemote(t, "https://github.com/testowner/testrepo.git", nil)
+
+	// Write config with partial code_review section
+	configContent := `
+github:
+  owner: test
+  repo: test
+code_review:
+  provider: claude
+  max_fix_iterations: 3
+`
+	writeFile(t, filepath.Join(dir, ".choo.yaml"), configContent)
+
+	cfg, err := LoadConfig(dir)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	// Explicit values should be used
+	if cfg.CodeReview.Provider != ReviewProviderClaude {
+		t.Errorf("expected Provider to be %q, got %q", ReviewProviderClaude, cfg.CodeReview.Provider)
+	}
+	if cfg.CodeReview.MaxFixIterations != 3 {
+		t.Errorf("expected MaxFixIterations to be 3, got %d", cfg.CodeReview.MaxFixIterations)
+	}
+
+	// Other fields should have defaults
+	if !cfg.CodeReview.Enabled {
+		t.Error("expected Enabled to default to true")
+	}
+	if !cfg.CodeReview.Verbose {
+		t.Error("expected Verbose to default to true")
 	}
 }
