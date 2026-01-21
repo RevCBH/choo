@@ -16,6 +16,7 @@ import (
 
 // mockJobManager implements JobManager for testing
 type mockJobManager struct {
+	mu            sync.RWMutex
 	jobs          map[string]*JobState
 	startErr      error
 	stopErr       error
@@ -36,6 +37,8 @@ func (m *mockJobManager) Start(ctx context.Context, cfg JobConfig) (string, erro
 	if m.startErr != nil {
 		return "", m.startErr
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	jobID := "job-" + time.Now().Format("20060102150405")
 	m.jobs[jobID] = &JobState{
 		ID:        jobID,
@@ -49,6 +52,8 @@ func (m *mockJobManager) Stop(ctx context.Context, jobID string, force bool) err
 	if m.stopErr != nil {
 		return m.stopErr
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.stoppedJobs[jobID] = true
 	if force {
 		m.forceStopped[jobID] = true
@@ -60,6 +65,8 @@ func (m *mockJobManager) Stop(ctx context.Context, jobID string, force bool) err
 }
 
 func (m *mockJobManager) GetJob(jobID string) (*JobState, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	job, ok := m.jobs[jobID]
 	if !ok {
 		return nil, errors.New("job not found")
@@ -68,6 +75,8 @@ func (m *mockJobManager) GetJob(jobID string) (*JobState, error) {
 }
 
 func (m *mockJobManager) ListJobs(statusFilter []string) ([]*JobSummary, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	var result []*JobSummary
 	for _, job := range m.jobs {
 		if len(statusFilter) > 0 {
@@ -100,6 +109,8 @@ func (m *mockJobManager) Subscribe(jobID string, fromSeq int) (<-chan Event, fun
 }
 
 func (m *mockJobManager) ActiveJobCount() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	count := 0
 	for _, job := range m.jobs {
 		if job.Status == "running" {
@@ -110,10 +121,20 @@ func (m *mockJobManager) ActiveJobCount() int {
 }
 
 func (m *mockJobManager) addJob(id string, status string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.jobs[id] = &JobState{
 		ID:        id,
 		Status:    status,
 		StartedAt: time.Now(),
+	}
+}
+
+func (m *mockJobManager) setJobStatus(id string, status string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if job, ok := m.jobs[id]; ok {
+		job.Status = status
 	}
 }
 
@@ -586,7 +607,7 @@ func TestGRPC_LifecycleShutdown_WaitForJobs(t *testing.T) {
 	// Simulate job completing during wait
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		jm.jobs["job-wait"].Status = "completed"
+		jm.setJobStatus("job-wait", "completed")
 	}()
 
 	resp, err := server.Shutdown(context.Background(), &apiv1.ShutdownRequest{
