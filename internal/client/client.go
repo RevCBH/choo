@@ -24,7 +24,7 @@ type Client struct {
 // The connection uses insecure credentials since Unix sockets
 // are protected by filesystem permissions.
 func New(socketPath string) (*Client, error) {
-	conn, err := grpc.Dial(
+	conn, err := grpc.NewClient(
 		"unix://"+socketPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)

@@ -15,7 +15,7 @@ func (db *DB) AppendEvent(runID string, eventType string, unitID *string, payloa
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	// Get next sequence number for this run
 	sequence, err := db.getNextSequenceInTx(tx, runID)

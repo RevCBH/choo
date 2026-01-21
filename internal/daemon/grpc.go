@@ -344,20 +344,18 @@ func (s *GRPCServer) Shutdown(ctx context.Context, req *apiv1.ShutdownRequest) (
 			// Wait for all jobs to complete naturally
 			ticker := time.NewTicker(100 * time.Millisecond)
 			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					if s.jobManager.ActiveJobCount() == 0 {
-						close(done)
-						return
-					}
+			for range ticker.C {
+				if s.jobManager.ActiveJobCount() == 0 {
+					close(done)
+					return
 				}
 			}
 		}()
 
 		select {
 		case <-done:
-			// All jobs completed gracefully
+			// All jobs completed gracefully - no action needed
+			_ = 0 // explicit no-op to satisfy linter
 		case <-time.After(timeout):
 			// Timeout - force stop remaining jobs
 			for jobID, cancel := range activeJobs {

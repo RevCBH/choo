@@ -289,12 +289,13 @@ func TestBroadcast_SlowSubscriber(t *testing.T) {
 	// Fast subscriber should receive events
 	timeout := time.After(time.Second)
 	received := 0
+outer:
 	for i := 0; i < 100; i++ {
 		select {
 		case <-fastCh:
 			received++
 		case <-timeout:
-			break
+			break outer
 		}
 	}
 

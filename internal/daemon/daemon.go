@@ -82,7 +82,9 @@ func (d *Daemon) Start(ctx context.Context) error {
 	// 3. Create Unix socket listener (remove stale socket first)
 	listener, err := d.setupSocket()
 	if err != nil {
-		d.pidFile.Release()
+		if releaseErr := d.pidFile.Release(); releaseErr != nil {
+			log.Printf("Error releasing PID file during cleanup: %v", releaseErr)
+		}
 		return fmt.Errorf("failed to setup socket: %w", err)
 	}
 	d.listener = listener

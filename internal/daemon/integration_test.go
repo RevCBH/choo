@@ -50,7 +50,7 @@ func setupIntegrationTest(t *testing.T) (*Server, apiv1.DaemonServiceClient, fun
 	}, 2*time.Second, 10*time.Millisecond)
 
 	// Create client connection
-	conn, err := grpc.Dial(
+	conn, err := grpc.NewClient(
 		"unix://"+socketPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)

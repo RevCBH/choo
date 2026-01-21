@@ -8,13 +8,6 @@ import (
 	"github.com/RevCBH/choo/internal/events"
 )
 
-// Subscription represents an active event subscription for a job.
-type Subscription struct {
-	JobID   string
-	Channel <-chan events.Event
-	cancel  func()
-}
-
 // subscriber holds a channel for sending events to a subscriber
 type subscriber struct {
 	ch     chan events.Event

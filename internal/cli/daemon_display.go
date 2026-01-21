@@ -105,33 +105,6 @@ func defaultSocketPath() string {
 	return filepath.Join(home, ".choo", "daemon.sock")
 }
 
-// formatDuration formats a duration in human-readable form (e.g., "2m30s")
-func formatDuration(d time.Duration) string {
-	// Truncate to seconds for display
-	d = d.Round(time.Second)
-
-	// Format based on magnitude
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	}
-	if d < time.Hour {
-		minutes := int(d.Minutes())
-		seconds := int(d.Seconds()) % 60
-		if seconds > 0 {
-			return fmt.Sprintf("%dm%ds", minutes, seconds)
-		}
-		return fmt.Sprintf("%dm", minutes)
-	}
-
-	// For durations >= 1 hour
-	hours := int(d.Hours())
-	minutes := int(d.Minutes()) % 60
-	if minutes > 0 {
-		return fmt.Sprintf("%dh%dm", hours, minutes)
-	}
-	return fmt.Sprintf("%dh", hours)
-}
-
 // formatTime formats a timestamp for display
 func formatTime(t time.Time) string {
 	// Use consistent time format: HH:MM:SS

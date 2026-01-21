@@ -157,7 +157,7 @@ func TestServer_SocketGRPCConnection(t *testing.T) {
 	}, time.Second, 10*time.Millisecond)
 
 	// Connect via gRPC
-	conn, err := grpc.Dial(
+	conn, err := grpc.NewClient(
 		"unix://"+socketPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
