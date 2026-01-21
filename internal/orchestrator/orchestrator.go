@@ -7,11 +7,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RevCBH/choo/internal/config"
 	"github.com/RevCBH/choo/internal/discovery"
 	"github.com/RevCBH/choo/internal/escalate"
 	"github.com/RevCBH/choo/internal/events"
 	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/github"
+	"github.com/RevCBH/choo/internal/provider"
 	"github.com/RevCBH/choo/internal/scheduler"
 	"github.com/RevCBH/choo/internal/worker"
 )
@@ -81,6 +83,18 @@ type Config struct {
 
 	// FeatureMode is true when operating in feature mode
 	FeatureMode bool
+
+	// DefaultProvider is the provider type from --provider flag
+	// Used when unit frontmatter doesn't specify a provider
+	DefaultProvider string
+
+	// ForceTaskProvider overrides all provider selection when non-empty
+	// Set via --force-task-provider CLI flag
+	ForceTaskProvider string
+
+	// ProviderConfig contains provider-specific settings from .choo.yaml
+	// Includes provider type default and per-provider command overrides
+	ProviderConfig config.ProviderConfig
 }
 
 // Dependencies bundles external dependencies for injection
@@ -317,9 +331,16 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 		Events: o.bus,
 		Git:    o.git,
 		GitHub: o.github,
+		// Note: Provider is not set here - factory handles per-unit resolution
 	}
 
-	o.pool = worker.NewPool(o.cfg.Parallelism, workerCfg, workerDeps)
+	// Use factory-based pool construction for per-unit provider resolution
+	o.pool = worker.NewPoolWithFactory(
+		o.cfg.Parallelism,
+		workerCfg,
+		workerDeps,
+		o.createProviderFactory(),
+	)
 
 	// Subscribe to worker completion events
 	o.bus.Subscribe(o.handleEvent)
@@ -555,6 +576,55 @@ func buildGraphData(units []*discovery.Unit, levels [][]string) map[string]any {
 		"nodes":  nodes,
 		"edges":  edges,
 		"levels": levelsData,
+	}
+}
+
+// resolveProviderForUnit determines which provider to use for a unit
+// Precedence (highest to lowest):
+// 1. --force-task-provider flag
+// 2. Unit frontmatter provider field
+// 3. --provider CLI flag (stored in DefaultProvider)
+// 4. RALPH_PROVIDER env var (merged into ProviderConfig during config loading)
+// 5. .choo.yaml provider.type (in ProviderConfig)
+// 6. Default: claude
+func (o *Orchestrator) resolveProviderForUnit(unit *discovery.Unit) (provider.Provider, error) {
+	var providerType provider.ProviderType
+
+	// 1. --force-task-provider overrides everything
+	if o.cfg.ForceTaskProvider != "" {
+		providerType = provider.ProviderType(o.cfg.ForceTaskProvider)
+	} else if unit.Provider != "" {
+		// 2. Per-unit frontmatter
+		providerType = provider.ProviderType(unit.Provider)
+	} else if o.cfg.DefaultProvider != "" {
+		// 3. --provider CLI flag
+		providerType = provider.ProviderType(o.cfg.DefaultProvider)
+	} else if o.cfg.ProviderConfig.Type != "" {
+		// 4-5. Env var and .choo.yaml (merged during config loading)
+		providerType = provider.ProviderType(o.cfg.ProviderConfig.Type)
+	} else {
+		// 6. Default to claude
+		providerType = provider.ProviderClaude
+	}
+
+	// Get provider-specific command override if configured
+	command := ""
+	if o.cfg.ProviderConfig.Providers != nil {
+		if settings, ok := o.cfg.ProviderConfig.Providers[config.ProviderType(providerType)]; ok {
+			command = settings.Command
+		}
+	}
+
+	return provider.FromConfig(provider.Config{
+		Type:    providerType,
+		Command: command,
+	})
+}
+
+// createProviderFactory returns a factory function that resolves providers for units
+func (o *Orchestrator) createProviderFactory() worker.ProviderFactory {
+	return func(unit *discovery.Unit) (provider.Provider, error) {
+		return o.resolveProviderForUnit(unit)
 	}
 }
 

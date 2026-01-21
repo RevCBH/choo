@@ -92,6 +92,7 @@ func DiscoverUnit(unitDir string) (*Unit, error) {
 		ID:        filepath.Base(unitDir),
 		Path:      unitDir,
 		DependsOn: unitFrontmatter.DependsOn,
+		Provider:  unitFrontmatter.Provider,
 		Branch:    unitFrontmatter.OrchBranch,
 		Worktree:  unitFrontmatter.OrchWorktree,
 		PRNumber:  unitFrontmatter.OrchPRNumber,
