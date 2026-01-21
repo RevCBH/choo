@@ -14,6 +14,10 @@ generating specifications with review, generating tasks, and managing
 feature workflow state.`,
 	}
 
-	// Subcommands will be added in their respective tasks
+	// Add subcommands
+	cmd.AddCommand(
+		NewFeatureStartCmd(app),
+	)
+
 	return cmd
 }
