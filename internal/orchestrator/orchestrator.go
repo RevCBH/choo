@@ -3,6 +3,8 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -351,6 +353,19 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 
 		case scheduler.ReasonAllComplete:
 			// All units finished successfully
+			// Create PR if in feature mode
+			if o.cfg.FeatureMode && !o.cfg.NoPR {
+				prURL, err := o.createFeaturePR(ctx)
+				if err != nil {
+					o.bus.Emit(events.NewEvent(events.OrchFailed, "").
+						WithError(fmt.Errorf("failed to create PR: %w", err)))
+					return o.buildResult(startTime, err), err
+				}
+				if prURL != "" {
+					fmt.Printf("\nPR created: %s\n", prURL)
+				}
+			}
+
 			o.bus.Emit(events.NewEvent(events.OrchCompleted, ""))
 			return o.buildResult(startTime, nil), nil
 
@@ -612,4 +627,65 @@ func (o *Orchestrator) dryRun(units []*discovery.Unit) (*Result, error) {
 	return &Result{
 		TotalUnits: len(units),
 	}, nil
+}
+
+// prURLPattern matches GitHub PR URLs
+var prURLPattern = regexp.MustCompile(`https://github\.com/[^/]+/[^/]+/pull/\d+`)
+
+// createFeaturePR creates a PR for the feature branch using Claude
+func (o *Orchestrator) createFeaturePR(ctx context.Context) (string, error) {
+	if !o.cfg.FeatureMode || o.cfg.FeatureBranch == "" {
+		return "", nil // Not in feature mode, nothing to do
+	}
+
+	if o.cfg.NoPR {
+		return "", nil // PR creation disabled
+	}
+
+	// Push the feature branch first
+	if err := o.pushFeatureBranch(ctx); err != nil {
+		return "", fmt.Errorf("failed to push feature branch: %w", err)
+	}
+
+	// Collect completed unit names
+	var completedUnits []string
+	for _, unit := range o.units {
+		completedUnits = append(completedUnits, unit.ID)
+	}
+
+	// Build prompt for Claude
+	prompt := worker.BuildFeaturePRPrompt(o.cfg.FeatureBranch, o.cfg.TargetBranch, completedUnits)
+
+	// Invoke Claude to create the PR
+	cmd := exec.CommandContext(ctx, "claude",
+		"--dangerously-skip-permissions",
+		"-p", prompt,
+	)
+	cmd.Dir = o.cfg.RepoRoot
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("claude failed to create PR: %w", err)
+	}
+
+	// Extract PR URL from output
+	prURL := prURLPattern.FindString(string(output))
+	if prURL == "" {
+		return "", fmt.Errorf("could not find PR URL in Claude output")
+	}
+
+	// Emit event
+	o.bus.Emit(events.NewEvent(events.PRCreated, "").
+		WithPayload(map[string]any{
+			"url":    prURL,
+			"branch": o.cfg.FeatureBranch,
+			"target": o.cfg.TargetBranch,
+		}))
+
+	return prURL, nil
+}
+
+// pushFeatureBranch pushes the feature branch to remote
+func (o *Orchestrator) pushFeatureBranch(ctx context.Context) error {
+	return git.PushBranch(ctx, o.cfg.RepoRoot, o.cfg.FeatureBranch)
 }

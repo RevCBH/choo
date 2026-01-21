@@ -114,6 +114,45 @@ After making changes:
 The orchestrator will continue polling for approval.`, prURL, commentText.String())
 }
 
+// BuildFeaturePRPrompt creates a prompt for Claude to create a PR for a feature branch
+func BuildFeaturePRPrompt(featureBranch, targetBranch string, completedUnits []string) string {
+	return fmt.Sprintf(`All units for this feature are complete and merged into the feature branch.
+
+Create a pull request to merge the feature into %s:
+- Source branch: %s
+- Target branch: %s
+
+Completed units:
+%s
+
+Use the gh CLI:
+  gh pr create --base %s --head %s --title "..." --body "..."
+
+Guidelines for the PR:
+- Title: Descriptive summary of the entire feature
+- Body:
+  - Overview of what was implemented across all units
+  - List of units that were completed
+  - Key changes and design decisions
+  - Any notes for reviewers
+
+Print the PR URL when done so the orchestrator can capture it.`, targetBranch, featureBranch, targetBranch, formatUnitList(completedUnits), targetBranch, featureBranch)
+}
+
+// formatUnitList formats a list of completed units for the PR prompt
+func formatUnitList(units []string) string {
+	if len(units) == 0 {
+		return "(no units)"
+	}
+	var result strings.Builder
+	for _, u := range units {
+		result.WriteString("- ")
+		result.WriteString(u)
+		result.WriteString("\n")
+	}
+	return result.String()
+}
+
 // formatFileList formats a list of files for inclusion in prompts
 func formatFileList(files []string) string {
 	if len(files) == 0 {
