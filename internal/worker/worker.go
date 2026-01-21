@@ -370,6 +370,7 @@ func (w *Worker) mergeToFeatureBranch(ctx context.Context) error {
 		return err
 	}
 
+
 	// 5. Emit UnitMerged event
 	if w.events != nil {
 		evt := events.NewEvent(events.UnitMerged, w.unit.ID).WithPayload(map[string]any{
