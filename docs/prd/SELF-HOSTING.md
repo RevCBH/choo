@@ -1,10 +1,21 @@
+---
+prd_id: self-hosting
+title: "Choo Self-Hosting"
+status: complete
+depends_on:
+  - mvp-orchestrator
+# Orchestrator-managed fields
+# feature_branch: n/a (implemented before feature workflow)
+# feature_status: complete
+---
+
 # Choo Self-Hosting - Product Requirements Document
 
 ## Document Info
 
 | Field   | Value      |
 | ------- | ---------- |
-| Status  | Draft      |
+| Status  | Complete   |
 | Author  | Claude     |
 | Created | 2026-01-19 |
 | Target  | v0.2       |
@@ -320,11 +331,11 @@ func (s *Slack) Name() string {
 
 ### 3.6 Acceptance Criteria
 
-- [ ] `Escalator` interface defined with `Escalate` method
-- [ ] `Terminal` escalator prints to stderr with severity indicators
-- [ ] `Slack` escalator posts to webhook URL
-- [ ] `Multi` escalator fans out to multiple backends
-- [ ] Escalation includes unit, title, message, and context map
+- [x] `Escalator` interface defined with `Escalate` method
+- [x] `Terminal` escalator prints to stderr with severity indicators
+- [x] `Slack` escalator posts to webhook URL
+- [x] `Multi` escalator fans out to multiple backends
+- [x] Escalation includes unit, title, message, and context map
 
 ---
 
@@ -454,11 +465,11 @@ func (o *Orchestrator) executeUnit(ctx context.Context, unit *discovery.Unit) er
 
 ### 4.4 Acceptance Criteria
 
-- [ ] `choo run specs/tasks/` discovers units and executes them
-- [ ] Parallelism flag controls concurrent workers
-- [ ] Events emit for unit lifecycle
-- [ ] Escalator injected into workers
-- [ ] Graceful shutdown on SIGINT
+- [x] `choo run specs/tasks/` discovers units and executes them
+- [x] Parallelism flag controls concurrent workers
+- [x] Events emit for unit lifecycle
+- [x] Escalator injected into workers
+- [x] Graceful shutdown on SIGINT
 
 ---
 
@@ -517,304 +528,14 @@ Claude Code handles the complete git workflow after task completion:
                                  └─────────────┘
 ```
 
-### 5.3 Implementation
+### 5.3 Acceptance Criteria
 
-#### 5.3.1 Prompt Builder
-
-```go
-// internal/worker/prompt_git.go
-
-package worker
-
-import "fmt"
-
-// BuildCommitPrompt creates a prompt for Claude to commit changes
-func BuildCommitPrompt(taskTitle string, files []string) string {
-    return fmt.Sprintf(`Task "%s" is complete.
-
-Stage and commit the changes:
-1. Run: git add -A
-2. Run: git commit with a conventional commit message
-
-Guidelines for the commit message:
-- Use conventional commit format (feat:, fix:, refactor:, etc.)
-- First line: concise summary of what changed (50 chars or less)
-- If needed, add a blank line then detailed explanation
-- Explain WHY, not just WHAT
-
-Files changed:
-%s
-
-Do NOT push yet. Just stage and commit.`, taskTitle, formatFileList(files))
-}
-
-// BuildPushPrompt creates a prompt for Claude to push the branch
-func BuildPushPrompt(branch string) string {
-    return fmt.Sprintf(`Push the branch to origin:
-
-git push -u origin %s
-
-If the push fails due to a transient error (network, etc.), that's okay -
-the orchestrator will retry. Just attempt the push.`, branch)
-}
-
-// BuildPRPrompt creates a prompt for Claude to create a PR
-func BuildPRPrompt(branch, targetBranch, unitTitle string) string {
-    return fmt.Sprintf(`All tasks for unit "%s" are complete.
-
-Create a pull request:
-- Source branch: %s
-- Target branch: %s
-
-Use the gh CLI:
-  gh pr create --base %s --head %s --title "..." --body "..."
-
-Guidelines for the PR:
-- Title: Clear, concise summary of the unit's purpose
-- Body:
-  - Brief overview of what was implemented
-  - Key changes or decisions made
-  - Any notes for reviewers
-
-Print the PR URL when done so the orchestrator can capture it.`, unitTitle, branch, targetBranch, targetBranch, branch)
-}
-
-func formatFileList(files []string) string {
-    if len(files) == 0 {
-        return "(no files listed)"
-    }
-    result := ""
-    for _, f := range files {
-        result += "- " + f + "\n"
-    }
-    return result
-}
-```
-
-#### 5.3.2 Retry with Backoff
-
-```go
-// internal/worker/retry.go
-
-package worker
-
-import (
-    "context"
-    "math"
-    "time"
-)
-
-// RetryConfig controls retry behavior
-type RetryConfig struct {
-    MaxAttempts     int
-    InitialBackoff  time.Duration
-    MaxBackoff      time.Duration
-    BackoffMultiply float64
-}
-
-var DefaultRetryConfig = RetryConfig{
-    MaxAttempts:     3,
-    InitialBackoff:  1 * time.Second,
-    MaxBackoff:      30 * time.Second,
-    BackoffMultiply: 2.0,
-}
-
-// RetryResult indicates what happened
-type RetryResult struct {
-    Success  bool
-    Attempts int
-    LastErr  error
-}
-
-// RetryWithBackoff retries an operation with exponential backoff
-// It retries on ANY error - the assumption is that Claude failures
-// are transient (network, rate limits, etc.)
-func RetryWithBackoff(
-    ctx context.Context,
-    cfg RetryConfig,
-    operation func(ctx context.Context) error,
-) RetryResult {
-    var lastErr error
-    backoff := cfg.InitialBackoff
-
-    for attempt := 1; attempt <= cfg.MaxAttempts; attempt++ {
-        err := operation(ctx)
-        if err == nil {
-            return RetryResult{Success: true, Attempts: attempt}
-        }
-
-        lastErr = err
-
-        if attempt < cfg.MaxAttempts {
-            select {
-            case <-ctx.Done():
-                return RetryResult{Success: false, Attempts: attempt, LastErr: ctx.Err()}
-            case <-time.After(backoff):
-            }
-
-            // Exponential backoff
-            backoff = time.Duration(float64(backoff) * cfg.BackoffMultiply)
-            if backoff > cfg.MaxBackoff {
-                backoff = cfg.MaxBackoff
-            }
-        }
-    }
-
-    return RetryResult{Success: false, Attempts: cfg.MaxAttempts, LastErr: lastErr}
-}
-```
-
-#### 5.3.3 Worker Integration
-
-```go
-// internal/worker/git_delegate.go
-
-package worker
-
-import (
-    "context"
-    "fmt"
-    "regexp"
-    "strings"
-
-    "choo/internal/escalate"
-)
-
-// commitViaClaudeCode invokes Claude to stage and commit
-func (w *Worker) commitViaClaudeCode(ctx context.Context, taskTitle string) error {
-    files, _ := w.git.GetChangedFiles(ctx)
-    prompt := BuildCommitPrompt(taskTitle, files)
-
-    result := RetryWithBackoff(ctx, DefaultRetryConfig, func(ctx context.Context) error {
-        if err := w.invokeClaude(ctx, prompt); err != nil {
-            return err
-        }
-
-        // Verify commit was created
-        hasCommit, err := w.git.HasNewCommit(ctx)
-        if err != nil {
-            return err
-        }
-        if !hasCommit {
-            return fmt.Errorf("claude did not create a commit")
-        }
-        return nil
-    })
-
-    if !result.Success {
-        w.escalator.Escalate(ctx, escalate.Escalation{
-            Severity: escalate.SeverityBlocking,
-            Unit:     w.unit.ID,
-            Title:    "Failed to commit changes",
-            Message:  fmt.Sprintf("Claude could not commit after %d attempts", result.Attempts),
-            Context: map[string]string{
-                "task":  taskTitle,
-                "error": result.LastErr.Error(),
-            },
-        })
-        return result.LastErr
-    }
-
-    return nil
-}
-
-// pushViaClaudeCode invokes Claude to push the branch
-func (w *Worker) pushViaClaudeCode(ctx context.Context) error {
-    prompt := BuildPushPrompt(w.branch)
-
-    result := RetryWithBackoff(ctx, DefaultRetryConfig, func(ctx context.Context) error {
-        if err := w.invokeClaude(ctx, prompt); err != nil {
-            return err
-        }
-
-        // Verify branch exists on remote
-        exists, err := w.git.BranchExistsOnRemote(ctx, w.branch)
-        if err != nil {
-            return err
-        }
-        if !exists {
-            return fmt.Errorf("branch not found on remote after push")
-        }
-        return nil
-    })
-
-    if !result.Success {
-        w.escalator.Escalate(ctx, escalate.Escalation{
-            Severity: escalate.SeverityBlocking,
-            Unit:     w.unit.ID,
-            Title:    "Failed to push branch",
-            Message:  fmt.Sprintf("Claude could not push after %d attempts", result.Attempts),
-            Context: map[string]string{
-                "branch": w.branch,
-                "error":  result.LastErr.Error(),
-            },
-        })
-        return result.LastErr
-    }
-
-    w.bus.Emit(events.NewEvent(events.BranchPushed, w.unit.ID).WithPayload(map[string]string{
-        "branch": w.branch,
-    }))
-
-    return nil
-}
-
-// createPRViaClaudeCode invokes Claude to create the PR
-func (w *Worker) createPRViaClaudeCode(ctx context.Context) (string, error) {
-    prompt := BuildPRPrompt(w.branch, w.cfg.TargetBranch, w.unit.Title)
-
-    var prURL string
-
-    result := RetryWithBackoff(ctx, DefaultRetryConfig, func(ctx context.Context) error {
-        output, err := w.invokeClaudeWithOutput(ctx, prompt)
-        if err != nil {
-            return err
-        }
-
-        // Extract PR URL from output
-        url := extractPRURL(output)
-        if url == "" {
-            return fmt.Errorf("could not find PR URL in claude output")
-        }
-
-        prURL = url
-        return nil
-    })
-
-    if !result.Success {
-        w.escalator.Escalate(ctx, escalate.Escalation{
-            Severity: escalate.SeverityBlocking,
-            Unit:     w.unit.ID,
-            Title:    "Failed to create PR",
-            Message:  fmt.Sprintf("Claude could not create PR after %d attempts", result.Attempts),
-            Context: map[string]string{
-                "branch": w.branch,
-                "target": w.cfg.TargetBranch,
-                "error":  result.LastErr.Error(),
-            },
-        })
-        return "", result.LastErr
-    }
-
-    return prURL, nil
-}
-
-var prURLPattern = regexp.MustCompile(`https://github\.com/[^/]+/[^/]+/pull/\d+`)
-
-func extractPRURL(output string) string {
-    match := prURLPattern.FindString(output)
-    return match
-}
-```
-
-### 5.4 Acceptance Criteria
-
-- [ ] Claude writes commit messages based on actual changes
-- [ ] Claude pushes branches via `git push`
-- [ ] Claude creates PRs via `gh pr create` with contextual descriptions
-- [ ] Retry with exponential backoff on transient failures
-- [ ] Escalate to user after max retries (no fallback to direct operations)
-- [ ] PR URL captured from Claude's output
+- [x] Claude writes commit messages based on actual changes
+- [x] Claude pushes branches via `git push`
+- [x] Claude creates PRs via `gh pr create` with contextual descriptions
+- [x] Retry with exponential backoff on transient failures
+- [x] Escalate to user after max retries (no fallback to direct operations)
+- [x] PR URL captured from Claude's output
 
 ---
 
@@ -850,167 +571,13 @@ PRs are created but choo doesn't wait for approval. The review emoji state machi
                                    └─────────────┘
 ```
 
-### 6.3 Implementation
+### 6.3 Acceptance Criteria
 
-```go
-// internal/github/review.go
-
-type ReviewStatus string
-
-const (
-    ReviewPending    ReviewStatus = "pending"
-    ReviewInProgress ReviewStatus = "in_progress"
-    ReviewApproved   ReviewStatus = "approved"
-    ReviewChanges    ReviewStatus = "changes_requested"
-)
-
-func (c *Client) PollReview(ctx context.Context, prNumber int) (<-chan ReviewStatus, error) {
-    ch := make(chan ReviewStatus)
-
-    go func() {
-        defer close(ch)
-        ticker := time.NewTicker(30 * time.Second)
-        defer ticker.Stop()
-
-        var lastStatus ReviewStatus
-        for {
-            select {
-            case <-ctx.Done():
-                return
-            case <-ticker.C:
-                status, err := c.GetReviewStatus(prNumber)
-                if err != nil {
-                    continue // retry on error
-                }
-
-                if status != lastStatus {
-                    ch <- status
-                    lastStatus = status
-                }
-
-                if status == ReviewApproved {
-                    return
-                }
-            }
-        }
-    }()
-
-    return ch, nil
-}
-
-func (c *Client) GetReviewStatus(prNumber int) (ReviewStatus, error) {
-    reactions, err := c.getReactions(prNumber)
-    if err != nil {
-        return "", err
-    }
-
-    hasEyes := false
-    hasThumbsUp := false
-    for _, r := range reactions {
-        switch r.Content {
-        case "eyes":
-            hasEyes = true
-        case "+1":
-            hasThumbsUp = true
-        }
-    }
-
-    if hasThumbsUp {
-        return ReviewApproved, nil
-    }
-    if hasEyes {
-        return ReviewInProgress, nil
-    }
-
-    comments, err := c.getPRComments(prNumber)
-    if err != nil {
-        return "", err
-    }
-
-    if len(comments) > 0 {
-        return ReviewChanges, nil
-    }
-
-    return ReviewPending, nil
-}
-```
-
-### 6.4 Feedback Handling via Claude
-
-When status is `ReviewChanges`, delegate feedback response to Claude:
-
-```go
-// internal/worker/prompt_git.go
-
-func BuildFeedbackPrompt(prURL string, comments []github.Comment) string {
-    var commentText strings.Builder
-    for _, c := range comments {
-        commentText.WriteString(fmt.Sprintf("- @%s: %s\n", c.Author, c.Body))
-        if c.Path != "" {
-            commentText.WriteString(fmt.Sprintf("  (on %s:%d)\n", c.Path, c.Line))
-        }
-    }
-
-    return fmt.Sprintf(`PR %s has received feedback. Please address the following comments:
-
-%s
-
-After making changes:
-1. Stage and commit with a message like "address review feedback"
-2. Push the changes
-
-The orchestrator will continue polling for approval.`, prURL, commentText.String())
-}
-```
-
-```go
-// internal/worker/review.go
-
-func (w *Worker) handleFeedback(ctx context.Context, prNumber int, prURL string) error {
-    comments, err := w.github.GetPRComments(prNumber)
-    if err != nil {
-        return err
-    }
-
-    prompt := BuildFeedbackPrompt(prURL, comments)
-
-    // Delegate to Claude to address feedback
-    result := RetryWithBackoff(ctx, DefaultRetryConfig, func(ctx context.Context) error {
-        return w.invokeClaude(ctx, prompt)
-    })
-
-    if !result.Success {
-        w.escalator.Escalate(ctx, escalate.Escalation{
-            Severity: escalate.SeverityBlocking,
-            Unit:     w.unit.ID,
-            Title:    "Failed to address PR feedback",
-            Message:  fmt.Sprintf("Claude could not address feedback after %d attempts", result.Attempts),
-            Context: map[string]string{
-                "pr":    prURL,
-                "error": result.LastErr.Error(),
-            },
-        })
-        return result.LastErr
-    }
-
-    // Claude should have committed and pushed
-    // Verify push happened
-    if _, err := w.git.BranchExistsOnRemote(ctx, w.branch); err != nil {
-        return fmt.Errorf("branch not updated on remote after feedback: %w", err)
-    }
-
-    w.bus.Emit(events.NewEvent(events.PRFeedbackAddressed, w.unit.ID).WithPR(prNumber))
-    return nil
-}
-```
-
-### 6.5 Acceptance Criteria
-
-- [ ] Poll PR reactions every 30 seconds
-- [ ] Emit events on status transitions
-- [ ] Delegate feedback response to Claude (commit + push)
-- [ ] Escalate if Claude cannot address feedback
-- [ ] Proceed to merge on approval
+- [x] Poll PR reactions every 30 seconds
+- [x] Emit events on status transitions
+- [x] Delegate feedback response to Claude (commit + push)
+- [x] Escalate if Claude cannot address feedback
+- [x] Proceed to merge on approval
 
 ---
 
@@ -1055,121 +622,15 @@ When multiple units merge to main, later merges may conflict. The system needs t
                     └───────────┘            └───────────┘
 ```
 
-### 7.3 Implementation
+### 7.3 Acceptance Criteria
 
-```go
-// internal/worker/prompt_git.go
-
-func BuildConflictPrompt(targetBranch string, conflictedFiles []string) string {
-    return fmt.Sprintf(`The rebase onto %s resulted in merge conflicts.
-
-Conflicted files:
-%s
-
-Please resolve all conflicts:
-1. Open each conflicted file
-2. Find the conflict markers (<<<<<<, =======, >>>>>>>)
-3. Edit to resolve - keep the correct code, remove markers
-4. Stage resolved files: git add <file>
-5. Continue the rebase: git rebase --continue
-
-If the rebase continues successfully, do NOT push - the orchestrator will handle that.
-
-If you cannot resolve a conflict, explain why in your response.`, targetBranch, formatFileList(conflictedFiles))
-}
-```
-
-```go
-// internal/worker/merge.go
-
-func (w *Worker) mergeWithConflictResolution(ctx context.Context) error {
-    // Fetch latest
-    if err := w.git.Fetch(ctx); err != nil {
-        return fmt.Errorf("fetch failed: %w", err)
-    }
-
-    // Try rebase
-    result, err := w.git.RebaseOnto(ctx, w.cfg.TargetBranch)
-    if err != nil {
-        return fmt.Errorf("rebase failed: %w", err)
-    }
-
-    if !result.HasConflicts {
-        // No conflicts, force push and merge
-        return w.forcePushAndMerge(ctx)
-    }
-
-    // Emit conflict event
-    w.bus.Emit(events.NewEvent(events.PRConflict, w.unit.ID).WithPR(w.prNumber).WithPayload(map[string]any{
-        "files": result.Files,
-    }))
-
-    // Delegate conflict resolution to Claude
-    prompt := BuildConflictPrompt(w.cfg.TargetBranch, result.Files)
-
-    retryResult := RetryWithBackoff(ctx, DefaultRetryConfig, func(ctx context.Context) error {
-        if err := w.invokeClaude(ctx, prompt); err != nil {
-            return err
-        }
-
-        // Verify rebase completed (no longer in rebase state)
-        inRebase, err := w.git.IsRebaseInProgress(ctx)
-        if err != nil {
-            return err
-        }
-        if inRebase {
-            // Claude didn't complete the rebase
-            w.git.AbortRebase(ctx)
-            return fmt.Errorf("claude did not complete rebase")
-        }
-        return nil
-    })
-
-    if !retryResult.Success {
-        w.git.AbortRebase(ctx) // Clean up
-
-        w.escalator.Escalate(ctx, escalate.Escalation{
-            Severity: escalate.SeverityBlocking,
-            Unit:     w.unit.ID,
-            Title:    "Failed to resolve merge conflicts",
-            Message:  fmt.Sprintf("Claude could not resolve conflicts after %d attempts", retryResult.Attempts),
-            Context: map[string]string{
-                "files":  strings.Join(result.Files, ", "),
-                "target": w.cfg.TargetBranch,
-                "error":  retryResult.LastErr.Error(),
-            },
-        })
-        return retryResult.LastErr
-    }
-
-    return w.forcePushAndMerge(ctx)
-}
-
-func (w *Worker) forcePushAndMerge(ctx context.Context) error {
-    // Force push the rebased branch
-    if err := w.git.ForcePushWithLease(ctx, w.branch); err != nil {
-        return fmt.Errorf("force push failed: %w", err)
-    }
-
-    // Merge via GitHub API
-    if err := w.github.Merge(w.prNumber); err != nil {
-        return fmt.Errorf("merge failed: %w", err)
-    }
-
-    w.bus.Emit(events.NewEvent(events.PRMerged, w.unit.ID).WithPR(w.prNumber))
-    return nil
-}
-```
-
-### 7.4 Acceptance Criteria
-
-- [ ] Detect merge conflicts during rebase
-- [ ] Delegate conflict resolution to Claude (not orchestrator)
-- [ ] Verify rebase completed before continuing
-- [ ] Retry with backoff on failure
-- [ ] Escalate to user after max retries (no fallback)
-- [ ] Force push with lease after successful resolution
-- [ ] Emit PRConflict and PRMerged events
+- [x] Detect merge conflicts during rebase
+- [x] Delegate conflict resolution to Claude (not orchestrator)
+- [x] Verify rebase completed before continuing
+- [x] Retry with backoff on failure
+- [x] Escalate to user after max retries (no fallback)
+- [x] Force push with lease after successful resolution
+- [x] Emit PRConflict and PRMerged events
 
 ---
 
@@ -1226,51 +687,10 @@ jobs:
           version: latest
 ```
 
-### 8.3 Status Check Integration
+### 8.3 Acceptance Criteria
 
-```go
-// internal/github/checks.go
-
-type CheckStatus string
-
-const (
-    CheckPending CheckStatus = "pending"
-    CheckSuccess CheckStatus = "success"
-    CheckFailure CheckStatus = "failure"
-)
-
-func (c *Client) GetCheckStatus(ctx context.Context, ref string) (CheckStatus, error) {
-    runs, err := c.getCheckRuns(ref)
-    if err != nil {
-        return "", err
-    }
-
-    allComplete := true
-    anyFailed := false
-
-    for _, run := range runs {
-        if run.Status != "completed" {
-            allComplete = false
-        }
-        if run.Conclusion == "failure" {
-            anyFailed = true
-        }
-    }
-
-    if anyFailed {
-        return CheckFailure, nil
-    }
-    if !allComplete {
-        return CheckPending, nil
-    }
-    return CheckSuccess, nil
-}
-```
-
-### 8.4 Acceptance Criteria
-
-- [ ] CI runs on all PRs
-- [ ] Tests, vet, and lint all pass
+- [x] CI runs on all PRs
+- [x] Tests, vet, and lint all pass
 - [ ] Optional: block merge until CI passes
 
 ---
@@ -1287,72 +707,6 @@ func (c *Client) GetCheckStatus(ctx context.Context, ref string) (CheckStatus, e
 | review-polling | Poll loop, feedback delegation | 150 | claude-git |
 | conflict-resolution | Rebase, delegation, verification | 150 | claude-git |
 | ci | GitHub Actions workflow | 100 | - |
-
-### 9.2 Task Sequence
-
-```
-         ┌─────────────┐
-         │ escalation  │
-         └──────┬──────┘
-                │
-         ┌──────┴──────┐
-         ▼             ▼
-   ┌───────────┐ ┌───────────┐
-   │orchestrator│ │claude-git │
-   └─────┬─────┘ └─────┬─────┘
-         │             │
-         │      ┌──────┴──────┐
-         │      ▼             ▼
-         │ ┌────────────┐ ┌────────────┐
-         │ │  review-   │ │ conflict-  │
-         │ │  polling   │ │ resolution │
-         │ └────────────┘ └────────────┘
-         │
-         └─────────────────────┐
-                               ▼
-                          ┌────────┐
-                          │   ci   │
-                          └────────┘
-```
-
-### 9.3 Spec File Structure
-
-```
-specs/
-├── README.md
-├── completed/           # v0.1 archived specs
-└── tasks/
-    ├── escalation/
-    │   ├── IMPLEMENTATION_PLAN.md
-    │   ├── 01-interface.md
-    │   ├── 02-terminal.md
-    │   └── 03-multi.md
-    ├── orchestrator/
-    │   ├── IMPLEMENTATION_PLAN.md
-    │   ├── 01-orchestrator-type.md
-    │   ├── 02-main-loop.md
-    │   └── 03-wire-cli.md
-    ├── claude-git/
-    │   ├── IMPLEMENTATION_PLAN.md
-    │   ├── 01-prompts.md
-    │   ├── 02-commit-delegate.md
-    │   ├── 03-push-delegate.md
-    │   ├── 04-pr-delegate.md
-    │   └── 05-verification.md
-    ├── review-polling/
-    │   ├── IMPLEMENTATION_PLAN.md
-    │   ├── 01-poll-loop.md
-    │   ├── 02-status-detection.md
-    │   └── 03-feedback-delegate.md
-    ├── conflict-resolution/
-    │   ├── IMPLEMENTATION_PLAN.md
-    │   ├── 01-detect-conflicts.md
-    │   ├── 02-resolution-delegate.md
-    │   └── 03-verification.md
-    └── ci/
-        ├── IMPLEMENTATION_PLAN.md
-        └── 01-github-actions.md
-```
 
 ---
 
@@ -1387,49 +741,7 @@ merge:
 
 ---
 
-## 11. Testing Strategy
-
-### 11.1 Unit Tests
-
-| Package | Tests |
-|---------|-------|
-| escalate | Interface compliance, Multi fan-out |
-| orchestrator | Loop termination, dispatch ordering |
-| worker | Prompt generation, retry logic, verification |
-| github | Review status parsing, check status |
-
-### 11.2 Integration Tests
-
-| Scenario | Description |
-|----------|-------------|
-| Happy path | Single unit: discover → execute → commit → push → PR → merge |
-| Commit failure | Mock Claude failure, verify escalation |
-| Push failure | Network failure, verify retry then escalation |
-| PR feedback | Mock comments, verify Claude delegation |
-| Conflict resolution | Inject conflict, verify Claude delegation |
-| Escalation | Verify Terminal and Multi escalators |
-
-### 11.3 Self-Hosting Test
-
-Ultimate test: `choo run specs/tasks/` on its own codebase.
-
----
-
-## 12. Resolved Questions
-
-1. **PR Creation**: Delegated to Claude via `gh pr create`. Claude writes contextual titles and descriptions.
-
-2. **Commit Messages**: Delegated to Claude. Claude writes conventional commits based on actual changes.
-
-3. **Git Operations**: Orchestrator verifies outcomes, Claude executes operations (stage, commit, push).
-
-4. **Failure Handling**: Retry with exponential backoff for transient failures. Escalate to user after max retries (no fallback to direct operations).
-
-5. **Escalation Backends**: Clean `Escalator` interface supports Terminal (default), Slack, or custom webhooks.
-
----
-
-## 13. Success Metrics
+## 11. Success Metrics
 
 | Metric | Target |
 |--------|--------|

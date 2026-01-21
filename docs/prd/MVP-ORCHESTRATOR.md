@@ -1,13 +1,23 @@
+---
+prd_id: mvp-orchestrator
+title: "Ralph Orchestrator - Core MVP"
+status: complete
+depends_on: []
+# Orchestrator-managed fields
+# feature_branch: n/a (implemented before feature workflow)
+# feature_status: complete
+---
+
 # Ralph Orchestrator - Product Design Specification
 
 ## Document Info
 
 | Field   | Value      |
 | ------- | ---------- |
-| Status  | Draft      |
+| Status  | Complete   |
 | Author  | Bennett    |
 | Created | 2026-01-18 |
-| Target  | MVP        |
+| Target  | MVP (v0.1) |
 
 ---
 
@@ -221,10 +231,10 @@ type Unit struct {
     ID       string   // directory name, e.g., "app-shell"
     Path     string   // absolute path to unit directory
     SpecPath string   // path to parent spec (e.g., specs/APP-SHELL.md)
-    
+
     // Parsed from IMPLEMENTATION_PLAN.md frontmatter
     DependsOn []string // other unit IDs
-    
+
     // Orchestrator state (from frontmatter, updated at runtime)
     Status      UnitStatus
     Branch      string
@@ -232,7 +242,7 @@ type Unit struct {
     PRNumber    int
     StartedAt   *time.Time
     CompletedAt *time.Time
-    
+
     // Parsed from task files
     Tasks []*Task
 }
@@ -255,7 +265,7 @@ type Task struct {
     Status       TaskStatus
     Backpressure string
     DependsOn    []int // task numbers within unit
-    
+
     // Parsed from file
     FilePath string // relative to unit dir, e.g., "01-nav-types.md"
     Title    string // from first H1
@@ -431,20 +441,20 @@ var mergeMutex sync.Mutex
 
 func (w *Worker) mergeWithLock(pr *PullRequest) error {
     w.events.Emit(MergeQueueJoined, w.unit)
-    
+
     mergeMutex.Lock()
     defer mergeMutex.Unlock()
-    
+
     // Rebase onto fresh target
     if err := w.git.Fetch(); err != nil {
         return err
     }
-    
+
     hasConflicts, err := w.git.Rebase(w.targetBranch)
     if err != nil {
         return err
     }
-    
+
     if hasConflicts {
         w.events.Emit(MergeConflict, w.unit)
         if err := w.resolveConflictsWithClaude(); err != nil {
@@ -454,11 +464,11 @@ func (w *Worker) mergeWithLock(pr *PullRequest) error {
             return err
         }
     }
-    
+
     if err := w.github.MergePR(pr); err != nil {
         return err
     }
-    
+
     w.events.Emit(MergeCompleted, w.unit)
     return nil
 }
@@ -536,16 +546,16 @@ func (c *Client) Invoke(ctx context.Context, opts InvokeOptions) error {
         "--dangerously-skip-permissions",
         "-p", opts.Prompt,
     }
-    
+
     if opts.MaxTurns > 0 {
         args = append(args, "--max-turns", strconv.Itoa(opts.MaxTurns))
     }
-    
+
     cmd := exec.CommandContext(ctx, c.Command, args...)
     cmd.Dir = opts.WorkingDir
     cmd.Stdout = c.Logger
     cmd.Stderr = c.Logger
-    
+
     return cmd.Run()
 }
 ```
@@ -562,7 +572,7 @@ func (w *Worker) buildFeedbackPrompt(comments []PRComment) string {
         }
         fmt.Fprintf(&commentBlock, "%s\n\n", c.Body)
     }
-    
+
     return fmt.Sprintf(`You are addressing PR review feedback. Follow these instructions exactly.
 
 ## PR Feedback
@@ -685,13 +695,13 @@ const (
     OrchStarted   EventType = "orch.started"
     OrchCompleted EventType = "orch.completed"
     OrchFailed    EventType = "orch.failed"
-    
+
     // Unit lifecycle
     UnitQueued    EventType = "unit.queued"
     UnitStarted   EventType = "unit.started"
     UnitCompleted EventType = "unit.completed"
     UnitFailed    EventType = "unit.failed"
-    
+
     // Task lifecycle
     TaskStarted       EventType = "task.started"
     TaskClaudeInvoke  EventType = "task.claude.invoke"
@@ -703,7 +713,7 @@ const (
     TaskCompleted     EventType = "task.completed"
     TaskRetry         EventType = "task.retry"
     TaskFailed        EventType = "task.failed"
-    
+
     // PR lifecycle
     PRCreated          EventType = "pr.created"
     PRReviewPending    EventType = "pr.review.pending"
@@ -715,7 +725,7 @@ const (
     PRConflict         EventType = "pr.conflict"
     PRMerged           EventType = "pr.merged"
     PRFailed           EventType = "pr.failed"
-    
+
     // Git operations
     WorktreeCreated EventType = "worktree.created"
     WorktreeRemoved EventType = "worktree.removed"
@@ -790,7 +800,7 @@ func LogHandler(e Event) {
     if e.PR != nil {
         prStr = fmt.Sprintf(" pr=#%d", *e.PR)
     }
-    
+
     log.Printf("[%s] %s%s%s", e.Type, e.Unit, taskStr, prStr)
 }
 
@@ -801,7 +811,7 @@ func StateHandler(units map[string]*Unit) Handler {
         if !ok {
             return
         }
-        
+
         // Update in-memory state based on event
         switch e.Type {
         case UnitStarted:
@@ -810,7 +820,7 @@ func StateHandler(units map[string]*Unit) Handler {
             unit.Status = UnitStatusComplete
         // ... etc
         }
-        
+
         // Persist to frontmatter
         if err := writeUnitFrontmatter(unit); err != nil {
             log.Printf("ERROR: failed to persist state: %v", err)
@@ -833,14 +843,14 @@ func getGitHubToken() (string, error) {
     if token := os.Getenv("GITHUB_TOKEN"); token != "" {
         return token, nil
     }
-    
+
     // 2. Try gh CLI
     cmd := exec.Command("gh", "auth", "token")
     out, err := cmd.Output()
     if err == nil {
         return strings.TrimSpace(string(out)), nil
     }
-    
+
     return "", fmt.Errorf("no GitHub token found: set GITHUB_TOKEN or run 'gh auth login'")
 }
 ```
@@ -863,10 +873,10 @@ func (c *GitHubClient) GetReviewStatus(prNumber int) (ReviewStatus, error) {
     if err != nil {
         return "", err
     }
-    
+
     hasEyes := false
     hasThumbsUp := false
-    
+
     for _, r := range reactions {
         switch r.Content {
         case "eyes":
@@ -875,24 +885,24 @@ func (c *GitHubClient) GetReviewStatus(prNumber int) (ReviewStatus, error) {
             hasThumbsUp = true
         }
     }
-    
+
     if hasThumbsUp {
         return ReviewApproved, nil
     }
     if hasEyes {
         return ReviewInProgress, nil
     }
-    
+
     // Check for comments
     comments, err := c.getPRComments(prNumber)
     if err != nil {
         return "", err
     }
-    
+
     if len(comments) > 0 {
         return ReviewChanges, nil
     }
-    
+
     return ReviewPending, nil
 }
 ```
@@ -999,14 +1009,14 @@ parallelism: 4
 github:
   owner: auto        # Detected from git remote
   repo: auto         # Detected from git remote
-  
+
 worktree:
   base_path: /tmp/ralph-worktrees
-  
+
 claude:
   command: claude    # Or path to binary
   max_turns: 0       # 0 = unlimited
-  
+
 baseline_checks:
   - name: rust-fmt
     command: "cd koe/src-tauri && cargo fmt --check"
@@ -1126,11 +1136,11 @@ HTTP server with WebSocket event streaming:
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
     conn, _ := upgrader.Upgrade(w, r, nil)
-    
+
     s.bus.Subscribe(func(e Event) {
         conn.WriteJSON(e)
     })
-    
+
     // Keep connection open
     select {}
 }

@@ -1,13 +1,24 @@
+---
+prd_id: web-ui
+title: "Choo Web UI"
+status: in_progress
+depends_on:
+  - self-hosting
+# Orchestrator-managed fields
+# feature_branch: n/a (implemented before feature workflow)
+# feature_status: in_progress
+---
+
 # Choo Web UI - Product Requirements Document
 
 ## Document Info
 
-| Field   | Value      |
-| ------- | ---------- |
-| Status  | Draft      |
-| Author  | Claude     |
-| Created | 2026-01-19 |
-| Target  | v0.3       |
+| Field   | Value       |
+| ------- | ----------- |
+| Status  | In Progress |
+| Author  | Claude      |
+| Created | 2026-01-19  |
+| Target  | v0.3        |
 
 ---
 
@@ -309,16 +320,16 @@ choo run --web
 
 ## 11. Acceptance Criteria
 
-- [ ] `choo web` creates Unix socket and starts HTTP server on :8080
-- [ ] `choo run --web` connects to socket and pushes events
+- [x] `choo web` creates Unix socket and starts HTTP server on :8080
+- [x] `choo run --web` connects to socket and pushes events
 - [ ] Browser displays real-time dependency graph
 - [ ] Nodes update color/state as units progress
 - [ ] Click node shows detail panel with task list and errors
 - [ ] Failed units display error message in UI
-- [ ] Web UI shows "waiting" state before orchestrator connects
+- [x] Web UI shows "waiting" state before orchestrator connects
 - [ ] Web UI preserves final state after orchestrator exits
 - [ ] SSE reconnects automatically on disconnect
-- [ ] Socket cleaned up on `choo web` exit
+- [x] Socket cleaned up on `choo web` exit
 
 ---
 

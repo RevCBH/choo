@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -98,14 +97,12 @@ func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker 
 
 // Run executes the unit through all phases: setup, task loop, baseline, PR
 func (w *Worker) Run(ctx context.Context) error {
-	// Track success to decide whether to cleanup worktree
-	// On failure, preserve worktree for debugging/resume
-	success := false
+	// NOTE: Worktrees are intentionally NOT cleaned up on success.
+	// They preserve task status information that `choo status` reads.
+	// Worktrees should only be removed after PR is merged (via `choo cleanup`).
 	defer func() {
-		if w.worktreePath != "" && success {
-			_ = w.cleanup(ctx)
-		} else if w.worktreePath != "" {
-			fmt.Fprintf(os.Stderr, "Preserving worktree for debugging: %s\n", w.worktreePath)
+		if w.worktreePath != "" {
+			fmt.Fprintf(os.Stderr, "Worktree preserved at: %s\n", w.worktreePath)
 		}
 	}()
 
@@ -157,25 +154,26 @@ func (w *Worker) Run(ctx context.Context) error {
 		return fmt.Errorf("baseline checks failed: %w", err)
 	}
 
-	// Phase 3: PR Creation
-	if !w.config.NoPR {
-		if err := w.createPR(ctx); err != nil {
+	// Phase 3: Merge to feature branch (replaces PR workflow)
+	if !w.config.NoPR { // NoPR now means "no merge" for testing
+		if err := w.mergeToFeatureBranch(ctx); err != nil {
 			if w.events != nil {
 				evt := events.NewEvent(events.UnitFailed, w.unit.ID).WithError(err)
 				w.events.Emit(evt)
 			}
-			return fmt.Errorf("PR creation failed: %w", err)
+			return fmt.Errorf("merge to feature branch failed: %w", err)
 		}
 	}
 
-	// Phase 4: Emit UnitCompleted event
+	// Phase 4: Update unit status and emit UnitCompleted event
+	if err := w.updateUnitStatus(discovery.UnitStatusComplete); err != nil {
+		return fmt.Errorf("failed to update unit status: %w", err)
+	}
+
 	if w.events != nil {
 		evt := events.NewEvent(events.UnitCompleted, w.unit.ID)
 		w.events.Emit(evt)
 	}
-
-	// Mark success so worktree gets cleaned up
-	success = true
 
 	return nil
 }
@@ -320,53 +318,66 @@ func (w *Worker) runBaselinePhase(ctx context.Context) error {
 	return fmt.Errorf("baseline checks failed after %d retries: %s", maxRetries, output)
 }
 
-// createPR pushes branch and creates pull request
-func (w *Worker) createPR(ctx context.Context) error {
-	// Push branch to remote
-	if _, err := w.runner().Exec(ctx, w.worktreePath, "push", "-u", "origin", w.branch); err != nil {
-		return fmt.Errorf("failed to push branch: %w", err)
+// mergeToFeatureBranch performs local merge to the feature branch (replaces PR workflow)
+// This ensures dependent units have access to their predecessors' code
+func (w *Worker) mergeToFeatureBranch(ctx context.Context) error {
+	// 1. Review placeholder (log what would be reviewed)
+	w.logReviewPlaceholder(ctx)
+
+	// 2. Fetch latest feature branch to ensure we're rebasing onto latest
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "fetch", "origin", w.config.TargetBranch); err != nil {
+		return fmt.Errorf("failed to fetch target branch: %w", err)
 	}
 
-	// Create PR via gh CLI (since github.PRClient.CreatePR is delegated to Claude)
-	prTitle := fmt.Sprintf("feat: %s", w.unit.ID)
-	prBody := fmt.Sprintf("Auto-generated PR for unit %s", w.unit.ID)
-
-	createCmd := exec.CommandContext(ctx, "gh", "pr", "create",
-		"--title", prTitle,
-		"--body", prBody,
-		"--base", w.config.TargetBranch)
-	createCmd.Dir = w.worktreePath
-	if err := createCmd.Run(); err != nil {
-		return fmt.Errorf("failed to create PR: %w", err)
+	// 3. Rebase unit branch onto feature branch (handle any drift)
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "rebase", fmt.Sprintf("origin/%s", w.config.TargetBranch)); err != nil {
+		// If rebase fails, abort and return error
+		// (shouldn't happen with proper deps, but handle gracefully)
+		_, _ = w.runner().Exec(ctx, w.worktreePath, "rebase", "--abort")
+		return fmt.Errorf("failed to rebase onto target branch (possible conflict): %w", err)
 	}
 
-	// Update unit frontmatter: orch_status=pr_open
-	if err := w.updateUnitStatus(discovery.UnitStatusPROpen); err != nil {
-		return fmt.Errorf("failed to update unit status to pr_open: %w", err)
+	// 4. Merge unit branch into target branch in the RepoRoot
+	// This updates the local target branch so dependent units see the changes.
+	//
+	// Context assumption: RepoRoot must have TargetBranch checked out. This is satisfied when:
+	// - Feature mode with worktree: RepoRoot is the feature worktree (feature branch checked out)
+	// - Feature mode from repo root: RepoRoot is the main repo (must have feature branch checked out)
+	// - Non-feature mode: RepoRoot is the main repo (main branch checked out)
+	//
+	// The orchestrator is responsible for ensuring RepoRoot is in the correct state before
+	// starting workers. No implicit checkout is performed here.
+	if _, err := w.runner().Exec(ctx, w.config.RepoRoot, "merge", w.branch, "--ff-only"); err != nil {
+		// Fall back to regular merge if fast-forward fails
+		if _, err := w.runner().Exec(ctx, w.config.RepoRoot, "merge", w.branch, "-m", fmt.Sprintf("Merge unit %s", w.unit.ID)); err != nil {
+			return fmt.Errorf("failed to merge unit branch into target: %w", err)
+		}
 	}
 
-	// Emit PRCreated event
+	// 5. Emit UnitMerged event
 	if w.events != nil {
-		evt := events.NewEvent(events.PRCreated, w.unit.ID)
+		evt := events.NewEvent(events.UnitMerged, w.unit.ID).WithPayload(map[string]any{
+			"branch":        w.branch,
+			"target_branch": w.config.TargetBranch,
+		})
 		w.events.Emit(evt)
 	}
 
+	fmt.Fprintf(os.Stderr, "Successfully merged unit %s to %s (local)\n", w.unit.ID, w.config.TargetBranch)
 	return nil
 }
 
-// cleanup removes the worktree
-func (w *Worker) cleanup(ctx context.Context) error {
-	if w.worktreePath == "" {
-		return nil
+// logReviewPlaceholder logs the diff that would be reviewed
+// Future: integrate codex review here
+func (w *Worker) logReviewPlaceholder(ctx context.Context) {
+	// Get the diff between target branch and current HEAD
+	diff, err := w.runner().Exec(ctx, w.worktreePath, "diff", fmt.Sprintf("origin/%s...HEAD", w.config.TargetBranch), "--stat")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Review placeholder - could not get diff: %v\n", err)
+		return
 	}
 
-	worktree := &git.Worktree{
-		Path:   w.worktreePath,
-		Branch: w.branch,
-		UnitID: w.unit.ID,
-	}
-
-	return w.git.RemoveWorktree(ctx, worktree)
+	fmt.Fprintf(os.Stderr, "Review placeholder - changes to review for unit %s:\n%s\n", w.unit.ID, diff)
 }
 
 // updateUnitStatus updates the unit frontmatter status in the IMPLEMENTATION_PLAN.md

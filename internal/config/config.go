@@ -36,6 +36,9 @@ type Config struct {
 	// Review contains review polling settings
 	Review ReviewConfig `yaml:"review"`
 
+	// Feature contains PRD-driven feature workflow settings
+	Feature FeatureConfig `yaml:"feature"`
+
 	// LogLevel controls log verbosity (debug, info, warn, error)
 	LogLevel string `yaml:"log_level"`
 }
@@ -106,6 +109,18 @@ type ReviewConfig struct {
 
 	// PollInterval is how often to check for review status
 	PollInterval string `yaml:"poll_interval"`
+}
+
+// FeatureConfig holds configuration for PRD-driven feature workflow.
+type FeatureConfig struct {
+	// PRDDir is the directory containing PRD files
+	PRDDir string `yaml:"prd_dir"`
+
+	// SpecsDir is the directory for generated specs
+	SpecsDir string `yaml:"specs_dir"`
+
+	// BranchPrefix is the prefix for feature branches
+	BranchPrefix string `yaml:"branch_prefix"`
 }
 
 // ReviewTimeoutDuration parses the review timeout as a Duration.

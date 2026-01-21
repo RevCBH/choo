@@ -93,3 +93,54 @@ func gitExecWithStdin(ctx context.Context, dir string, stdin string, args ...str
 	runnerMu.RUnlock()
 	return runner.ExecWithStdin(ctx, dir, stdin, args...)
 }
+
+// Client provides git operations for a specific repository or worktree
+type Client struct {
+	// RepoPath is the root directory of the git repository
+	RepoPath string
+	// WorktreePath is an alias for RepoPath (for worktree operations)
+	WorktreePath string
+}
+
+// NewClient creates a new git client for the given repository path
+func NewClient(repoPath string) *Client {
+	return &Client{
+		RepoPath:     repoPath,
+		WorktreePath: repoPath, // Alias for worktree operations
+	}
+}
+
+// CreateBranch creates a new branch from the target branch
+func (c *Client) CreateBranch(ctx context.Context, branchName, fromBranch string) error {
+	_, err := gitExec(ctx, c.RepoPath, "branch", branchName, fromBranch)
+	return err
+}
+
+// BranchExists checks if a branch exists locally or remotely
+func (c *Client) BranchExists(ctx context.Context, branchName string) (bool, error) {
+	// Check local branches
+	_, err := gitExec(ctx, c.RepoPath, "rev-parse", "--verify", branchName)
+	if err == nil {
+		return true, nil
+	}
+
+	// Check remote branches
+	_, err = gitExec(ctx, c.RepoPath, "rev-parse", "--verify", "origin/"+branchName)
+	if err == nil {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// Checkout switches to the specified branch
+func (c *Client) Checkout(ctx context.Context, branchName string) error {
+	_, err := gitExec(ctx, c.RepoPath, "checkout", branchName)
+	return err
+}
+
+// DeleteBranch removes a branch locally
+func (c *Client) DeleteBranch(ctx context.Context, branchName string) error {
+	_, err := gitExec(ctx, c.RepoPath, "branch", "-D", branchName)
+	return err
+}

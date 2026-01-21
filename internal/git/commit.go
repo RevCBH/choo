@@ -38,6 +38,12 @@ func StageAll(ctx context.Context, worktreePath string) error {
 	return err
 }
 
+// StagePath stages changes in a specific path (git add <path>)
+func StagePath(ctx context.Context, worktreePath string, path string) error {
+	_, err := gitExec(ctx, worktreePath, "add", path)
+	return err
+}
+
 // HasUncommittedChanges checks if there are uncommitted changes
 func HasUncommittedChanges(ctx context.Context, worktreePath string) (bool, error) {
 	output, err := gitExec(ctx, worktreePath, "status", "--porcelain")
@@ -66,4 +72,19 @@ func GetStagedFiles(ctx context.Context, worktreePath string) ([]string, error) 
 	}
 
 	return files, nil
+}
+
+// Push pushes the current branch to remote
+func Push(ctx context.Context, worktreePath string) error {
+	_, err := gitExec(ctx, worktreePath, "push")
+	return err
+}
+
+// GetCommitHash retrieves the current HEAD commit hash
+func GetCommitHash(ctx context.Context, worktreePath string) (string, error) {
+	output, err := gitExec(ctx, worktreePath, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(output), nil
 }
