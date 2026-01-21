@@ -2,11 +2,13 @@ package client
 
 import (
 	"context"
+	"io"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
 	apiv1 "github.com/RevCBH/choo/pkg/api/v1"
+	"github.com/RevCBH/choo/internal/events"
 )
 
 // Client wraps gRPC connection and service stub for daemon communication
@@ -113,4 +115,32 @@ func (c *Client) Shutdown(ctx context.Context, waitForJobs bool, timeout int) er
 	}
 	_, err := c.daemon.Shutdown(ctx, req)
 	return err
+}
+
+// WatchJob streams job events, calling handler for each event received.
+// The method blocks until the job completes (returns nil), the context
+// is cancelled (returns context error), or an error occurs.
+//
+// Events are delivered in sequence order. The fromSeq parameter specifies
+// the sequence number to start from (0 = beginning). This enables
+// reconnection scenarios where the client resumes from a specific point.
+func (c *Client) WatchJob(ctx context.Context, jobID string, fromSeq int, handler func(events.Event)) error {
+	stream, err := c.daemon.WatchJob(ctx, &apiv1.WatchJobRequest{
+		JobId:        jobID,
+		FromSequence: int32(fromSeq),
+	})
+	if err != nil {
+		return err
+	}
+
+	for {
+		event, err := stream.Recv()
+		if err == io.EOF {
+			return nil // Job completed normally
+		}
+		if err != nil {
+			return err // Connection lost or job failed
+		}
+		handler(protoToEvent(event))
+	}
 }
