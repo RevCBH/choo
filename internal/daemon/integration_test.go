@@ -45,6 +45,7 @@ func setupIntegrationTest(t *testing.T) (*Server, apiv1.DaemonServiceClient, fun
 				t.Fatalf("Server failed to start: %v", err)
 			}
 		default:
+			// No error yet - continue checking
 		}
 		return server.IsRunning()
 	}, 2*time.Second, 10*time.Millisecond)

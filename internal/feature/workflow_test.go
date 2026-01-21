@@ -191,6 +191,7 @@ func TestWorkflow_Escalation(t *testing.T) {
 			select {
 			case eventReceived <- e:
 			default:
+				// Channel full - drop event
 			}
 		}
 	})
