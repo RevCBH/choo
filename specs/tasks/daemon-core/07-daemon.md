@@ -1,6 +1,6 @@
 ---
 task: 7
-status: pending
+status: complete
 backpressure: "go test ./internal/daemon/... -run TestDaemon"
 depends_on: [1, 2, 4, 6]
 ---
