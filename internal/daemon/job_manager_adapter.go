@@ -2,10 +2,14 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/RevCBH/choo/internal/daemon/db"
 )
+
+// ErrJobNotFound is returned when a job cannot be found.
+var ErrJobNotFound = errors.New("job not found")
 
 // jobManagerAdapter adapts jobManagerImpl to implement the JobManager interface
 // required by GRPCServer.
@@ -52,6 +56,9 @@ func (a *jobManagerAdapter) GetJob(jobID string) (*JobState, error) {
 	run, err := a.db.GetRun(jobID)
 	if err != nil {
 		return nil, err
+	}
+	if run == nil {
+		return nil, ErrJobNotFound
 	}
 
 	var startedAt time.Time

@@ -180,6 +180,12 @@ func (s *GRPCServer) StartJob(ctx context.Context, req *apiv1.StartJobRequest) (
 				Status: "attached", // Signals this is an existing job, not newly created
 			}, nil
 		}
+
+		// No active run found - delete any completed/failed runs for this branch
+		// to avoid UNIQUE constraint violation when creating new run
+		if _, err := s.db.DeleteNonActiveRunByBranch(req.FeatureBranch, req.RepoPath); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to clean up old run: %v", err)
+		}
 	}
 
 	// Create job context for cancellation
