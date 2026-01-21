@@ -136,6 +136,106 @@ func TestParseUnitFrontmatter_Minimal(t *testing.T) {
 	}
 }
 
+func TestParseUnitFrontmatter_WithProvider(t *testing.T) {
+	data := []byte(`unit: my-feature
+provider: codex
+depends_on:
+  - base-types`)
+
+	uf, err := ParseUnitFrontmatter(data)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if uf.Unit != "my-feature" {
+		t.Errorf("Unit: expected 'my-feature', got %q", uf.Unit)
+	}
+
+	if uf.Provider != "codex" {
+		t.Errorf("Provider: expected 'codex', got %q", uf.Provider)
+	}
+
+	if len(uf.DependsOn) != 1 || uf.DependsOn[0] != "base-types" {
+		t.Errorf("DependsOn: expected [base-types], got %v", uf.DependsOn)
+	}
+}
+
+func TestParseUnitFrontmatter_WithoutProvider(t *testing.T) {
+	data := []byte(`unit: my-feature
+depends_on:
+  - base-types`)
+
+	uf, err := ParseUnitFrontmatter(data)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if uf.Unit != "my-feature" {
+		t.Errorf("Unit: expected 'my-feature', got %q", uf.Unit)
+	}
+
+	if uf.Provider != "" {
+		t.Errorf("Provider: expected empty string, got %q", uf.Provider)
+	}
+
+	if len(uf.DependsOn) != 1 || uf.DependsOn[0] != "base-types" {
+		t.Errorf("DependsOn: expected [base-types], got %v", uf.DependsOn)
+	}
+}
+
+func TestParseUnitFrontmatter_ProviderClaude(t *testing.T) {
+	data := []byte(`unit: claude-optimized
+provider: claude
+depends_on: []`)
+
+	uf, err := ParseUnitFrontmatter(data)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if uf.Unit != "claude-optimized" {
+		t.Errorf("Unit: expected 'claude-optimized', got %q", uf.Unit)
+	}
+
+	if uf.Provider != "claude" {
+		t.Errorf("Provider: expected 'claude', got %q", uf.Provider)
+	}
+}
+
+func TestParseUnitFrontmatter_ProviderWithOrchFields(t *testing.T) {
+	data := []byte(`unit: my-feature
+provider: codex
+depends_on: []
+orch_status: in_progress
+orch_branch: feature/my-feature
+orch_pr_number: 42`)
+
+	uf, err := ParseUnitFrontmatter(data)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	if uf.Unit != "my-feature" {
+		t.Errorf("Unit: expected 'my-feature', got %q", uf.Unit)
+	}
+
+	if uf.Provider != "codex" {
+		t.Errorf("Provider: expected 'codex', got %q", uf.Provider)
+	}
+
+	if uf.OrchStatus != "in_progress" {
+		t.Errorf("OrchStatus: expected 'in_progress', got %q", uf.OrchStatus)
+	}
+
+	if uf.OrchBranch != "feature/my-feature" {
+		t.Errorf("OrchBranch: expected 'feature/my-feature', got %q", uf.OrchBranch)
+	}
+
+	if uf.OrchPRNumber != 42 {
+		t.Errorf("OrchPRNumber: expected 42, got %d", uf.OrchPRNumber)
+	}
+}
+
 func TestParseTaskFrontmatter_Complete(t *testing.T) {
 	data := []byte(`task: 5
 status: complete
