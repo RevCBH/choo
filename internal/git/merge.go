@@ -206,6 +206,25 @@ func IsRebaseInProgress(ctx context.Context, worktreePath string) (bool, error) 
 	return false, nil
 }
 
+// IsMergeInProgress checks if a merge is currently in progress
+func IsMergeInProgress(ctx context.Context, repoPath string) (bool, error) {
+	// Check for MERGE_HEAD file which indicates merge in progress
+	gitDir := filepath.Join(repoPath, ".git")
+
+	// For worktrees, .git is a file pointing to the actual git dir
+	gitDirContent, err := os.ReadFile(gitDir)
+	if err == nil && strings.HasPrefix(string(gitDirContent), "gitdir:") {
+		gitDir = strings.TrimSpace(strings.TrimPrefix(string(gitDirContent), "gitdir:"))
+	}
+
+	// Check for MERGE_HEAD (indicates merge in progress)
+	if _, err := os.Stat(filepath.Join(gitDir, "MERGE_HEAD")); err == nil {
+		return true, nil
+	}
+
+	return false, nil
+}
+
 // AbortRebase aborts an in-progress rebase
 func AbortRebase(ctx context.Context, worktreePath string) error {
 	_, err := gitExec(ctx, worktreePath, "rebase", "--abort")
