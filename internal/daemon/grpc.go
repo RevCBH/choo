@@ -302,3 +302,89 @@ func isTerminalStatus(status string) bool {
 		return false
 	}
 }
+
+// Shutdown initiates graceful daemon shutdown.
+// If wait_for_jobs is true, waits for running jobs up to timeout_seconds.
+func (s *GRPCServer) Shutdown(ctx context.Context, req *apiv1.ShutdownRequest) (*apiv1.ShutdownResponse, error) {
+	s.mu.Lock()
+
+	// Check if already shutting down
+	if s.shuttingDown {
+		s.mu.Unlock()
+		return nil, status.Errorf(codes.FailedPrecondition, "shutdown already in progress")
+	}
+
+	// Mark as shutting down
+	s.shuttingDown = true
+	close(s.shutdownCh)
+
+	// Copy active jobs map for iteration
+	activeJobs := make(map[string]context.CancelFunc)
+	for k, v := range s.activeJobs {
+		activeJobs[k] = v
+	}
+	s.mu.Unlock()
+
+	jobsStopped := 0
+
+	if req.WaitForJobs && len(activeJobs) > 0 {
+		// Wait for jobs with timeout
+		timeout := time.Duration(req.TimeoutSeconds) * time.Second
+		if timeout == 0 {
+			timeout = 30 * time.Second // default timeout
+		}
+
+		done := make(chan struct{})
+		go func() {
+			// Wait for all jobs to complete naturally
+			ticker := time.NewTicker(100 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					if s.jobManager.ActiveJobCount() == 0 {
+						close(done)
+						return
+					}
+				}
+			}
+		}()
+
+		select {
+		case <-done:
+			// All jobs completed gracefully
+		case <-time.After(timeout):
+			// Timeout - force stop remaining jobs
+			for jobID, cancel := range activeJobs {
+				cancel()
+				jobsStopped++
+				_ = s.jobManager.Stop(ctx, jobID, true)
+			}
+		}
+	} else if !req.WaitForJobs {
+		// Force stop all jobs immediately
+		for jobID, cancel := range activeJobs {
+			cancel()
+			jobsStopped++
+			_ = s.jobManager.Stop(ctx, jobID, true)
+		}
+	}
+
+	return &apiv1.ShutdownResponse{
+		Success:     true,
+		JobsStopped: int32(jobsStopped),
+	}, nil
+}
+
+// Health returns daemon health status for monitoring and service discovery.
+func (s *GRPCServer) Health(ctx context.Context, req *apiv1.HealthRequest) (*apiv1.HealthResponse, error) {
+	s.mu.RLock()
+	shuttingDown := s.shuttingDown
+	s.mu.RUnlock()
+
+	return &apiv1.HealthResponse{
+		Healthy:    !shuttingDown,
+		ActiveJobs: int32(s.jobManager.ActiveJobCount()),
+		Version:    s.version,
+	}, nil
+}
