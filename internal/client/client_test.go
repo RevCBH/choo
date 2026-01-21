@@ -17,6 +17,8 @@ type mockDaemonClient struct {
 	stopJobFn      func(context.Context, *apiv1.StopJobRequest, ...grpc.CallOption) (*apiv1.StopJobResponse, error)
 	listJobsFn     func(context.Context, *apiv1.ListJobsRequest, ...grpc.CallOption) (*apiv1.ListJobsResponse, error)
 	getJobStatusFn func(context.Context, *apiv1.GetJobStatusRequest, ...grpc.CallOption) (*apiv1.GetJobStatusResponse, error)
+	healthFn       func(context.Context, *apiv1.HealthRequest, ...grpc.CallOption) (*apiv1.HealthResponse, error)
+	shutdownFn     func(context.Context, *apiv1.ShutdownRequest, ...grpc.CallOption) (*apiv1.ShutdownResponse, error)
 }
 
 func (m *mockDaemonClient) StartJob(ctx context.Context, req *apiv1.StartJobRequest, opts ...grpc.CallOption) (*apiv1.StartJobResponse, error) {
@@ -45,6 +47,20 @@ func (m *mockDaemonClient) GetJobStatus(ctx context.Context, req *apiv1.GetJobSt
 		return m.getJobStatusFn(ctx, req, opts...)
 	}
 	return nil, errors.New("getJobStatusFn not set")
+}
+
+func (m *mockDaemonClient) Health(ctx context.Context, req *apiv1.HealthRequest, opts ...grpc.CallOption) (*apiv1.HealthResponse, error) {
+	if m.healthFn != nil {
+		return m.healthFn(ctx, req, opts...)
+	}
+	return nil, errors.New("healthFn not set")
+}
+
+func (m *mockDaemonClient) Shutdown(ctx context.Context, req *apiv1.ShutdownRequest, opts ...grpc.CallOption) (*apiv1.ShutdownResponse, error) {
+	if m.shutdownFn != nil {
+		return m.shutdownFn(ctx, req, opts...)
+	}
+	return nil, errors.New("shutdownFn not set")
 }
 
 func TestStartJob_Success(t *testing.T) {
@@ -195,5 +211,128 @@ func TestGetJobStatus_NotFound(t *testing.T) {
 	}
 	if err != expectedErr {
 		t.Errorf("Expected error %v, got %v", expectedErr, err)
+	}
+}
+
+func TestHealth_Success(t *testing.T) {
+	mock := &mockDaemonClient{
+		healthFn: func(ctx context.Context, req *apiv1.HealthRequest, opts ...grpc.CallOption) (*apiv1.HealthResponse, error) {
+			return &apiv1.HealthResponse{
+				Healthy:    true,
+				ActiveJobs: 3,
+				Version:    "1.0.0",
+			}, nil
+		},
+	}
+
+	client := &Client{daemon: mock}
+
+	health, err := client.Health(context.Background())
+	if err != nil {
+		t.Fatalf("Health failed: %v", err)
+	}
+	if !health.Healthy {
+		t.Error("Expected healthy to be true")
+	}
+	if health.ActiveJobs != 3 {
+		t.Errorf("Expected 3 active jobs, got %d", health.ActiveJobs)
+	}
+	if health.Version != "1.0.0" {
+		t.Errorf("Expected version 1.0.0, got %s", health.Version)
+	}
+}
+
+func TestHealth_Unavailable(t *testing.T) {
+	expectedErr := errors.New("daemon unavailable")
+	mock := &mockDaemonClient{
+		healthFn: func(ctx context.Context, req *apiv1.HealthRequest, opts ...grpc.CallOption) (*apiv1.HealthResponse, error) {
+			return nil, expectedErr
+		},
+	}
+
+	client := &Client{daemon: mock}
+
+	_, err := client.Health(context.Background())
+	if err == nil {
+		t.Fatal("Expected error, got nil")
+	}
+	if err != expectedErr {
+		t.Errorf("Expected error %v, got %v", expectedErr, err)
+	}
+}
+
+func TestShutdown_WaitForJobs(t *testing.T) {
+	var capturedWaitForJobs bool
+	var capturedTimeout int32
+	mock := &mockDaemonClient{
+		shutdownFn: func(ctx context.Context, req *apiv1.ShutdownRequest, opts ...grpc.CallOption) (*apiv1.ShutdownResponse, error) {
+			capturedWaitForJobs = req.GetWaitForJobs()
+			capturedTimeout = req.GetTimeoutSeconds()
+			return &apiv1.ShutdownResponse{
+				Success: true,
+			}, nil
+		},
+	}
+
+	client := &Client{daemon: mock}
+
+	err := client.Shutdown(context.Background(), true, 30)
+	if err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+	if !capturedWaitForJobs {
+		t.Error("Expected waitForJobs to be true")
+	}
+	if capturedTimeout != 30 {
+		t.Errorf("Expected timeout 30, got %d", capturedTimeout)
+	}
+}
+
+func TestShutdown_Immediate(t *testing.T) {
+	var capturedWaitForJobs bool
+	var capturedTimeout int32
+	mock := &mockDaemonClient{
+		shutdownFn: func(ctx context.Context, req *apiv1.ShutdownRequest, opts ...grpc.CallOption) (*apiv1.ShutdownResponse, error) {
+			capturedWaitForJobs = req.GetWaitForJobs()
+			capturedTimeout = req.GetTimeoutSeconds()
+			return &apiv1.ShutdownResponse{
+				Success: true,
+			}, nil
+		},
+	}
+
+	client := &Client{daemon: mock}
+
+	err := client.Shutdown(context.Background(), false, 0)
+	if err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+	if capturedWaitForJobs {
+		t.Error("Expected waitForJobs to be false")
+	}
+	if capturedTimeout != 0 {
+		t.Errorf("Expected timeout 0, got %d", capturedTimeout)
+	}
+}
+
+func TestShutdown_Timeout(t *testing.T) {
+	var capturedTimeout int32
+	mock := &mockDaemonClient{
+		shutdownFn: func(ctx context.Context, req *apiv1.ShutdownRequest, opts ...grpc.CallOption) (*apiv1.ShutdownResponse, error) {
+			capturedTimeout = req.GetTimeoutSeconds()
+			return &apiv1.ShutdownResponse{
+				Success: true,
+			}, nil
+		},
+	}
+
+	client := &Client{daemon: mock}
+
+	err := client.Shutdown(context.Background(), true, 60)
+	if err != nil {
+		t.Fatalf("Shutdown failed: %v", err)
+	}
+	if capturedTimeout != 60 {
+		t.Errorf("Expected timeout 60, got %d", capturedTimeout)
 	}
 }
