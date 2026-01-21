@@ -27,15 +27,13 @@ type Unit struct {
 }
 
 // UnitStatus represents the lifecycle state of a unit
+// Simplified flow: pending -> in_progress -> complete (merged to feature branch)
 type UnitStatus string
 
 const (
 	UnitStatusPending    UnitStatus = "pending"
 	UnitStatusInProgress UnitStatus = "in_progress"
-	UnitStatusPROpen     UnitStatus = "pr_open"
-	UnitStatusInReview   UnitStatus = "in_review"
-	UnitStatusMerging    UnitStatus = "merging"
-	UnitStatusComplete   UnitStatus = "complete"
+	UnitStatusComplete   UnitStatus = "complete" // Terminal: all tasks done and merged to feature branch
 	UnitStatusFailed     UnitStatus = "failed"
 	UnitStatusBlocked    UnitStatus = "blocked"
 )
@@ -77,9 +75,12 @@ func parseUnitStatus(s string) (UnitStatus, error) {
 
 	status := UnitStatus(s)
 	switch status {
-	case UnitStatusPending, UnitStatusInProgress, UnitStatusPROpen,
-		UnitStatusInReview, UnitStatusMerging, UnitStatusComplete, UnitStatusFailed, UnitStatusBlocked:
+	case UnitStatusPending, UnitStatusInProgress, UnitStatusComplete, UnitStatusFailed, UnitStatusBlocked:
 		return status, nil
+	// Backwards compatibility: treat old PR-related states as in_progress
+	// so they will be re-executed with the new local merge workflow
+	case "pr_open", "in_review", "merging":
+		return UnitStatusInProgress, nil
 	default:
 		return "", fmt.Errorf("invalid unit status: %q", s)
 	}

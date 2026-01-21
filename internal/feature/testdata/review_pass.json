@@ -1,0 +1,10 @@
+{
+  "verdict": "pass",
+  "score": {
+    "completeness": 95,
+    "consistency": 90,
+    "testability": 85,
+    "architecture": 92
+  },
+  "feedback": []
+}

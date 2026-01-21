@@ -1,0 +1,12 @@
+{
+  "scenario": "minor_prd_change",
+  "description": "Minor changes to PRD that don't affect implementation",
+  "original_body": "# Feature: User Authentication\n\n## Overview\nImplement user authentication using JWT tokens.\n\n## Requirements\n- User login endpoint\n- Token generation\n- Token validation middleware\n\n## Technical Details\nUse bcrypt for password hashing.",
+  "new_body": "# Feature: User Authentication\n\n## Overview\nImplement user authentication using JWT tokens.\n\n## Requirements\n- User login endpoint\n- Token generation and refresh\n- Token validation middleware\n\n## Technical Details\nUse bcrypt for password hashing with cost factor 10.",
+  "in_progress_units": ["login_endpoint", "token_validation"],
+  "expected_assessment": {
+    "significant": false,
+    "affected_units": [],
+    "recommendation": "Minor clarifications added. No changes to implementation needed."
+  }
+}

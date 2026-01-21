@@ -11,6 +11,7 @@ import (
 	"github.com/RevCBH/choo/internal/config"
 	"github.com/RevCBH/choo/internal/escalate"
 	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/feature"
 	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/github"
 	"github.com/RevCBH/choo/internal/orchestrator"
@@ -32,6 +33,7 @@ type RunOptions struct {
 	Web          bool   // Enable web UI event forwarding
 	WebSocket    string // Custom Unix socket path (optional)
 	NoTUI        bool   // Disable TUI even when stdout is a TTY
+	Feature      string // PRD ID to work on in feature mode
 }
 
 // Validate checks RunOptions for validity
@@ -70,14 +72,40 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 				opts.TasksDir = args[0]
 			}
 
+			// Create context
+			ctx := context.Background()
+
+			// If --target wasn't explicitly set, use current branch
+			wd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("failed to get working directory: %w", err)
+			}
+			if !cmd.Flags().Changed("target") {
+				currentBranch, err := git.GetCurrentBranch(ctx, wd)
+				if err != nil {
+					// Fall back to "main" if we can't detect current branch
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not detect current branch (%v), using 'main'\n", err)
+					opts.TargetBranch = "main"
+				} else {
+					opts.TargetBranch = currentBranch
+				}
+			}
+
+			// Ensure target branch exists on remote (auto-push if not)
+			if !opts.DryRun {
+				pushed, err := git.EnsureBranchOnRemote(ctx, wd, opts.TargetBranch)
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not verify target branch on remote: %v\n", err)
+				} else if pushed {
+					fmt.Fprintf(cmd.OutOrStdout(), "Pushed target branch '%s' to remote\n", opts.TargetBranch)
+				}
+			}
+
 			// Validate options
 			if err := opts.Validate(); err != nil {
 				fmt.Fprintf(cmd.ErrOrStderr(), "Error: %v\n", err)
 				os.Exit(2)
 			}
-
-			// Create context
-			ctx := context.Background()
 
 			// Run orchestrator
 			return app.RunOrchestrator(ctx, opts)
@@ -86,7 +114,7 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 
 	// Add flags
 	cmd.Flags().IntVarP(&opts.Parallelism, "parallelism", "p", 4, "Max concurrent units")
-	cmd.Flags().StringVarP(&opts.TargetBranch, "target", "t", "main", "Branch PRs target")
+	cmd.Flags().StringVarP(&opts.TargetBranch, "target", "t", "main", "Branch PRs target (default: current branch)")
 	cmd.Flags().BoolVarP(&opts.DryRun, "dry-run", "n", false, "Show execution plan without running")
 	cmd.Flags().BoolVar(&opts.NoPR, "no-pr", false, "Skip PR creation")
 	cmd.Flags().StringVar(&opts.Unit, "unit", "", "Run only specified unit (single-unit mode)")
@@ -94,6 +122,7 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 	cmd.Flags().BoolVar(&opts.Web, "web", false, "Enable web UI event forwarding")
 	cmd.Flags().StringVar(&opts.WebSocket, "web-socket", "", "Custom Unix socket path (default: ~/.choo/web.sock)")
 	cmd.Flags().BoolVar(&opts.NoTUI, "no-tui", false, "Disable interactive TUI (use summary-only output)")
+	cmd.Flags().StringVar(&opts.Feature, "feature", "", "PRD ID for feature mode (targets feature branch)")
 
 	return cmd
 }
@@ -214,6 +243,27 @@ func (a *App) RunOrchestrator(ctx context.Context, opts RunOptions) error {
 		DryRun:          opts.DryRun,
 		ShutdownTimeout: orchestrator.DefaultShutdownTimeout,
 		SuppressOutput:  useTUI,
+	}
+
+	// Configure feature mode if --feature flag provided
+	if opts.Feature != "" {
+		gitClient := git.NewClient(wd)
+		branchMgr := feature.NewBranchManager(gitClient, cfg.Feature.BranchPrefix)
+
+		orchCfg.FeatureMode = true
+		orchCfg.FeatureBranch = branchMgr.GetBranchName(opts.Feature)
+
+		// Ensure feature branch exists
+		exists, err := branchMgr.Exists(ctx, opts.Feature)
+		if err != nil {
+			return fmt.Errorf("checking feature branch: %w", err)
+		}
+		if !exists {
+			// Create the feature branch from main
+			if err := branchMgr.Create(ctx, opts.Feature, orchCfg.TargetBranch); err != nil {
+				return fmt.Errorf("creating feature branch: %w", err)
+			}
+		}
 	}
 
 	// Create orchestrator

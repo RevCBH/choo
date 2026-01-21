@@ -21,9 +21,6 @@ func TestUnitStatus_IsTerminal_NonTerminal(t *testing.T) {
 		StatusPending,
 		StatusReady,
 		StatusInProgress,
-		StatusPROpen,
-		StatusInReview,
-		StatusMerging,
 	}
 
 	for _, status := range nonTerminalStatuses {
@@ -34,11 +31,9 @@ func TestUnitStatus_IsTerminal_NonTerminal(t *testing.T) {
 }
 
 func TestUnitStatus_IsActive(t *testing.T) {
+	// In the simplified flow, only StatusInProgress is active
 	activeStatuses := []UnitStatus{
 		StatusInProgress,
-		StatusPROpen,
-		StatusInReview,
-		StatusMerging,
 	}
 
 	for _, status := range activeStatuses {
@@ -91,9 +86,6 @@ func TestCanTransition_Terminal(t *testing.T) {
 		StatusPending,
 		StatusReady,
 		StatusInProgress,
-		StatusPROpen,
-		StatusInReview,
-		StatusMerging,
 		StatusComplete,
 		StatusFailed,
 		StatusBlocked,
