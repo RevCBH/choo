@@ -2,13 +2,21 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
+	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/RevCBH/choo/internal/config"
 	"github.com/RevCBH/choo/internal/daemon/db"
+	"github.com/RevCBH/choo/internal/escalate"
 	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/git"
+	"github.com/RevCBH/choo/internal/github"
 	"github.com/RevCBH/choo/internal/orchestrator"
+	"github.com/RevCBH/choo/internal/web"
 	"github.com/oklog/ulid/v2"
 )
 
@@ -22,6 +30,18 @@ type jobManagerImpl struct {
 	jobs map[string]*ManagedJob
 
 	eventBus *events.Bus // Global daemon event bus
+
+	// store maintains job state and is always updated regardless of web server status.
+	// This allows late-attaching clients to query current state.
+	store *web.Store
+
+	// webHub is optional and set when the web server starts.
+	// When set, events are broadcast to SSE clients.
+	webHub *web.Hub
+
+	// OnJobComplete is called when a job finishes (success, failure, or cancellation).
+	// Used to notify external components (e.g., GRPCServer) for cleanup.
+	OnJobComplete func(jobID string)
 }
 
 // NewJobManager creates a new job manager.
@@ -31,11 +51,30 @@ func NewJobManager(database *db.DB, maxJobs int) *jobManagerImpl {
 		maxJobs:  maxJobs,
 		jobs:     make(map[string]*ManagedJob),
 		eventBus: events.NewBus(1000), // Global event bus for daemon-level events
+		store:    web.NewStore(),      // Always have a store for state tracking
 	}
 }
 
+// Store returns the job state store.
+// This store is always kept in sync with job events, regardless of web server status.
+func (jm *jobManagerImpl) Store() *web.Store {
+	return jm.store
+}
+
+// SetWebHub configures the SSE broadcast hub.
+// When set, job events are broadcast to connected web clients.
+// The Store is always updated regardless of whether a Hub is set.
+func (jm *jobManagerImpl) SetWebHub(hub *web.Hub) {
+	jm.mu.Lock()
+	defer jm.mu.Unlock()
+	jm.webHub = hub
+}
+
 // Start creates and starts a new job, returning the job ID.
-func (jm *jobManagerImpl) Start(ctx context.Context, cfg JobConfig) (string, error) {
+// The caller provides both the context and its cancel func. This allows the caller
+// (typically the gRPC layer) to retain control over job cancellation while the
+// job manager tracks and executes the job.
+func (jm *jobManagerImpl) Start(ctx context.Context, cancel context.CancelFunc, cfg JobConfig) (string, error) {
 	// 1. Validate configuration
 	if err := cfg.Validate(); err != nil {
 		return "", fmt.Errorf("invalid job config: %w", err)
@@ -53,7 +92,13 @@ func (jm *jobManagerImpl) Start(ctx context.Context, cfg JobConfig) (string, err
 	// 4. Generate unique job ID using ULID
 	jobID := ulid.Make().String()
 
-	// 5. Create run record in SQLite
+	// 5. Delete any non-active runs for the same branch/repo to avoid UNIQUE constraint violations
+	// This cleans up completed/failed/cancelled runs before creating a new one
+	if _, err := jm.db.DeleteNonActiveRunByBranch(cfg.FeatureBranch, cfg.RepoPath); err != nil {
+		return "", fmt.Errorf("failed to clean up old runs: %w", err)
+	}
+
+	// 6. Create run record in SQLite
 	run := &db.Run{
 		ID:            jobID,
 		FeatureBranch: cfg.FeatureBranch,
@@ -71,27 +116,83 @@ func (jm *jobManagerImpl) Start(ctx context.Context, cfg JobConfig) (string, err
 	// 6. Create isolated event bus for this job
 	jobEventBus := events.NewBus(1000)
 
-	// 7. Create orchestrator with job-specific config
+	// 7. Load repository config for dependency creation
+	repoCfg, err := config.LoadConfig(cfg.RepoPath)
+	if err != nil {
+		// Mark job as failed if config cannot be loaded
+		if updateErr := jm.db.UpdateRunStatus(jobID, db.RunStatusFailed, ptrString(err.Error())); updateErr != nil {
+			log.Printf("failed to update run status: %v", updateErr)
+		}
+		return "", fmt.Errorf("failed to load config: %w", err)
+	}
+
+	// 8. Create Git WorktreeManager
+	gitManager := git.NewWorktreeManager(cfg.RepoPath, nil)
+
+	// 9. Create GitHub PRClient (may fail if no token available)
+	var ghClient *github.PRClient
+	pollInterval, _ := repoCfg.ReviewPollIntervalDuration()
+	reviewTimeout, _ := repoCfg.ReviewTimeoutDuration()
+
+	ghClient, err = github.NewPRClient(github.PRClientConfig{
+		Owner:         repoCfg.GitHub.Owner,
+		Repo:          repoCfg.GitHub.Repo,
+		PollInterval:  pollInterval,
+		ReviewTimeout: reviewTimeout,
+	})
+	if err != nil {
+		// Log warning but continue - jobs with NoPR: true will work fine
+		log.Printf("GitHub client not available (jobs requiring PR creation will fail): %v", err)
+		ghClient = nil
+	}
+
+	// 10. Create Escalator (Terminal for daemon mode)
+	esc := escalate.NewTerminal()
+
+	// 11. Create orchestrator with job-specific config
+	// Make TasksDir absolute if it's relative (daemon runs from different cwd)
+	tasksDir := cfg.TasksDir
+	if !filepath.IsAbs(tasksDir) {
+		tasksDir = filepath.Join(cfg.RepoPath, tasksDir)
+	}
+
 	orchConfig := orchestrator.Config{
 		Parallelism:  cfg.Concurrency,
 		TargetBranch: cfg.TargetBranch,
-		TasksDir:     cfg.TasksDir,
+		TasksDir:     tasksDir,
 		RepoRoot:     cfg.RepoPath,
 		DryRun:       cfg.DryRun,
+		WorktreeBase: repoCfg.Worktree.BasePath,
 	}
 
 	orchDeps := orchestrator.Dependencies{
-		Bus: jobEventBus,
-		// Note: Other dependencies (Git, GitHub, Escalator) would be injected here
-		// in production, but are nil for now as they're not required for the spec
+		Bus:       jobEventBus,
+		Escalator: esc,
+		Git:       gitManager,
+		GitHub:    ghClient,
 	}
 
 	orch := orchestrator.New(orchConfig, orchDeps)
 
-	// Create cancellable context for the job
-	jobCtx, cancel := context.WithCancel(ctx)
+	// 12. Set up event forwarding to Store (always) and Hub (if available)
+	// Mark store as connected when job starts
+	jm.store.SetConnected(true)
 
-	// 8. Register ManagedJob in map
+	// Subscribe to job events - always update Store, broadcast to Hub if set
+	jobEventBus.Subscribe(func(e events.Event) {
+		webEvent := convertToWebEvent(e)
+		jm.store.HandleEvent(webEvent)
+
+		// Broadcast to SSE clients if Hub is configured
+		jm.mu.RLock()
+		hub := jm.webHub
+		jm.mu.RUnlock()
+		if hub != nil {
+			hub.Broadcast(webEvent)
+		}
+	})
+
+	// 13. Register ManagedJob in map (use the caller-provided cancel func)
 	job := &ManagedJob{
 		ID:           jobID,
 		Orchestrator: orch,
@@ -102,12 +203,12 @@ func (jm *jobManagerImpl) Start(ctx context.Context, cfg JobConfig) (string, err
 	}
 	jm.jobs[jobID] = job
 
-	// 9. Start orchestrator in goroutine with cleanup on completion
+	// 14. Start orchestrator in goroutine with cleanup on completion
 	go func() {
 		defer jm.cleanup(jobID)
 
-		// Run the orchestrator
-		_, err := orch.Run(jobCtx)
+		// Run the orchestrator with the caller-provided context
+		_, err := orch.Run(ctx)
 
 		// Update database status based on result
 		var status db.RunStatus
@@ -128,6 +229,9 @@ func (jm *jobManagerImpl) Start(ctx context.Context, cfg JobConfig) (string, err
 			// Log error but don't fail - job has already completed
 			fmt.Printf("failed to update run status: %v\n", updateErr)
 		}
+
+		// Mark store as disconnected when job ends
+		jm.store.SetConnected(false)
 
 		// Close the job's event bus
 		jobEventBus.Close()
@@ -206,7 +310,39 @@ func (jm *jobManagerImpl) ActiveCount() int {
 // Called when orchestrator goroutine exits.
 func (jm *jobManagerImpl) cleanup(jobID string) {
 	jm.mu.Lock()
-	defer jm.mu.Unlock()
-
 	delete(jm.jobs, jobID)
+	callback := jm.OnJobComplete
+	jm.mu.Unlock()
+
+	// Notify listener outside of lock to prevent deadlocks
+	if callback != nil {
+		callback(jobID)
+	}
+}
+
+// ptrString returns a pointer to the given string.
+func ptrString(s string) *string {
+	return &s
+}
+
+// convertToWebEvent converts an events.Event to a web.Event for the web UI.
+func convertToWebEvent(e events.Event) *web.Event {
+	var payload json.RawMessage
+	if e.Payload != nil {
+		// Marshal the payload to JSON
+		data, err := json.Marshal(e.Payload)
+		if err == nil {
+			payload = data
+		}
+	}
+
+	return &web.Event{
+		Type:    string(e.Type),
+		Time:    e.Time,
+		Unit:    e.Unit,
+		Task:    e.Task,
+		PR:      e.PR,
+		Payload: payload,
+		Error:   e.Error,
+	}
 }

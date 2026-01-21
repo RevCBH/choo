@@ -33,7 +33,7 @@ func newMockJobManager() *mockJobManager {
 	}
 }
 
-func (m *mockJobManager) Start(ctx context.Context, cfg JobConfig) (string, error) {
+func (m *mockJobManager) Start(ctx context.Context, cancel context.CancelFunc, cfg JobConfig) (string, error) {
 	if m.startErr != nil {
 		return "", m.startErr
 	}

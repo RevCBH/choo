@@ -298,7 +298,8 @@ func TestDaemon_Shutdown_Timeout(t *testing.T) {
 	require.NoError(t, err)
 
 	// Start a long-running job by directly using the job manager
-	jobCtx := context.Background()
+	jobCtx, jobCancel := context.WithCancel(context.Background())
+	defer jobCancel()
 	jobCfg := JobConfig{
 		RepoPath:      tmpDir, // Use tmpDir as a placeholder
 		TasksDir:      tmpDir,
@@ -323,7 +324,7 @@ func TestDaemon_Shutdown_Timeout(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Start a job (it will fail to actually run due to invalid paths, but will be tracked)
-	_, _ = d.jobManager.Start(jobCtx, jobCfg)
+	_, _ = d.jobManager.Start(jobCtx, jobCancel, jobCfg)
 
 	// Trigger shutdown
 	cancel()

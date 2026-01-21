@@ -31,8 +31,10 @@ type GRPCServer struct {
 // This abstraction allows the gRPC layer to remain decoupled from
 // the actual job execution implementation
 type JobManager interface {
-	// Start creates and starts a new job, returning the job ID
-	Start(ctx context.Context, cfg JobConfig) (string, error)
+	// Start creates and starts a new job, returning the job ID.
+	// The caller provides both the context and its cancel func to allow
+	// the caller to retain control over job cancellation.
+	Start(ctx context.Context, cancel context.CancelFunc, cfg JobConfig) (string, error)
 
 	// Stop gracefully stops a running job
 	Stop(ctx context.Context, jobID string, force bool) error
@@ -136,14 +138,18 @@ func (s *GRPCServer) trackJob(jobID string, cancel context.CancelFunc) {
 	s.activeJobs[jobID] = cancel
 }
 
-// untrackJob removes a job from shutdown tracking
-func (s *GRPCServer) untrackJob(jobID string) {
+// UntrackJob removes a job from shutdown tracking.
+// Exported so that the daemon can wire up a completion callback.
+func (s *GRPCServer) UntrackJob(jobID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.activeJobs, jobID)
 }
 
-// StartJob creates and starts a new orchestration job
+// StartJob creates and starts a new orchestration job, or attaches to an existing one.
+// If a job is already running for the same (repo_path, feature_branch) pair,
+// returns that job's ID with status "attached" instead of creating a new one.
+// This enables CLI attach: `choo run` can join an in-progress workflow.
 func (s *GRPCServer) StartJob(ctx context.Context, req *apiv1.StartJobRequest) (*apiv1.StartJobResponse, error) {
 	// Check if server is shutting down
 	if s.isShuttingDown() {
@@ -161,10 +167,25 @@ func (s *GRPCServer) StartJob(ctx context.Context, req *apiv1.StartJobRequest) (
 		return nil, status.Errorf(codes.InvalidArgument, "repo_path is required")
 	}
 
+	// Check for existing running job for this repo/branch (attach support)
+	if req.FeatureBranch != "" {
+		existingRun, err := s.db.GetActiveRunByBranch(req.FeatureBranch, req.RepoPath)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to check for existing job: %v", err)
+		}
+		if existingRun != nil {
+			// Return existing job ID - client should attach to this
+			return &apiv1.StartJobResponse{
+				JobId:  existingRun.ID,
+				Status: "attached", // Signals this is an existing job, not newly created
+			}, nil
+		}
+	}
+
 	// Create job context for cancellation
 	jobCtx, cancel := context.WithCancel(context.Background())
 
-	jobID, err := s.jobManager.Start(jobCtx, JobConfig{
+	jobID, err := s.jobManager.Start(jobCtx, cancel, JobConfig{
 		RepoPath:      req.RepoPath,
 		TasksDir:      req.TasksDir,
 		TargetBranch:  req.TargetBranch,
@@ -210,7 +231,7 @@ func (s *GRPCServer) StopJob(ctx context.Context, req *apiv1.StopJobRequest) (*a
 	}
 
 	// Untrack job
-	s.untrackJob(req.JobId)
+	s.UntrackJob(req.JobId)
 
 	message := "job stopped gracefully"
 	if req.Force {

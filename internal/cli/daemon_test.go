@@ -5,7 +5,7 @@ import (
 )
 
 func TestDaemonCmd_Structure(t *testing.T) {
-	// Verifies daemon has start, stop, status subcommands
+	// Verifies daemon has start, stop, status, logs subcommands
 	app := New()
 	cmd := NewDaemonCmd(app)
 
@@ -15,8 +15,8 @@ func TestDaemonCmd_Structure(t *testing.T) {
 
 	// Check for subcommands
 	subcommands := cmd.Commands()
-	if len(subcommands) != 3 {
-		t.Errorf("Expected 3 subcommands, got %d", len(subcommands))
+	if len(subcommands) != 4 {
+		t.Errorf("Expected 4 subcommands, got %d", len(subcommands))
 	}
 
 	// Map subcommands by name
@@ -26,7 +26,7 @@ func TestDaemonCmd_Structure(t *testing.T) {
 	}
 
 	// Verify required subcommands
-	requiredSubcmds := []string{"start", "stop", "status"}
+	requiredSubcmds := []string{"start", "stop", "status", "logs"}
 	for _, required := range requiredSubcmds {
 		if !subcmdMap[required] {
 			t.Errorf("Expected subcommand '%s' not found", required)

@@ -1,10 +1,13 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/RevCBH/choo/internal/client"
@@ -12,7 +15,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// NewDaemonCmd creates the daemon command group with start, stop, status subcommands
+// NewDaemonCmd creates the daemon command group with start, stop, status, logs subcommands
 func NewDaemonCmd(a *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "daemon",
@@ -22,6 +25,7 @@ func NewDaemonCmd(a *App) *cobra.Command {
 	cmd.AddCommand(newDaemonStartCmd(a))
 	cmd.AddCommand(newDaemonStopCmd(a))
 	cmd.AddCommand(newDaemonStatusCmd(a))
+	cmd.AddCommand(newDaemonLogsCmd(a))
 
 	return cmd
 }
@@ -83,6 +87,8 @@ func isDaemonRunning() bool {
 }
 
 // startDaemonBackground spawns the daemon process in the background.
+// The child process is started in its own process group and session,
+// so it won't be affected by signals sent to the parent (e.g., Ctrl+C).
 func startDaemonBackground() error {
 	// Get the path to the current executable
 	exe, err := os.Executable()
@@ -115,25 +121,38 @@ func startDaemonBackground() error {
 	cmd := exec.Command(exe, "daemon", "start", "--foreground")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
-	// Detach from parent process group
 	cmd.Stdin = nil
+
+	// Create a new process group and session so the daemon is fully detached
+	// from the terminal. This prevents Ctrl+C from killing the daemon.
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Setpgid: true, // Create new process group
+		Pgid:    0,    // Child becomes process group leader
+	}
 
 	if err := cmd.Start(); err != nil {
 		logFile.Close()
 		return fmt.Errorf("failed to start daemon: %w", err)
 	}
 
-	// Don't wait for the process - let it run in background
-	// Release the process so it doesn't become a zombie
-	go func() {
-		cmd.Wait()
-		logFile.Close()
-	}()
+	// Record the PID for later verification
+	pid := cmd.Process.Pid
+
+	// Release the process - the daemon runs independently now.
+	// We don't call cmd.Wait() because that would block until the daemon exits.
+	// Instead, we detach completely and let the daemon manage itself.
+	if err := cmd.Process.Release(); err != nil {
+		// Non-fatal - the process is already running
+		fmt.Fprintf(os.Stderr, "Warning: failed to release process: %v\n", err)
+	}
+
+	// Close the log file handle in the parent - the child has its own copy
+	logFile.Close()
 
 	// Wait briefly and verify the daemon started successfully
 	time.Sleep(500 * time.Millisecond)
 	if isDaemonRunning() {
-		fmt.Printf("Daemon started (PID: %d)\n", cmd.Process.Pid)
+		fmt.Printf("Daemon started (PID: %d)\n", pid)
 		fmt.Printf("Logs: %s\n", logPath)
 		return nil
 	}
@@ -204,5 +223,127 @@ func newDaemonStatusCmd(a *App) *cobra.Command {
 			fmt.Printf("Version: %s\n", health.Version)
 			return nil
 		},
+	}
+}
+
+// newDaemonLogsCmd creates the 'daemon logs' command
+// Shows daemon log output with optional follow mode
+func newDaemonLogsCmd(a *App) *cobra.Command {
+	var (
+		follow bool
+		lines  int
+	)
+
+	cmd := &cobra.Command{
+		Use:   "logs",
+		Short: "Show daemon logs",
+		Long:  `Display daemon log output. Use -f to follow logs in real-time.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return fmt.Errorf("failed to get home directory: %w", err)
+			}
+			logPath := filepath.Join(home, ".choo", "daemon.log")
+
+			// Check if log file exists
+			if _, err := os.Stat(logPath); os.IsNotExist(err) {
+				return fmt.Errorf("no daemon logs found at %s", logPath)
+			}
+
+			if follow {
+				return followLogs(cmd, logPath, lines)
+			}
+			return showLogs(logPath, lines)
+		},
+	}
+
+	cmd.Flags().BoolVarP(&follow, "follow", "f", false, "Follow log output (like tail -f)")
+	cmd.Flags().IntVarP(&lines, "lines", "n", 50, "Number of lines to show (0 for all)")
+
+	return cmd
+}
+
+// showLogs displays the last N lines of the log file
+func showLogs(logPath string, lines int) error {
+	if lines == 0 {
+		// Show all lines
+		f, err := os.Open(logPath)
+		if err != nil {
+			return fmt.Errorf("failed to open log file: %w", err)
+		}
+		defer f.Close()
+		_, err = io.Copy(os.Stdout, f)
+		return err
+	}
+
+	// Show last N lines (similar to tail -n)
+	f, err := os.Open(logPath)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %w", err)
+	}
+	defer f.Close()
+
+	// Read all lines into a buffer
+	var allLines []string
+	scanner := bufio.NewScanner(f)
+	// Increase buffer size for long lines
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		allLines = append(allLines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("error reading log file: %w", err)
+	}
+
+	// Print last N lines
+	start := len(allLines) - lines
+	if start < 0 {
+		start = 0
+	}
+	for _, line := range allLines[start:] {
+		fmt.Println(line)
+	}
+	return nil
+}
+
+// followLogs tails the log file, showing new content as it's written
+func followLogs(cmd *cobra.Command, logPath string, initialLines int) error {
+	// First show the last N lines
+	if initialLines > 0 {
+		if err := showLogs(logPath, initialLines); err != nil {
+			return err
+		}
+	}
+
+	// Open file for following
+	f, err := os.Open(logPath)
+	if err != nil {
+		return fmt.Errorf("failed to open log file: %w", err)
+	}
+	defer f.Close()
+
+	// Seek to end of file
+	if _, err := f.Seek(0, io.SeekEnd); err != nil {
+		return fmt.Errorf("failed to seek to end of file: %w", err)
+	}
+
+	// Follow new content
+	reader := bufio.NewReader(f)
+	for {
+		select {
+		case <-cmd.Context().Done():
+			return nil
+		default:
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if err == io.EOF {
+					// No new content, wait a bit
+					time.Sleep(100 * time.Millisecond)
+					continue
+				}
+				return fmt.Errorf("error reading log file: %w", err)
+			}
+			fmt.Print(line)
+		}
 	}
 }

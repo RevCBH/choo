@@ -23,8 +23,8 @@ func newJobManagerAdapter(impl *jobManagerImpl, database *db.DB) *jobManagerAdap
 }
 
 // Start creates and starts a new job, returning the job ID.
-func (a *jobManagerAdapter) Start(ctx context.Context, cfg JobConfig) (string, error) {
-	return a.impl.Start(ctx, cfg)
+func (a *jobManagerAdapter) Start(ctx context.Context, cancel context.CancelFunc, cfg JobConfig) (string, error) {
+	return a.impl.Start(ctx, cancel, cfg)
 }
 
 // Stop gracefully stops a running job.

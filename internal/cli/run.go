@@ -71,11 +71,22 @@ func (opts RunOptions) Validate() error {
 	return nil
 }
 
-// runWithDaemon executes a job via the daemon and attaches to event stream
+// runWithDaemon executes a job via the daemon and attaches to event stream.
+// If the daemon is not running, it will be started automatically.
 func runWithDaemon(ctx context.Context, tasksDir string, parallelism int, target, feature string) error {
+	// Auto-start daemon if not running
+	if !isDaemonRunning() {
+		fmt.Println("Starting daemon...")
+		if err := startDaemonBackground(); err != nil {
+			return fmt.Errorf("failed to start daemon: %w", err)
+		}
+		// Give daemon a moment to initialize
+		time.Sleep(500 * time.Millisecond)
+	}
+
 	c, err := client.New(defaultSocketPath())
 	if err != nil {
-		return fmt.Errorf("failed to connect to daemon: %w (is daemon running?)", err)
+		return fmt.Errorf("failed to connect to daemon: %w", err)
 	}
 	defer c.Close()
 
