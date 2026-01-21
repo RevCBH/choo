@@ -51,21 +51,25 @@ type JobManager interface {
 
 // JobConfig contains configuration for starting a new job
 type JobConfig struct {
-	TasksDir      string
-	TargetBranch  string
-	FeatureBranch string
-	Parallelism   int
-	RepoPath      string
+	RepoPath      string // Absolute path to git repository
+	TasksDir      string // Directory containing task definitions
+	TargetBranch  string // Base branch for PRs (e.g., "main")
+	FeatureBranch string // Optional: for feature mode
+	DryRun        bool   // If true, don't create PRs or merge
+	Concurrency   int    // Max parallel units (0 = default)
 }
 
 // JobState represents the full state of a job
 type JobState struct {
-	ID          string
-	Status      string
-	StartedAt   *time.Time
-	CompletedAt *time.Time
-	Error       *string
-	Units       []*UnitState
+	ID            string
+	Status        string     // "running", "completed", "failed", "cancelled"
+	StartedAt     time.Time
+	CompletedAt   *time.Time
+	Error         *string
+	UnitsTotal    int
+	UnitsComplete int
+	UnitsFailed   int
+	Units         []*UnitState // Detailed unit states (optional, for backwards compat)
 }
 
 // UnitState represents the state of a unit within a job
@@ -158,11 +162,12 @@ func (s *GRPCServer) StartJob(ctx context.Context, req *apiv1.StartJobRequest) (
 	jobCtx, cancel := context.WithCancel(context.Background())
 
 	jobID, err := s.jobManager.Start(jobCtx, JobConfig{
+		RepoPath:      req.RepoPath,
 		TasksDir:      req.TasksDir,
 		TargetBranch:  req.TargetBranch,
 		FeatureBranch: req.FeatureBranch,
-		Parallelism:   int(req.Parallelism),
-		RepoPath:      req.RepoPath,
+		DryRun:        false, // TODO: add to proto
+		Concurrency:   int(req.Parallelism),
 	})
 	if err != nil {
 		cancel() // Clean up context

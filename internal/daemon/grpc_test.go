@@ -37,11 +37,10 @@ func (m *mockJobManager) Start(ctx context.Context, cfg JobConfig) (string, erro
 		return "", m.startErr
 	}
 	jobID := "job-" + time.Now().Format("20060102150405")
-	now := time.Now()
 	m.jobs[jobID] = &JobState{
 		ID:        jobID,
 		Status:    "running",
-		StartedAt: &now,
+		StartedAt: time.Now(),
 	}
 	return jobID, nil
 }
@@ -86,7 +85,7 @@ func (m *mockJobManager) ListJobs(statusFilter []string) ([]*JobSummary, error) 
 		result = append(result, &JobSummary{
 			JobID:     job.ID,
 			Status:    job.Status,
-			StartedAt: job.StartedAt,
+			StartedAt: &job.StartedAt,
 		})
 	}
 	return result, nil
@@ -111,11 +110,10 @@ func (m *mockJobManager) ActiveJobCount() int {
 }
 
 func (m *mockJobManager) addJob(id string, status string) {
-	now := time.Now()
 	m.jobs[id] = &JobState{
 		ID:        id,
 		Status:    status,
-		StartedAt: &now,
+		StartedAt: time.Now(),
 	}
 }
 
