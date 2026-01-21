@@ -48,7 +48,8 @@ const (
 const (
 	UnitQueued    EventType = "unit.queued"
 	UnitStarted   EventType = "unit.started"
-	UnitCompleted EventType = "unit.completed"
+	UnitCompleted EventType = "unit.completed" // Terminal: tasks done and merged to feature branch
+	UnitMerged    EventType = "unit.merged"    // Emitted when unit is merged to feature branch (same as completed)
 	UnitFailed    EventType = "unit.failed"
 	UnitBlocked   EventType = "unit.blocked"
 )
@@ -67,18 +68,18 @@ const (
 	TaskFailed         EventType = "task.failed"
 )
 
-// PR lifecycle events
+// PR lifecycle events (deprecated: local merge workflow replaces PRs for unit branches)
 const (
-	PRCreated           EventType = "pr.created"
-	PRReviewPending     EventType = "pr.review.pending"
-	PRReviewInProgress  EventType = "pr.review.in_progress"
-	PRReviewApproved    EventType = "pr.review.approved"
-	PRFeedbackReceived  EventType = "pr.feedback.received"
-	PRFeedbackAddressed EventType = "pr.feedback.addressed"
-	PRMergeQueued       EventType = "pr.merge.queued"
-	PRConflict          EventType = "pr.conflict"
-	PRMerged            EventType = "pr.merged"
-	PRFailed            EventType = "pr.failed"
+	PRCreated           EventType = "pr.created"            // Deprecated
+	PRReviewPending     EventType = "pr.review.pending"     // Deprecated
+	PRReviewInProgress  EventType = "pr.review.in_progress" // Deprecated
+	PRReviewApproved    EventType = "pr.review.approved"    // Deprecated
+	PRFeedbackReceived  EventType = "pr.feedback.received"  // Deprecated
+	PRFeedbackAddressed EventType = "pr.feedback.addressed" // Deprecated
+	PRMergeQueued       EventType = "pr.merge.queued"       // Deprecated
+	PRConflict          EventType = "pr.conflict"           // Deprecated
+	PRMerged            EventType = "pr.merged"             // Deprecated
+	PRFailed            EventType = "pr.failed"             // Deprecated
 )
 
 // Git operation events
