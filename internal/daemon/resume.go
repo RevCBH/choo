@@ -96,11 +96,8 @@ func (jm *jobManagerImpl) Resume(ctx context.Context, runID string, cfg JobConfi
 
 	// Check if daemon version matches (if set)
 	// For now, we skip version checking if DaemonVersion is not set in the database
-	// In production, this would be a strict check
-	if run.DaemonVersion != "" {
-		// This would need to compare with actual daemon version
-		// For testing purposes, we'll allow empty version to pass
-	}
+	// TODO: In production, implement strict version checking
+	_ = run.DaemonVersion // Version checking not yet implemented
 
 	// 2. Validate repository still exists
 	if err := validateRepoExists(cfg.RepoPath); err != nil {

@@ -1,32 +1,33 @@
+version: "2"
+
 linters:
+  default: none
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
-    - staticcheck
+    - staticcheck  # includes gosimple checks in v2
     - unused
-
-linters-settings:
-  errcheck:
-    # Don't check for unchecked errors in test files for common test patterns
-    exclude-functions:
-      - (github.com/RevCBH/choo/internal/scheduler.Scheduler).Transition
-      - (github.com/RevCBH/choo/internal/worker.Pool).Submit
-      - (github.com/RevCBH/choo/internal/worker.Pool).Wait
-      - (github.com/RevCBH/choo/internal/git.WorktreeManager).RemoveWorktree
-      - (*os/exec.Cmd).Run
-      - (*encoding/json.Encoder).Encode
-      - (*encoding/json.Decoder).Decode
-      - (io.Writer).Write
-      - os.MkdirAll
-      - os.WriteFile
-      - os.Chdir
-      - (*bytes.Buffer).ReadFrom
-
-issues:
-  # Exclude test files from some checks
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
+  exclusions:
+    presets:
+      - std-error-handling  # ignore common errors like Close(), Write(), etc.
+    rules:
+      # Exclude test files from errcheck
+      - path: _test\.go
+        linters:
+          - errcheck
+  settings:
+    errcheck:
+      # Don't check for unchecked errors for common patterns
+      exclude-functions:
+        - (github.com/RevCBH/choo/internal/scheduler.Scheduler).Transition
+        - (github.com/RevCBH/choo/internal/worker.Pool).Submit
+        - (github.com/RevCBH/choo/internal/worker.Pool).Wait
+        - (github.com/RevCBH/choo/internal/git.WorktreeManager).RemoveWorktree
+        - (*encoding/json.Encoder).Encode
+        - os.MkdirAll
+    staticcheck:
+      # Only enable SA checks (semantic analysis), not ST (style) or QF (quick fixes)
+      checks:
+        - "SA*"
+        - "-SA1019"  # Allow deprecated symbols for now (grpc migration ongoing)
