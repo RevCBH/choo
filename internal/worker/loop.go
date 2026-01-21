@@ -70,94 +70,98 @@ func (w *Worker) findReadyTasks() []*discovery.Task {
 	return ready
 }
 
-// invokeClaudeForTask runs Claude CLI as subprocess with the task prompt
-// CRITICAL: Uses subprocess, NEVER the Claude API directly
-// NOTE: We do NOT pass --max-turns to Claude. Each Claude invocation is ONE Ralph turn.
-// Claude should have unlimited turns to complete the task within a single invocation.
-// MaxClaudeRetries controls how many times Ralph will invoke Claude, not Claude's internal turns.
-func (w *Worker) invokeClaudeForTask(ctx context.Context, prompt TaskPrompt) error {
-	// Build args: --dangerously-skip-permissions, -p prompt.Content
-	// No --max-turns: Claude gets unlimited turns per invocation
-	args := []string{
-		"--dangerously-skip-permissions",
-		"-p", prompt.Content,
+// invokeProvider runs the configured provider with the task prompt
+// CRITICAL: Uses subprocess via Provider.Invoke(), NEVER direct API calls
+// NOTE: We do NOT pass --max-turns to providers. Each invocation is ONE Ralph turn.
+// The provider should have unlimited turns to complete the task within a single invocation.
+// MaxClaudeRetries controls how many times Ralph will invoke the provider, not internal turns.
+func (w *Worker) invokeProvider(ctx context.Context, prompt TaskPrompt) error {
+	// Get provider name for logging
+	providerName := "unknown"
+	if w.provider != nil {
+		providerName = string(w.provider.Name())
 	}
 
-	// Create exec.CommandContext for "claude" binary
-	cmd := exec.CommandContext(ctx, "claude", args...)
-
-	// Set cmd.Dir to worktree path
-	cmd.Dir = w.worktreePath
-
-	// Create log file for Claude output
-	logDir := filepath.Join(w.config.WorktreeBase, "logs")
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to create log directory: %v\n", err)
-	}
-
-	logFile, err := os.Create(filepath.Join(logDir, fmt.Sprintf("claude-%s-%d.log", w.unit.ID, time.Now().Unix())))
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to create log file: %v\n", err)
-		// Fall back to inheriting stdout/stderr (unless suppressed)
-		if !w.config.SuppressOutput {
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
-		}
-	} else {
-		defer logFile.Close()
-		// Write prompt to log file first
-		fmt.Fprintf(logFile, "=== PROMPT ===\n%s\n=== END PROMPT ===\n\n", prompt.Content)
-		fmt.Fprintf(logFile, "=== CLAUDE OUTPUT ===\n")
-
-		if w.config.SuppressOutput {
-			// TUI mode: only write to log file
-			cmd.Stdout = logFile
-			cmd.Stderr = logFile
-		} else {
-			// Non-TUI mode: tee output to both log file and stdout/stderr
-			cmd.Stdout = io.MultiWriter(os.Stdout, logFile)
-			cmd.Stderr = io.MultiWriter(os.Stderr, logFile)
-			fmt.Fprintf(os.Stderr, "Claude output logging to: %s\n", logFile.Name())
-		}
-	}
-
-	// Emit TaskClaudeInvoke event
+	// Emit TaskClaudeInvoke event at start (name unchanged for backward compatibility)
 	if w.events != nil {
 		evt := events.NewEvent(events.TaskClaudeInvoke, w.unit.ID)
 		if w.currentTask != nil {
 			evt = evt.WithTask(w.currentTask.Number).WithPayload(map[string]any{
-				"title": w.currentTask.Title,
+				"title":    w.currentTask.Title,
+				"provider": providerName,
 			})
 		}
 		w.events.Emit(evt)
 	}
 
-	// Run command
-	runErr := cmd.Run()
+	// Track error to emit in TaskClaudeDone event
+	var runErr error
+	defer func() {
+		// Always emit TaskClaudeDone event (name unchanged for backward compatibility)
+		if w.events != nil {
+			evt := events.NewEvent(events.TaskClaudeDone, w.unit.ID)
+			if w.currentTask != nil {
+				evt = evt.WithTask(w.currentTask.Number)
+			}
+			if runErr != nil {
+				evt = evt.WithError(runErr)
+			}
+			w.events.Emit(evt)
+		}
+	}()
+
+	// Check if provider is configured early
+	if w.provider == nil {
+		runErr = fmt.Errorf("no provider configured for worker")
+		return runErr
+	}
+
+	// Create log file for provider output
+	logDir := filepath.Join(w.config.WorktreeBase, "logs")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create log directory: %v\n", err)
+	}
+
+	logFile, err := os.Create(filepath.Join(logDir,
+		fmt.Sprintf("%s-%s-%d.log", providerName, w.unit.ID, time.Now().Unix())))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create log file: %v\n", err)
+		// Fall back to stdout/stderr (unless suppressed)
+		if !w.config.SuppressOutput {
+			runErr = w.provider.Invoke(ctx, prompt.Content, w.worktreePath, os.Stdout, os.Stderr)
+		} else {
+			runErr = w.provider.Invoke(ctx, prompt.Content, w.worktreePath, io.Discard, io.Discard)
+		}
+		return runErr
+	}
+	defer logFile.Close()
+
+	// Write prompt to log file
+	fmt.Fprintf(logFile, "=== PROMPT ===\n%s\n=== END PROMPT ===\n\n", prompt.Content)
+	fmt.Fprintf(logFile, "=== PROVIDER: %s ===\n", providerName)
+
+	// Configure output writers
+	var stdout, stderr io.Writer
+	if w.config.SuppressOutput {
+		stdout = logFile
+		stderr = logFile
+	} else {
+		stdout = io.MultiWriter(os.Stdout, logFile)
+		stderr = io.MultiWriter(os.Stderr, logFile)
+		fmt.Fprintf(os.Stderr, "Provider output logging to: %s\n", logFile.Name())
+	}
+
+	// Invoke provider
+	runErr = w.provider.Invoke(ctx, prompt.Content, w.worktreePath, stdout, stderr)
 
 	// Write completion status to log
-	if logFile != nil {
-		fmt.Fprintf(logFile, "\n=== END CLAUDE OUTPUT ===\n")
-		if runErr != nil {
-			fmt.Fprintf(logFile, "Exit error: %v\n", runErr)
-		} else {
-			fmt.Fprintf(logFile, "Exit: success\n")
-		}
+	fmt.Fprintf(logFile, "\n=== END PROVIDER OUTPUT ===\n")
+	if runErr != nil {
+		fmt.Fprintf(logFile, "Exit error: %v\n", runErr)
+	} else {
+		fmt.Fprintf(logFile, "Exit: success\n")
 	}
 
-	// Emit TaskClaudeDone event
-	if w.events != nil {
-		evt := events.NewEvent(events.TaskClaudeDone, w.unit.ID)
-		if w.currentTask != nil {
-			evt = evt.WithTask(w.currentTask.Number)
-		}
-		if runErr != nil {
-			evt = evt.WithError(runErr)
-		}
-		w.events.Emit(evt)
-	}
-
-	// Return error if command failed
 	return runErr
 }
 
@@ -243,9 +247,9 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 			w.events.Emit(evt)
 		}
 
-		// b. Emit TaskClaudeInvoke event (done inside invokeClaudeForTask)
-		// c. Invoke Claude
-		claudeErr := w.invokeClaudeForTask(ctx, prompt)
+		// b. Emit TaskClaudeInvoke event (done inside invokeProvider)
+		// c. Invoke Provider
+		claudeErr := w.invokeProvider(ctx, prompt)
 
 		// c. Find which task was completed (scan all ready tasks)
 		// IMPORTANT: Check for completion EVEN if Claude returned an error,

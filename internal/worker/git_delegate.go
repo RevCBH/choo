@@ -3,9 +3,13 @@ package worker
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/RevCBH/choo/internal/escalate"
 	"github.com/RevCBH/choo/internal/events"
@@ -164,10 +168,60 @@ func (w *Worker) pushViaClaudeCode(ctx context.Context) error {
 	return nil
 }
 
-// invokeClaude invokes Claude CLI with the given prompt (no output capture)
+// invokeClaude invokes Claude CLI directly with the given prompt (no output capture)
+// NOTE: This always uses Claude, regardless of the configured task provider.
+// This is intentional - non-task operations like conflict resolution should always use Claude.
 func (w *Worker) invokeClaude(ctx context.Context, prompt string) error {
-	taskPrompt := TaskPrompt{Content: prompt}
-	return w.invokeClaudeForTask(ctx, taskPrompt)
+	return w.invokeClaudeInDir(ctx, w.worktreePath, prompt)
+}
+
+// invokeClaudeInDir invokes Claude CLI in a specific directory (for RepoRoot conflicts)
+// Uses w.config.ClaudeCommand if set, otherwise defaults to "claude"
+func (w *Worker) invokeClaudeInDir(ctx context.Context, dir, prompt string) error {
+	args := []string{
+		"--dangerously-skip-permissions",
+		"-p", prompt,
+	}
+
+	// Use configured Claude command, with fallback to default
+	claudeCmd := w.config.ClaudeCommand
+	if claudeCmd == "" {
+		claudeCmd = "claude"
+	}
+
+	cmd := exec.CommandContext(ctx, claudeCmd, args...)
+	cmd.Dir = dir
+
+	// Create log file for Claude output
+	logDir := filepath.Join(w.config.WorktreeBase, "logs")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create log directory: %v\n", err)
+	}
+
+	logFile, err := os.Create(filepath.Join(logDir, fmt.Sprintf("claude-merge-%s-%d.log", w.unit.ID, time.Now().Unix())))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create log file: %v\n", err)
+		if !w.config.SuppressOutput {
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+		}
+	} else {
+		defer logFile.Close()
+		fmt.Fprintf(logFile, "=== Claude invocation for merge conflict resolution ===\n")
+		fmt.Fprintf(logFile, "Directory: %s\n", dir)
+		fmt.Fprintf(logFile, "Prompt:\n%s\n", prompt)
+		fmt.Fprintf(logFile, "=== Output ===\n")
+
+		if w.config.SuppressOutput {
+			cmd.Stdout = logFile
+			cmd.Stderr = logFile
+		} else {
+			cmd.Stdout = io.MultiWriter(os.Stdout, logFile)
+			cmd.Stderr = io.MultiWriter(os.Stderr, logFile)
+		}
+	}
+
+	return cmd.Run()
 }
 
 // invokeClaudeWithOutputImpl is the default implementation

@@ -10,9 +10,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/RevCBH/choo/internal/config"
 	"github.com/RevCBH/choo/internal/discovery"
 	"github.com/RevCBH/choo/internal/escalate"
 	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/provider"
 	"github.com/RevCBH/choo/internal/scheduler"
 	"github.com/RevCBH/choo/internal/worker"
 )
@@ -826,9 +828,12 @@ backpressure: "echo ok"
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// All units complete, so TotalUnits should be 0
-	if result.TotalUnits != 0 {
-		t.Errorf("expected 0 units when all are complete, got %d", result.TotalUnits)
+	// All units complete - TotalUnits should reflect the discovered units
+	if result.TotalUnits != 1 {
+		t.Errorf("expected 1 unit discovered, got %d", result.TotalUnits)
+	}
+	if result.CompletedUnits != 1 {
+		t.Errorf("expected 1 completed unit, got %d", result.CompletedUnits)
 	}
 }
 
@@ -913,5 +918,107 @@ backpressure: "echo ok"
 	}
 	if strings.Contains(output, "dep-unit") {
 		t.Error("expected output NOT to contain dep-unit (it's complete)")
+	}
+}
+
+func TestResolveProviderForUnit_Precedence(t *testing.T) {
+	tests := []struct {
+		name         string
+		cfg          Config
+		unitProvider string
+		expectedType provider.ProviderType
+	}{
+		{
+			name: "force_overrides_all",
+			cfg: Config{
+				ForceTaskProvider: "codex",
+				DefaultProvider:   "claude",
+				ProviderConfig: config.ProviderConfig{
+					Type: "claude",
+				},
+			},
+			unitProvider: "claude",
+			expectedType: provider.ProviderCodex,
+		},
+		{
+			name: "frontmatter_overrides_default",
+			cfg: Config{
+				DefaultProvider: "claude",
+			},
+			unitProvider: "codex",
+			expectedType: provider.ProviderCodex,
+		},
+		{
+			name: "default_used_when_no_frontmatter",
+			cfg: Config{
+				DefaultProvider: "codex",
+			},
+			unitProvider: "",
+			expectedType: provider.ProviderCodex,
+		},
+		{
+			name: "config_used_when_no_default",
+			cfg: Config{
+				ProviderConfig: config.ProviderConfig{
+					Type: "codex",
+				},
+			},
+			unitProvider: "",
+			expectedType: provider.ProviderCodex,
+		},
+		{
+			name:         "claude_is_fallback",
+			cfg:          Config{},
+			unitProvider: "",
+			expectedType: provider.ProviderClaude,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			deps := Dependencies{Bus: events.NewBus(100)}
+			o := New(tt.cfg, deps)
+
+			unit := &discovery.Unit{
+				ID:       "test-unit",
+				Provider: tt.unitProvider,
+			}
+
+			prov, err := o.resolveProviderForUnit(unit)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if prov.Name() != tt.expectedType {
+				t.Errorf("expected %s, got %s", tt.expectedType, prov.Name())
+			}
+		})
+	}
+}
+
+func TestResolveProviderForUnit_CommandOverride(t *testing.T) {
+	cfg := Config{
+		DefaultProvider: "codex",
+		ProviderConfig: config.ProviderConfig{
+			Providers: map[config.ProviderType]config.ProviderSettings{
+				"codex": {
+					Command: "/custom/path/to/codex",
+				},
+			},
+		},
+	}
+	deps := Dependencies{Bus: events.NewBus(100)}
+	o := New(cfg, deps)
+
+	unit := &discovery.Unit{ID: "test-unit"}
+
+	prov, err := o.resolveProviderForUnit(unit)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Provider should be created successfully with custom command
+	if prov.Name() != provider.ProviderCodex {
+		t.Errorf("expected codex, got %s", prov.Name())
 	}
 }

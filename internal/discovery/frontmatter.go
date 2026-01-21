@@ -16,6 +16,11 @@ type UnitFrontmatter struct {
 	// Optional dependency field
 	DependsOn []string `yaml:"depends_on"`
 
+	// Provider overrides the default provider for this unit's task execution
+	// Valid values: "claude", "codex"
+	// Empty means use the resolved default from CLI/env/config
+	Provider string `yaml:"provider,omitempty"`
+
 	// Orchestrator-managed fields (may not be present initially)
 	OrchStatus      string `yaml:"orch_status"`
 	OrchBranch      string `yaml:"orch_branch"`

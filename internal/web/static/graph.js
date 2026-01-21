@@ -13,11 +13,11 @@ const STATUS_COLORS = {
 };
 
 const LAYOUT = {
-    nodeWidth: 140,
+    nodeWidth: 200,
     nodeHeight: 50,
-    levelSpacing: 180,
-    nodeSpacing: 70,
-    padding: 90,  // Must be > nodeWidth/2 to prevent cutoff
+    levelSpacing: 240,
+    nodeSpacing: 80,
+    padding: 120,  // Must be > nodeWidth/2 to prevent cutoff
     // Progress block settings
     blockSize: 8,
     blockGap: 3,
@@ -74,19 +74,104 @@ export function initGraph(container, data, eventCallbacks) {
 function computeLayout(width, height) {
     const levels = graphData.levels || [];
 
+    // Build adjacency maps for fast lookup
+    const nodeById = new Map(graphData.nodes.map(n => [n.id, n]));
+    const incomingEdges = new Map(); // nodeId -> [sourceNodeIds]
+    const outgoingEdges = new Map(); // nodeId -> [targetNodeIds]
+
+    graphData.nodes.forEach(n => {
+        incomingEdges.set(n.id, []);
+        outgoingEdges.set(n.id, []);
+    });
+
+    graphData.edges.forEach(e => {
+        // e.from = dependent (right), e.to = dependency (left)
+        incomingEdges.get(e.from)?.push(e.to);
+        outgoingEdges.get(e.to)?.push(e.from);
+    });
+
+    // First pass: assign X positions and initial centered Y positions
     levels.forEach((levelNodes, levelIndex) => {
         const x = LAYOUT.padding + levelIndex * LAYOUT.levelSpacing;
         const levelHeight = levelNodes.length * LAYOUT.nodeSpacing;
         const startY = (height - levelHeight) / 2 + LAYOUT.nodeSpacing / 2;
 
         levelNodes.forEach((nodeId, nodeIndex) => {
-            const node = graphData.nodes.find(n => n.id === nodeId);
+            const node = nodeById.get(nodeId);
             if (node) {
                 node.x = x;
                 node.y = startY + nodeIndex * LAYOUT.nodeSpacing;
             }
         });
     });
+
+    // Barycentric positioning: iteratively adjust Y based on connected neighbors
+    const iterations = 4;
+    for (let iter = 0; iter < iterations; iter++) {
+        // Forward pass: adjust based on incoming edges (dependencies)
+        for (let levelIndex = 1; levelIndex < levels.length; levelIndex++) {
+            const levelNodes = levels[levelIndex];
+            const barycenters = [];
+
+            levelNodes.forEach(nodeId => {
+                const node = nodeById.get(nodeId);
+                const incoming = incomingEdges.get(nodeId) || [];
+                if (incoming.length > 0) {
+                    const avgY = incoming.reduce((sum, depId) => {
+                        const dep = nodeById.get(depId);
+                        return sum + (dep ? dep.y : 0);
+                    }, 0) / incoming.length;
+                    barycenters.push({ nodeId, y: avgY });
+                } else {
+                    barycenters.push({ nodeId, y: node.y });
+                }
+            });
+
+            // Sort by barycenter and reassign positions
+            barycenters.sort((a, b) => a.y - b.y);
+            const levelHeight = levelNodes.length * LAYOUT.nodeSpacing;
+            const startY = (height - levelHeight) / 2 + LAYOUT.nodeSpacing / 2;
+
+            barycenters.forEach((item, i) => {
+                const node = nodeById.get(item.nodeId);
+                if (node) {
+                    node.y = startY + i * LAYOUT.nodeSpacing;
+                }
+            });
+        }
+
+        // Backward pass: adjust based on outgoing edges (dependents)
+        for (let levelIndex = levels.length - 2; levelIndex >= 0; levelIndex--) {
+            const levelNodes = levels[levelIndex];
+            const barycenters = [];
+
+            levelNodes.forEach(nodeId => {
+                const node = nodeById.get(nodeId);
+                const outgoing = outgoingEdges.get(nodeId) || [];
+                if (outgoing.length > 0) {
+                    const avgY = outgoing.reduce((sum, depId) => {
+                        const dep = nodeById.get(depId);
+                        return sum + (dep ? dep.y : 0);
+                    }, 0) / outgoing.length;
+                    barycenters.push({ nodeId, y: avgY });
+                } else {
+                    barycenters.push({ nodeId, y: node.y });
+                }
+            });
+
+            // Sort by barycenter and reassign positions
+            barycenters.sort((a, b) => a.y - b.y);
+            const levelHeight = levelNodes.length * LAYOUT.nodeSpacing;
+            const startY = (height - levelHeight) / 2 + LAYOUT.nodeSpacing / 2;
+
+            barycenters.forEach((item, i) => {
+                const node = nodeById.get(item.nodeId);
+                if (node) {
+                    node.y = startY + i * LAYOUT.nodeSpacing;
+                }
+            });
+        }
+    }
 }
 
 function renderNodes() {
@@ -125,7 +210,7 @@ function renderNodes() {
         .attr("fill", "white")
         .attr("font-size", "13px")
         .attr("font-weight", "500")
-        .text(d => truncateLabel(d.id, 18));
+        .text(d => truncateLabel(d.id, 26));
 
     // Progress blocks container
     nodeEnter.append("g")
@@ -207,6 +292,9 @@ function renderProgressBlocks(container, node) {
 }
 
 function renderEdges() {
+    // Compute port offsets for edges connecting to the same node side
+    const portOffsets = computePortOffsets();
+
     const edgeSelection = edgesGroup.selectAll(".edge")
         .data(graphData.edges, d => `${d.from}-${d.to}`);
 
@@ -223,7 +311,8 @@ function renderEdges() {
             const source = graphData.nodes.find(n => n.id === d.to);   // dependency (left)
             const target = graphData.nodes.find(n => n.id === d.from); // dependent (right)
             if (!source || !target) return "";
-            return bezierPath(source, target);
+            const offsets = portOffsets.get(`${d.from}-${d.to}`) || { sourceOffset: 0, targetOffset: 0 };
+            return bezierPath(source, target, offsets.sourceOffset, offsets.targetOffset);
         })
         .attr("fill", "none")
         .attr("stroke", "#6B7280")
@@ -231,13 +320,90 @@ function renderEdges() {
         .attr("marker-end", "url(#arrowhead)");
 }
 
-function bezierPath(source, target) {
+/**
+ * Compute Y offsets for edge connection points to avoid overlap.
+ * When multiple edges connect to the same side of a node, stagger them vertically.
+ */
+function computePortOffsets() {
+    const offsets = new Map(); // edgeKey -> {sourceOffset, targetOffset}
+    const maxPortOffset = LAYOUT.nodeHeight / 3; // Max offset from center
+
+    // Group edges by source (right side) and target (left side) nodes
+    const sourceEdges = new Map(); // nodeId -> edges leaving from right side
+    const targetEdges = new Map(); // nodeId -> edges entering from left side
+
+    graphData.edges.forEach(e => {
+        // e.to = source (dependency, left node), e.from = target (dependent, right node)
+        if (!sourceEdges.has(e.to)) sourceEdges.set(e.to, []);
+        if (!targetEdges.has(e.from)) targetEdges.set(e.from, []);
+        sourceEdges.get(e.to).push(e);
+        targetEdges.get(e.from).push(e);
+    });
+
+    // Compute offsets for edges leaving each source node (right side)
+    sourceEdges.forEach((edges, nodeId) => {
+        if (edges.length <= 1) {
+            edges.forEach(e => {
+                const key = `${e.from}-${e.to}`;
+                if (!offsets.has(key)) offsets.set(key, { sourceOffset: 0, targetOffset: 0 });
+                offsets.get(key).sourceOffset = 0;
+            });
+            return;
+        }
+
+        // Sort edges by target node's Y position for consistent ordering
+        edges.sort((a, b) => {
+            const targetA = graphData.nodes.find(n => n.id === a.from);
+            const targetB = graphData.nodes.find(n => n.id === b.from);
+            return (targetA?.y || 0) - (targetB?.y || 0);
+        });
+
+        const step = (2 * maxPortOffset) / (edges.length - 1 || 1);
+        edges.forEach((e, i) => {
+            const key = `${e.from}-${e.to}`;
+            if (!offsets.has(key)) offsets.set(key, { sourceOffset: 0, targetOffset: 0 });
+            offsets.get(key).sourceOffset = -maxPortOffset + i * step;
+        });
+    });
+
+    // Compute offsets for edges entering each target node (left side)
+    targetEdges.forEach((edges, nodeId) => {
+        if (edges.length <= 1) {
+            edges.forEach(e => {
+                const key = `${e.from}-${e.to}`;
+                if (!offsets.has(key)) offsets.set(key, { sourceOffset: 0, targetOffset: 0 });
+                offsets.get(key).targetOffset = 0;
+            });
+            return;
+        }
+
+        // Sort edges by source node's Y position for consistent ordering
+        edges.sort((a, b) => {
+            const sourceA = graphData.nodes.find(n => n.id === a.to);
+            const sourceB = graphData.nodes.find(n => n.id === b.to);
+            return (sourceA?.y || 0) - (sourceB?.y || 0);
+        });
+
+        const step = (2 * maxPortOffset) / (edges.length - 1 || 1);
+        edges.forEach((e, i) => {
+            const key = `${e.from}-${e.to}`;
+            if (!offsets.has(key)) offsets.set(key, { sourceOffset: 0, targetOffset: 0 });
+            offsets.get(key).targetOffset = -maxPortOffset + i * step;
+        });
+    });
+
+    return offsets;
+}
+
+function bezierPath(source, target, sourceYOffset = 0, targetYOffset = 0) {
     const sourceX = source.x + LAYOUT.nodeWidth / 2;
+    const sourceY = source.y + sourceYOffset;
     // Arrowhead marker has refX=8 with 10-unit path, so tip extends 2 units past path end
     // End path 2 units before node edge so arrowhead tip touches the edge
     const targetX = target.x - LAYOUT.nodeWidth / 2 - 2;
+    const targetY = target.y + targetYOffset;
     const midX = (sourceX + targetX) / 2;
-    return `M ${sourceX} ${source.y} C ${midX} ${source.y}, ${midX} ${target.y}, ${targetX} ${target.y}`;
+    return `M ${sourceX} ${sourceY} C ${midX} ${sourceY}, ${midX} ${targetY}, ${targetX} ${targetY}`;
 }
 
 function truncateLabel(text, maxLength) {

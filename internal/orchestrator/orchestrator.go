@@ -3,15 +3,19 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/RevCBH/choo/internal/config"
 	"github.com/RevCBH/choo/internal/discovery"
 	"github.com/RevCBH/choo/internal/escalate"
 	"github.com/RevCBH/choo/internal/events"
 	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/github"
+	"github.com/RevCBH/choo/internal/provider"
 	"github.com/RevCBH/choo/internal/scheduler"
 	"github.com/RevCBH/choo/internal/worker"
 )
@@ -81,6 +85,22 @@ type Config struct {
 
 	// FeatureMode is true when operating in feature mode
 	FeatureMode bool
+
+	// DefaultProvider is the provider type from --provider flag
+	// Used when unit frontmatter doesn't specify a provider
+	DefaultProvider string
+
+	// ForceTaskProvider overrides all provider selection when non-empty
+	// Set via --force-task-provider CLI flag
+	ForceTaskProvider string
+
+	// ProviderConfig contains provider-specific settings from .choo.yaml
+	// Includes provider type default and per-provider command overrides
+	ProviderConfig config.ProviderConfig
+
+	// ClaudeCommand is the Claude CLI command for non-task operations
+	// (conflict resolution, PR creation, etc.) - always uses Claude regardless of task provider
+	ClaudeCommand string
 }
 
 // Dependencies bundles external dependencies for injection
@@ -270,13 +290,30 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 		}
 	}
 
+	// Store all discovered units before filtering (for PR creation)
+	allDiscoveredUnits := units
+
 	// Filter out already-complete units (they don't need to be re-executed)
 	units = filterOutCompleteUnits(units)
 	if len(units) == 0 {
-		// All units already complete - nothing to do
+		// All units already complete - create PR if in feature mode
+		if o.cfg.FeatureMode && !o.cfg.NoPR {
+			// Collect unit IDs from the original list
+			var unitIDs []string
+			for _, u := range allDiscoveredUnits {
+				unitIDs = append(unitIDs, u.ID)
+			}
+			prURL, err := o.createFeaturePR(ctx, unitIDs...)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create PR: %w", err)
+			}
+			if prURL != "" {
+				fmt.Printf("\nPR created: %s\n", prURL)
+			}
+		}
 		return &Result{
-			TotalUnits:     0,
-			CompletedUnits: 0,
+			TotalUnits:     len(allDiscoveredUnits),
+			CompletedUnits: len(allDiscoveredUnits),
 		}, nil
 	}
 
@@ -311,15 +348,23 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 		BackpressureTimeout: 5 * time.Minute,
 		MaxClaudeRetries:    3,
 		SuppressOutput:      o.cfg.SuppressOutput,
+		ClaudeCommand:       o.cfg.ClaudeCommand,
 	}
 
 	workerDeps := worker.WorkerDeps{
 		Events: o.bus,
 		Git:    o.git,
 		GitHub: o.github,
+		// Note: Provider is not set here - factory handles per-unit resolution
 	}
 
-	o.pool = worker.NewPool(o.cfg.Parallelism, workerCfg, workerDeps)
+	// Use factory-based pool construction for per-unit provider resolution
+	o.pool = worker.NewPoolWithFactory(
+		o.cfg.Parallelism,
+		workerCfg,
+		workerDeps,
+		o.createProviderFactory(),
+	)
 
 	// Subscribe to worker completion events
 	o.bus.Subscribe(o.handleEvent)
@@ -351,6 +396,19 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 
 		case scheduler.ReasonAllComplete:
 			// All units finished successfully
+			// Create PR if in feature mode
+			if o.cfg.FeatureMode && !o.cfg.NoPR {
+				prURL, err := o.createFeaturePR(ctx)
+				if err != nil {
+					o.bus.Emit(events.NewEvent(events.OrchFailed, "").
+						WithError(fmt.Errorf("failed to create PR: %w", err)))
+					return o.buildResult(startTime, err), err
+				}
+				if prURL != "" {
+					fmt.Printf("\nPR created: %s\n", prURL)
+				}
+			}
+
 			o.bus.Emit(events.NewEvent(events.OrchCompleted, ""))
 			return o.buildResult(startTime, nil), nil
 
@@ -558,6 +616,55 @@ func buildGraphData(units []*discovery.Unit, levels [][]string) map[string]any {
 	}
 }
 
+// resolveProviderForUnit determines which provider to use for a unit
+// Precedence (highest to lowest):
+// 1. --force-task-provider flag
+// 2. Unit frontmatter provider field
+// 3. --provider CLI flag (stored in DefaultProvider)
+// 4. RALPH_PROVIDER env var (merged into ProviderConfig during config loading)
+// 5. .choo.yaml provider.type (in ProviderConfig)
+// 6. Default: claude
+func (o *Orchestrator) resolveProviderForUnit(unit *discovery.Unit) (provider.Provider, error) {
+	var providerType provider.ProviderType
+
+	// 1. --force-task-provider overrides everything
+	if o.cfg.ForceTaskProvider != "" {
+		providerType = provider.ProviderType(o.cfg.ForceTaskProvider)
+	} else if unit.Provider != "" {
+		// 2. Per-unit frontmatter
+		providerType = provider.ProviderType(unit.Provider)
+	} else if o.cfg.DefaultProvider != "" {
+		// 3. --provider CLI flag
+		providerType = provider.ProviderType(o.cfg.DefaultProvider)
+	} else if o.cfg.ProviderConfig.Type != "" {
+		// 4-5. Env var and .choo.yaml (merged during config loading)
+		providerType = provider.ProviderType(o.cfg.ProviderConfig.Type)
+	} else {
+		// 6. Default to claude
+		providerType = provider.ProviderClaude
+	}
+
+	// Get provider-specific command override if configured
+	command := ""
+	if o.cfg.ProviderConfig.Providers != nil {
+		if settings, ok := o.cfg.ProviderConfig.Providers[config.ProviderType(providerType)]; ok {
+			command = settings.Command
+		}
+	}
+
+	return provider.FromConfig(provider.Config{
+		Type:    providerType,
+		Command: command,
+	})
+}
+
+// createProviderFactory returns a factory function that resolves providers for units
+func (o *Orchestrator) createProviderFactory() worker.ProviderFactory {
+	return func(unit *discovery.Unit) (provider.Provider, error) {
+		return o.resolveProviderForUnit(unit)
+	}
+}
+
 // dryRun prints the execution plan without running workers
 func (o *Orchestrator) dryRun(units []*discovery.Unit) (*Result, error) {
 	// Build schedule without executing
@@ -612,4 +719,76 @@ func (o *Orchestrator) dryRun(units []*discovery.Unit) (*Result, error) {
 	return &Result{
 		TotalUnits: len(units),
 	}, nil
+}
+
+// prURLPattern matches GitHub PR URLs
+var prURLPattern = regexp.MustCompile(`https://github\.com/[^/]+/[^/]+/pull/\d+`)
+
+// createFeaturePR creates a PR for the feature branch using Claude
+// If completedUnitIDs is nil, it uses o.units to get the list
+func (o *Orchestrator) createFeaturePR(ctx context.Context, completedUnitIDs ...string) (string, error) {
+	if !o.cfg.FeatureMode || o.cfg.FeatureBranch == "" {
+		return "", nil // Not in feature mode, nothing to do
+	}
+
+	if o.cfg.NoPR {
+		return "", nil // PR creation disabled
+	}
+
+	// Push the feature branch first
+	if err := o.pushFeatureBranch(ctx); err != nil {
+		return "", fmt.Errorf("failed to push feature branch: %w", err)
+	}
+
+	// Collect completed unit names
+	var completedUnits []string
+	if len(completedUnitIDs) > 0 {
+		completedUnits = completedUnitIDs
+	} else {
+		for _, unit := range o.units {
+			completedUnits = append(completedUnits, unit.ID)
+		}
+	}
+
+	// Build prompt for Claude
+	prompt := worker.BuildFeaturePRPrompt(o.cfg.FeatureBranch, o.cfg.TargetBranch, completedUnits)
+
+	// Get Claude command (use configured command or default)
+	claudeCmd := o.cfg.ClaudeCommand
+	if claudeCmd == "" {
+		claudeCmd = "claude"
+	}
+
+	// Invoke Claude to create the PR
+	cmd := exec.CommandContext(ctx, claudeCmd,
+		"--dangerously-skip-permissions",
+		"-p", prompt,
+	)
+	cmd.Dir = o.cfg.RepoRoot
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("claude failed to create PR: %w", err)
+	}
+
+	// Extract PR URL from output
+	prURL := prURLPattern.FindString(string(output))
+	if prURL == "" {
+		return "", fmt.Errorf("could not find PR URL in Claude output")
+	}
+
+	// Emit event
+	o.bus.Emit(events.NewEvent(events.PRCreated, "").
+		WithPayload(map[string]any{
+			"url":    prURL,
+			"branch": o.cfg.FeatureBranch,
+			"target": o.cfg.TargetBranch,
+		}))
+
+	return prURL, nil
+}
+
+// pushFeatureBranch pushes the feature branch to remote
+func (o *Orchestrator) pushFeatureBranch(ctx context.Context) error {
+	return git.PushBranch(ctx, o.cfg.RepoRoot, o.cfg.FeatureBranch)
 }

@@ -13,6 +13,7 @@ type Unit struct {
 
 	// Parsed from IMPLEMENTATION_PLAN.md frontmatter
 	DependsOn []string // other unit IDs this unit depends on
+	Provider  string   // provider override from frontmatter (empty = use default)
 
 	// Orchestrator state (from frontmatter, updated at runtime)
 	Status      UnitStatus

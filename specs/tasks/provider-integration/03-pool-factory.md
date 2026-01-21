@@ -1,3 +1,46 @@
+---
+task: 3
+status: complete
+backpressure: "go test ./internal/worker/... -run Pool"
+depends_on: [1, 2]
+---
+
+# Add Provider Factory to Pool
+
+**Parent spec**: `/specs/PROVIDER-INTEGRATION.md`
+**Task**: #3 of 4 in implementation plan
+
+## Objective
+
+Add a provider factory function to the worker Pool that creates provider instances per-unit. This enables the orchestrator to inject provider resolution logic while keeping the Pool generic.
+
+## Dependencies
+
+### External Specs (must be implemented)
+- PROVIDER - provides `Provider` interface
+
+### Task Dependencies (within this unit)
+- Task #1 (01-worker-types.md) - Worker accepts Provider in deps
+- Task #2 (02-invoke-provider.md) - Worker uses provider for invocation
+
+### Package Dependencies
+- `github.com/RevCBH/choo/internal/provider`
+- `github.com/RevCBH/choo/internal/discovery`
+
+## Deliverables
+
+### Files to Modify
+
+```
+internal/worker/
+└── pool.go    # MODIFY: Add providerFactory field and NewPoolWithFactory
+```
+
+### Types to Update
+
+```go
+// internal/worker/pool.go
+
 package worker
 
 import (
@@ -23,10 +66,9 @@ type Pool struct {
 	events          *events.Bus
 	git             *git.WorktreeManager
 	github          *github.PRClient
-	providerFactory ProviderFactory // NEW: factory for creating providers per-unit
+	providerFactory ProviderFactory   // NEW: factory for creating providers per-unit
 	workers         map[string]*Worker
 	mu              sync.Mutex
-	mergeMu         sync.Mutex // Serializes merge operations to prevent conflicts
 	wg              sync.WaitGroup
 	sem             chan struct{} // Semaphore for concurrency control
 	firstErr        error         // First error encountered
@@ -42,6 +84,12 @@ type PoolStats struct {
 	TotalTasks     int
 	CompletedTasks int
 }
+```
+
+### Functions to Add/Update
+
+```go
+// internal/worker/pool.go
 
 // NewPoolWithFactory creates a worker pool with a custom provider factory
 func NewPoolWithFactory(maxWorkers int, cfg WorkerConfig, deps WorkerDeps, factory ProviderFactory) *Pool {
@@ -100,7 +148,6 @@ func (p *Pool) Submit(unit *discovery.Unit) error {
 		Git:      p.git,
 		GitHub:   p.github,
 		Provider: prov,
-		MergeMu:  &p.mergeMu,
 	})
 
 	// Add to workers map
@@ -155,10 +202,6 @@ func (p *Pool) Stats() PoolStats {
 	stats := PoolStats{}
 
 	for _, worker := range p.workers {
-		// Count active workers (those still running)
-		// Since we can't easily determine if a worker is done without adding state,
-		// we'll count based on semaphore capacity
-
 		// Count tasks
 		if worker.unit != nil {
 			stats.TotalTasks += len(worker.unit.Tasks)
@@ -167,11 +210,6 @@ func (p *Pool) Stats() PoolStats {
 
 	// Active workers = current semaphore usage
 	stats.ActiveWorkers = len(p.sem)
-
-	// For completed/failed, we need to check if workers have finished
-	// Since Worker doesn't track completion state, we'll infer from events or errors
-	// For now, we'll track based on the workers map and assume completion
-	// This is a simplified implementation - a full implementation would track state
 
 	return stats
 }
@@ -224,3 +262,45 @@ func (p *Pool) Stop() error {
 	p.wg.Wait()
 	return nil
 }
+```
+
+## Backpressure
+
+### Validation Command
+
+```bash
+go test ./internal/worker/... -run Pool
+```
+
+### Must Pass
+
+| Test | Assertion |
+|------|-----------|
+| Build succeeds | No compilation errors |
+| NewPoolWithFactory works | Pool created with custom factory |
+| NewPool backward compatible | Pool created with default Claude factory |
+| Submit calls factory | Provider created per-unit via factory |
+| Factory errors handled | Submit returns error if factory fails |
+
+### CI Compatibility
+
+- [x] No external API keys required
+- [x] No network access required
+- [x] Runs in <60 seconds
+
+## Implementation Notes
+
+- Add `ProviderFactory` type alias for the factory function signature
+- Add `providerFactory` field to Pool struct
+- Create `NewPoolWithFactory` constructor that accepts a custom factory
+- Update `NewPool` to use a default factory that falls back to Claude
+- Update `Submit` to call the factory and pass the provider to the worker
+- Remove the `claude` field from Pool struct (no longer needed)
+- Handle factory errors in Submit by returning an error before starting the worker
+- Ensure backward compatibility: existing code using NewPool should work unchanged
+
+## NOT In Scope
+
+- Provider resolution logic (task #4)
+- Orchestrator changes (task #4)
+- Unit tests for factory behavior (covered by backpressure command)
