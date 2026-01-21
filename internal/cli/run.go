@@ -259,17 +259,21 @@ func (a *App) RunOrchestrator(ctx context.Context, opts RunOptions) error {
 
 	// Build orchestrator config from CLI options and loaded config
 	orchCfg := orchestrator.Config{
-		Parallelism:     opts.Parallelism,
-		TargetBranch:    opts.TargetBranch,
-		TasksDir:        opts.TasksDir,
-		RepoRoot:        wd,
-		WorktreeBase:    cfg.Worktree.BasePath,
-		NoPR:            opts.NoPR,
-		SkipReview:      opts.SkipReview,
-		SingleUnit:      opts.Unit,
-		DryRun:          opts.DryRun,
-		ShutdownTimeout: orchestrator.DefaultShutdownTimeout,
-		SuppressOutput:  useTUI,
+		Parallelism:       opts.Parallelism,
+		TargetBranch:      opts.TargetBranch,
+		TasksDir:          opts.TasksDir,
+		RepoRoot:          wd,
+		WorktreeBase:      cfg.Worktree.BasePath,
+		NoPR:              opts.NoPR,
+		SkipReview:        opts.SkipReview,
+		SingleUnit:        opts.Unit,
+		DryRun:            opts.DryRun,
+		ShutdownTimeout:   orchestrator.DefaultShutdownTimeout,
+		SuppressOutput:    useTUI,
+		DefaultProvider:   opts.Provider,
+		ForceTaskProvider: opts.ForceTaskProvider,
+		ProviderConfig:    cfg.Provider,
+		ClaudeCommand:     config.GetProviderCommand(cfg, config.ProviderClaude),
 	}
 
 	// Configure feature mode if --feature flag provided

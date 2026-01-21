@@ -56,7 +56,8 @@ type WorkerConfig struct {
 	BackpressureTimeout time.Duration
 	BaselineTimeout     time.Duration
 	NoPR                bool
-	SuppressOutput      bool // When true, don't tee Claude output to stdout (TUI mode)
+	SuppressOutput      bool   // When true, don't tee Claude output to stdout (TUI mode)
+	ClaudeCommand       string // Claude CLI command for non-task operations (conflict resolution, etc.)
 }
 
 // BaselineCheck represents a single baseline validation command

@@ -97,6 +97,10 @@ type Config struct {
 	// ProviderConfig contains provider-specific settings from .choo.yaml
 	// Includes provider type default and per-provider command overrides
 	ProviderConfig config.ProviderConfig
+
+	// ClaudeCommand is the Claude CLI command for non-task operations
+	// (conflict resolution, PR creation, etc.) - always uses Claude regardless of task provider
+	ClaudeCommand string
 }
 
 // Dependencies bundles external dependencies for injection
@@ -344,6 +348,7 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 		BackpressureTimeout: 5 * time.Minute,
 		MaxClaudeRetries:    3,
 		SuppressOutput:      o.cfg.SuppressOutput,
+		ClaudeCommand:       o.cfg.ClaudeCommand,
 	}
 
 	workerDeps := worker.WorkerDeps{
@@ -748,8 +753,14 @@ func (o *Orchestrator) createFeaturePR(ctx context.Context, completedUnitIDs ...
 	// Build prompt for Claude
 	prompt := worker.BuildFeaturePRPrompt(o.cfg.FeatureBranch, o.cfg.TargetBranch, completedUnits)
 
+	// Get Claude command (use configured command or default)
+	claudeCmd := o.cfg.ClaudeCommand
+	if claudeCmd == "" {
+		claudeCmd = "claude"
+	}
+
 	// Invoke Claude to create the PR
-	cmd := exec.CommandContext(ctx, "claude",
+	cmd := exec.CommandContext(ctx, claudeCmd,
 		"--dangerously-skip-permissions",
 		"-p", prompt,
 	)

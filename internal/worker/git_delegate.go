@@ -168,20 +168,28 @@ func (w *Worker) pushViaClaudeCode(ctx context.Context) error {
 	return nil
 }
 
-// invokeClaude invokes Provider with the given prompt (no output capture)
+// invokeClaude invokes Claude CLI directly with the given prompt (no output capture)
+// NOTE: This always uses Claude, regardless of the configured task provider.
+// This is intentional - non-task operations like conflict resolution should always use Claude.
 func (w *Worker) invokeClaude(ctx context.Context, prompt string) error {
-	taskPrompt := TaskPrompt{Content: prompt}
-	return w.invokeProvider(ctx, taskPrompt)
+	return w.invokeClaudeInDir(ctx, w.worktreePath, prompt)
 }
 
 // invokeClaudeInDir invokes Claude CLI in a specific directory (for RepoRoot conflicts)
+// Uses w.config.ClaudeCommand if set, otherwise defaults to "claude"
 func (w *Worker) invokeClaudeInDir(ctx context.Context, dir, prompt string) error {
 	args := []string{
 		"--dangerously-skip-permissions",
 		"-p", prompt,
 	}
 
-	cmd := exec.CommandContext(ctx, "claude", args...)
+	// Use configured Claude command, with fallback to default
+	claudeCmd := w.config.ClaudeCommand
+	if claudeCmd == "" {
+		claudeCmd = "claude"
+	}
+
+	cmd := exec.CommandContext(ctx, claudeCmd, args...)
 	cmd.Dir = dir
 
 	// Create log file for Claude output

@@ -76,16 +76,50 @@ func (w *Worker) findReadyTasks() []*discovery.Task {
 // The provider should have unlimited turns to complete the task within a single invocation.
 // MaxClaudeRetries controls how many times Ralph will invoke the provider, not internal turns.
 func (w *Worker) invokeProvider(ctx context.Context, prompt TaskPrompt) error {
-	// Create log file for provider output
-	logDir := filepath.Join(w.config.WorktreeBase, "logs")
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to create log directory: %v\n", err)
-	}
-
 	// Get provider name for logging
 	providerName := "unknown"
 	if w.provider != nil {
 		providerName = string(w.provider.Name())
+	}
+
+	// Emit TaskClaudeInvoke event at start (name unchanged for backward compatibility)
+	if w.events != nil {
+		evt := events.NewEvent(events.TaskClaudeInvoke, w.unit.ID)
+		if w.currentTask != nil {
+			evt = evt.WithTask(w.currentTask.Number).WithPayload(map[string]any{
+				"title":    w.currentTask.Title,
+				"provider": providerName,
+			})
+		}
+		w.events.Emit(evt)
+	}
+
+	// Track error to emit in TaskClaudeDone event
+	var runErr error
+	defer func() {
+		// Always emit TaskClaudeDone event (name unchanged for backward compatibility)
+		if w.events != nil {
+			evt := events.NewEvent(events.TaskClaudeDone, w.unit.ID)
+			if w.currentTask != nil {
+				evt = evt.WithTask(w.currentTask.Number)
+			}
+			if runErr != nil {
+				evt = evt.WithError(runErr)
+			}
+			w.events.Emit(evt)
+		}
+	}()
+
+	// Check if provider is configured early
+	if w.provider == nil {
+		runErr = fmt.Errorf("no provider configured for worker")
+		return runErr
+	}
+
+	// Create log file for provider output
+	logDir := filepath.Join(w.config.WorktreeBase, "logs")
+	if err := os.MkdirAll(logDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to create log directory: %v\n", err)
 	}
 
 	logFile, err := os.Create(filepath.Join(logDir,
@@ -93,13 +127,12 @@ func (w *Worker) invokeProvider(ctx context.Context, prompt TaskPrompt) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to create log file: %v\n", err)
 		// Fall back to stdout/stderr (unless suppressed)
-		if w.provider == nil {
-			return fmt.Errorf("no provider configured for worker")
-		}
 		if !w.config.SuppressOutput {
-			return w.provider.Invoke(ctx, prompt.Content, w.worktreePath, os.Stdout, os.Stderr)
+			runErr = w.provider.Invoke(ctx, prompt.Content, w.worktreePath, os.Stdout, os.Stderr)
+		} else {
+			runErr = w.provider.Invoke(ctx, prompt.Content, w.worktreePath, io.Discard, io.Discard)
 		}
-		return w.provider.Invoke(ctx, prompt.Content, w.worktreePath, io.Discard, io.Discard)
+		return runErr
 	}
 	defer logFile.Close()
 
@@ -118,25 +151,8 @@ func (w *Worker) invokeProvider(ctx context.Context, prompt TaskPrompt) error {
 		fmt.Fprintf(os.Stderr, "Provider output logging to: %s\n", logFile.Name())
 	}
 
-	// Emit TaskClaudeInvoke event (name unchanged for backward compatibility)
-	if w.events != nil {
-		evt := events.NewEvent(events.TaskClaudeInvoke, w.unit.ID)
-		if w.currentTask != nil {
-			evt = evt.WithTask(w.currentTask.Number).WithPayload(map[string]any{
-				"title":    w.currentTask.Title,
-				"provider": providerName,
-			})
-		}
-		w.events.Emit(evt)
-	}
-
-	// Check if provider is configured
-	if w.provider == nil {
-		return fmt.Errorf("no provider configured for worker")
-	}
-
 	// Invoke provider
-	runErr := w.provider.Invoke(ctx, prompt.Content, w.worktreePath, stdout, stderr)
+	runErr = w.provider.Invoke(ctx, prompt.Content, w.worktreePath, stdout, stderr)
 
 	// Write completion status to log
 	fmt.Fprintf(logFile, "\n=== END PROVIDER OUTPUT ===\n")
@@ -144,18 +160,6 @@ func (w *Worker) invokeProvider(ctx context.Context, prompt TaskPrompt) error {
 		fmt.Fprintf(logFile, "Exit error: %v\n", runErr)
 	} else {
 		fmt.Fprintf(logFile, "Exit: success\n")
-	}
-
-	// Emit TaskClaudeDone event (name unchanged for backward compatibility)
-	if w.events != nil {
-		evt := events.NewEvent(events.TaskClaudeDone, w.unit.ID)
-		if w.currentTask != nil {
-			evt = evt.WithTask(w.currentTask.Number)
-		}
-		if runErr != nil {
-			evt = evt.WithError(runErr)
-		}
-		w.events.Emit(evt)
 	}
 
 	return runErr
