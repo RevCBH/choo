@@ -9,24 +9,29 @@ import (
 	"github.com/RevCBH/choo/internal/events"
 	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/github"
+	"github.com/RevCBH/choo/internal/provider"
 )
+
+// ProviderFactory creates a provider for a given unit
+// This allows the orchestrator to inject provider resolution logic
+type ProviderFactory func(*discovery.Unit) (provider.Provider, error)
 
 // Pool manages a collection of workers executing units in parallel
 type Pool struct {
-	maxWorkers int
-	config     WorkerConfig
-	events     *events.Bus
-	git        *git.WorktreeManager
-	github     *github.PRClient
-	claude     *ClaudeClient
-	workers    map[string]*Worker
-	mu         sync.Mutex
-	mergeMu    sync.Mutex // Serializes merge operations to prevent conflicts
-	wg         sync.WaitGroup
-	sem        chan struct{} // Semaphore for concurrency control
-	firstErr   error         // First error encountered
-	cancelCtx  context.Context
-	cancelFunc context.CancelFunc
+	maxWorkers      int
+	config          WorkerConfig
+	events          *events.Bus
+	git             *git.WorktreeManager
+	github          *github.PRClient
+	providerFactory ProviderFactory // NEW: factory for creating providers per-unit
+	workers         map[string]*Worker
+	mu              sync.Mutex
+	mergeMu         sync.Mutex // Serializes merge operations to prevent conflicts
+	wg              sync.WaitGroup
+	sem             chan struct{} // Semaphore for concurrency control
+	firstErr        error         // First error encountered
+	cancelCtx       context.Context
+	cancelFunc      context.CancelFunc
 }
 
 // PoolStats holds current pool statistics
@@ -38,21 +43,38 @@ type PoolStats struct {
 	CompletedTasks int
 }
 
-// NewPool creates a worker pool with the specified parallelism
-func NewPool(maxWorkers int, cfg WorkerConfig, deps WorkerDeps) *Pool {
+// NewPoolWithFactory creates a worker pool with a custom provider factory
+func NewPoolWithFactory(maxWorkers int, cfg WorkerConfig, deps WorkerDeps, factory ProviderFactory) *Pool {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Pool{
-		maxWorkers: maxWorkers,
-		config:     cfg,
-		events:     deps.Events,
-		git:        deps.Git,
-		github:     deps.GitHub,
-		claude:     deps.Claude,
-		workers:    make(map[string]*Worker),
-		sem:        make(chan struct{}, maxWorkers),
-		cancelCtx:  ctx,
-		cancelFunc: cancel,
+		maxWorkers:      maxWorkers,
+		config:          cfg,
+		events:          deps.Events,
+		git:             deps.Git,
+		github:          deps.GitHub,
+		providerFactory: factory,
+		workers:         make(map[string]*Worker),
+		sem:             make(chan struct{}, maxWorkers),
+		cancelCtx:       ctx,
+		cancelFunc:      cancel,
 	}
+}
+
+// NewPool creates a worker pool with the specified parallelism
+// Uses a default provider factory that creates Claude providers
+func NewPool(maxWorkers int, cfg WorkerConfig, deps WorkerDeps) *Pool {
+	// Default factory returns the provider from deps, or creates Claude if nil
+	defaultFactory := func(unit *discovery.Unit) (provider.Provider, error) {
+		if deps.Provider != nil {
+			return deps.Provider, nil
+		}
+		// Default to Claude provider for backward compatibility
+		return provider.FromConfig(provider.Config{
+			Type: provider.ProviderClaude,
+		})
+	}
+
+	return NewPoolWithFactory(maxWorkers, cfg, deps, defaultFactory)
 }
 
 // Submit queues a unit for execution
@@ -65,13 +87,20 @@ func (p *Pool) Submit(unit *discovery.Unit) error {
 		return fmt.Errorf("unit %s already submitted", unit.ID)
 	}
 
-	// Create worker for unit
+	// Resolve provider for this unit via factory
+	prov, err := p.providerFactory(unit)
+	if err != nil {
+		p.mu.Unlock()
+		return fmt.Errorf("failed to create provider for unit %s: %w", unit.ID, err)
+	}
+
+	// Create worker with resolved provider
 	worker := NewWorker(unit, p.config, WorkerDeps{
-		Events:  p.events,
-		Git:     p.git,
-		GitHub:  p.github,
-		Claude:  p.claude,
-		MergeMu: &p.mergeMu,
+		Events:   p.events,
+		Git:      p.git,
+		GitHub:   p.github,
+		Provider: prov,
+		MergeMu:  &p.mergeMu,
 	})
 
 	// Add to workers map
@@ -179,6 +208,12 @@ func New(size int, bus *events.Bus, git *git.WorktreeManager) *Pool {
 		sem:        make(chan struct{}, size),
 		cancelCtx:  ctx,
 		cancelFunc: cancel,
+		// No providerFactory - will use default Claude when Submit is called
+		providerFactory: func(unit *discovery.Unit) (provider.Provider, error) {
+			return provider.FromConfig(provider.Config{
+				Type: provider.ProviderClaude,
+			})
+		},
 	}
 }
 

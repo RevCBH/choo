@@ -168,10 +168,10 @@ func (w *Worker) pushViaClaudeCode(ctx context.Context) error {
 	return nil
 }
 
-// invokeClaude invokes Claude CLI with the given prompt (no output capture)
+// invokeClaude invokes Provider with the given prompt (no output capture)
 func (w *Worker) invokeClaude(ctx context.Context, prompt string) error {
 	taskPrompt := TaskPrompt{Content: prompt}
-	return w.invokeClaudeForTask(ctx, taskPrompt)
+	return w.invokeProvider(ctx, taskPrompt)
 }
 
 // invokeClaudeInDir invokes Claude CLI in a specific directory (for RepoRoot conflicts)

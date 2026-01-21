@@ -1,6 +1,6 @@
 ---
 task: 4
-status: pending
+status: complete
 backpressure: "go test ./internal/orchestrator/... -run Provider"
 depends_on: [3]
 ---
