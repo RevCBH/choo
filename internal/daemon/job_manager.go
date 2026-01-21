@@ -207,25 +207,6 @@ func (jm *jobManagerImpl) Start(ctx context.Context, cancel context.CancelFunc, 
 	go func() {
 		defer jm.cleanup(jobID)
 
-		// Ensure target branch exists on remote (auto-push if not)
-		// This is done inside the goroutine to avoid holding locks during network ops
-		if !cfg.DryRun {
-			pushed, pushErr := git.EnsureBranchOnRemote(ctx, cfg.RepoPath, cfg.TargetBranch)
-			if pushErr != nil {
-				log.Printf("Warning: could not verify target branch on remote: %v", pushErr)
-				// Mark job as failed and return early
-				if updateErr := jm.db.UpdateRunStatus(jobID, db.RunStatusFailed, ptrString(
-					fmt.Sprintf("failed to ensure target branch on remote: %v", pushErr))); updateErr != nil {
-					log.Printf("failed to update run status: %v", updateErr)
-				}
-				jm.store.SetConnected(false)
-				jobEventBus.Close()
-				return
-			} else if pushed {
-				log.Printf("Pushed target branch '%s' to remote", cfg.TargetBranch)
-			}
-		}
-
 		// Run the orchestrator with the caller-provided context
 		_, err := orch.Run(ctx)
 

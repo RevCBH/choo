@@ -52,13 +52,29 @@ func (s *Store) HandleEvent(e *Event) {
 		s.parallelism = payload.Parallelism
 		s.graph = payload.Graph
 
-		// Initialize unit states from graph nodes
+		// Initialize unit states from graph nodes (supports resume with pre-existing statuses)
 		if s.graph != nil {
 			for _, node := range s.graph.Nodes {
+				// Use initial status from graph if provided, otherwise default to pending
+				status := "pending"
+				if node.Status != "" {
+					status = node.Status
+				}
+
+				// For completed units, set CurrentTask to show all tasks done
+				currentTask := 0
+				if status == "complete" && node.Tasks > 0 {
+					currentTask = node.Tasks - 1
+				} else if node.CompletedTasks > 0 {
+					// For in-progress resumed units, show completed task progress
+					currentTask = node.CompletedTasks - 1
+				}
+
 				s.units[node.ID] = &UnitState{
-					ID:         node.ID,
-					Status:     "pending",
-					TotalTasks: node.Tasks,
+					ID:          node.ID,
+					Status:      status,
+					TotalTasks:  node.Tasks,
+					CurrentTask: currentTask,
 				}
 			}
 		}

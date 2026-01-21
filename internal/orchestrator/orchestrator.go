@@ -582,13 +582,29 @@ func buildGraphData(units []*discovery.Unit, levels [][]string) map[string]any {
 		}
 	}
 
-	// Build nodes
+	// Build nodes with status and completed task count for resume support
 	nodes := make([]map[string]any, 0, len(units))
 	for _, unit := range units {
+		// Count completed tasks for resume scenarios
+		completedTasks := 0
+		for _, task := range unit.Tasks {
+			if task != nil && task.Status == discovery.TaskStatusComplete {
+				completedTasks++
+			}
+		}
+
+		// Map discovery status to web status
+		status := "pending"
+		if unit.Status != "" {
+			status = string(unit.Status)
+		}
+
 		nodes = append(nodes, map[string]any{
-			"id":    unit.ID,
-			"level": levelMap[unit.ID],
-			"tasks": len(unit.Tasks),
+			"id":              unit.ID,
+			"level":           levelMap[unit.ID],
+			"tasks":           len(unit.Tasks),
+			"status":          status,
+			"completed_tasks": completedTasks,
 		})
 	}
 

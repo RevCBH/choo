@@ -15,9 +15,9 @@ const STATUS_COLORS = {
 const LAYOUT = {
     nodeWidth: 200,
     nodeHeight: 50,
-    levelSpacing: 240,
-    nodeSpacing: 80,
-    padding: 120,  // Must be > nodeWidth/2 to prevent cutoff
+    levelSpacing: 100,   // Vertical spacing between levels (top-down)
+    nodeSpacing: 240,    // Horizontal spacing between nodes in same level
+    padding: 80,         // Padding from edges
     // Progress block settings
     blockSize: 8,
     blockGap: 3,
@@ -49,18 +49,18 @@ export function initGraph(container, data, eventCallbacks) {
         .attr("width", width)
         .attr("height", height);
 
-    // Arrow marker for edges
+    // Arrow marker for edges (pointing down for top-bottom layout)
     svg.append("defs")
         .append("marker")
         .attr("id", "arrowhead")
-        .attr("viewBox", "0 -5 10 10")
-        .attr("refX", 8)
-        .attr("refY", 0)
+        .attr("viewBox", "-5 0 10 10")
+        .attr("refX", 0)
+        .attr("refY", 8)
         .attr("markerWidth", 6)
         .attr("markerHeight", 6)
         .attr("orient", "auto")
         .append("path")
-        .attr("d", "M0,-5L10,0L0,5")
+        .attr("d", "M-5,0L0,10L5,0")
         .attr("fill", "#6B7280");
 
     edgesGroup = svg.append("g").attr("class", "edges");
@@ -85,27 +85,27 @@ function computeLayout(width, height) {
     });
 
     graphData.edges.forEach(e => {
-        // e.from = dependent (right), e.to = dependency (left)
+        // e.from = dependent (below), e.to = dependency (above)
         incomingEdges.get(e.from)?.push(e.to);
         outgoingEdges.get(e.to)?.push(e.from);
     });
 
-    // First pass: assign X positions and initial centered Y positions
+    // First pass: assign Y positions (levels) and initial centered X positions
     levels.forEach((levelNodes, levelIndex) => {
-        const x = LAYOUT.padding + levelIndex * LAYOUT.levelSpacing;
-        const levelHeight = levelNodes.length * LAYOUT.nodeSpacing;
-        const startY = (height - levelHeight) / 2 + LAYOUT.nodeSpacing / 2;
+        const y = LAYOUT.padding + levelIndex * LAYOUT.levelSpacing;
+        const levelWidth = levelNodes.length * LAYOUT.nodeSpacing;
+        const startX = (width - levelWidth) / 2 + LAYOUT.nodeSpacing / 2;
 
         levelNodes.forEach((nodeId, nodeIndex) => {
             const node = nodeById.get(nodeId);
             if (node) {
-                node.x = x;
-                node.y = startY + nodeIndex * LAYOUT.nodeSpacing;
+                node.y = y;
+                node.x = startX + nodeIndex * LAYOUT.nodeSpacing;
             }
         });
     });
 
-    // Barycentric positioning: iteratively adjust Y based on connected neighbors
+    // Barycentric positioning: iteratively adjust X based on connected neighbors
     const iterations = 4;
     for (let iter = 0; iter < iterations; iter++) {
         // Forward pass: adjust based on incoming edges (dependencies)
@@ -117,25 +117,25 @@ function computeLayout(width, height) {
                 const node = nodeById.get(nodeId);
                 const incoming = incomingEdges.get(nodeId) || [];
                 if (incoming.length > 0) {
-                    const avgY = incoming.reduce((sum, depId) => {
+                    const avgX = incoming.reduce((sum, depId) => {
                         const dep = nodeById.get(depId);
-                        return sum + (dep ? dep.y : 0);
+                        return sum + (dep ? dep.x : 0);
                     }, 0) / incoming.length;
-                    barycenters.push({ nodeId, y: avgY });
+                    barycenters.push({ nodeId, x: avgX });
                 } else {
-                    barycenters.push({ nodeId, y: node.y });
+                    barycenters.push({ nodeId, x: node.x });
                 }
             });
 
             // Sort by barycenter and reassign positions
-            barycenters.sort((a, b) => a.y - b.y);
-            const levelHeight = levelNodes.length * LAYOUT.nodeSpacing;
-            const startY = (height - levelHeight) / 2 + LAYOUT.nodeSpacing / 2;
+            barycenters.sort((a, b) => a.x - b.x);
+            const levelWidth = levelNodes.length * LAYOUT.nodeSpacing;
+            const startX = (width - levelWidth) / 2 + LAYOUT.nodeSpacing / 2;
 
             barycenters.forEach((item, i) => {
                 const node = nodeById.get(item.nodeId);
                 if (node) {
-                    node.y = startY + i * LAYOUT.nodeSpacing;
+                    node.x = startX + i * LAYOUT.nodeSpacing;
                 }
             });
         }
@@ -149,25 +149,25 @@ function computeLayout(width, height) {
                 const node = nodeById.get(nodeId);
                 const outgoing = outgoingEdges.get(nodeId) || [];
                 if (outgoing.length > 0) {
-                    const avgY = outgoing.reduce((sum, depId) => {
+                    const avgX = outgoing.reduce((sum, depId) => {
                         const dep = nodeById.get(depId);
-                        return sum + (dep ? dep.y : 0);
+                        return sum + (dep ? dep.x : 0);
                     }, 0) / outgoing.length;
-                    barycenters.push({ nodeId, y: avgY });
+                    barycenters.push({ nodeId, x: avgX });
                 } else {
-                    barycenters.push({ nodeId, y: node.y });
+                    barycenters.push({ nodeId, x: node.x });
                 }
             });
 
             // Sort by barycenter and reassign positions
-            barycenters.sort((a, b) => a.y - b.y);
-            const levelHeight = levelNodes.length * LAYOUT.nodeSpacing;
-            const startY = (height - levelHeight) / 2 + LAYOUT.nodeSpacing / 2;
+            barycenters.sort((a, b) => a.x - b.x);
+            const levelWidth = levelNodes.length * LAYOUT.nodeSpacing;
+            const startX = (width - levelWidth) / 2 + LAYOUT.nodeSpacing / 2;
 
             barycenters.forEach((item, i) => {
                 const node = nodeById.get(item.nodeId);
                 if (node) {
-                    node.y = startY + i * LAYOUT.nodeSpacing;
+                    node.x = startX + i * LAYOUT.nodeSpacing;
                 }
             });
         }
@@ -307,12 +307,12 @@ function renderEdges() {
         .attr("class", "edge")
         .attr("d", d => {
             // Edge "from" is the dependent, "to" is the dependency
-            // Draw arrow from dependency (to) to dependent (from) so it flows left-to-right
-            const source = graphData.nodes.find(n => n.id === d.to);   // dependency (left)
-            const target = graphData.nodes.find(n => n.id === d.from); // dependent (right)
+            // Draw arrow from dependency (to) to dependent (from) so it flows top-to-bottom
+            const source = graphData.nodes.find(n => n.id === d.to);   // dependency (top)
+            const target = graphData.nodes.find(n => n.id === d.from); // dependent (bottom)
             if (!source || !target) return "";
             const offsets = portOffsets.get(`${d.from}-${d.to}`) || { sourceOffset: 0, targetOffset: 0 };
-            return bezierPath(source, target, offsets.sourceOffset, offsets.targetOffset);
+            return stepPath(source, target, offsets.sourceOffset, offsets.targetOffset);
         })
         .attr("fill", "none")
         .attr("stroke", "#6B7280")
@@ -321,26 +321,26 @@ function renderEdges() {
 }
 
 /**
- * Compute Y offsets for edge connection points to avoid overlap.
- * When multiple edges connect to the same side of a node, stagger them vertically.
+ * Compute X offsets for edge connection points to avoid overlap.
+ * When multiple edges connect to the same side of a node, stagger them horizontally.
  */
 function computePortOffsets() {
     const offsets = new Map(); // edgeKey -> {sourceOffset, targetOffset}
-    const maxPortOffset = LAYOUT.nodeHeight / 3; // Max offset from center
+    const maxPortOffset = LAYOUT.nodeWidth / 3; // Max offset from center
 
-    // Group edges by source (right side) and target (left side) nodes
-    const sourceEdges = new Map(); // nodeId -> edges leaving from right side
-    const targetEdges = new Map(); // nodeId -> edges entering from left side
+    // Group edges by source (bottom side) and target (top side) nodes
+    const sourceEdges = new Map(); // nodeId -> edges leaving from bottom side
+    const targetEdges = new Map(); // nodeId -> edges entering from top side
 
     graphData.edges.forEach(e => {
-        // e.to = source (dependency, left node), e.from = target (dependent, right node)
+        // e.to = source (dependency, top node), e.from = target (dependent, bottom node)
         if (!sourceEdges.has(e.to)) sourceEdges.set(e.to, []);
         if (!targetEdges.has(e.from)) targetEdges.set(e.from, []);
         sourceEdges.get(e.to).push(e);
         targetEdges.get(e.from).push(e);
     });
 
-    // Compute offsets for edges leaving each source node (right side)
+    // Compute offsets for edges leaving each source node (bottom side)
     sourceEdges.forEach((edges, nodeId) => {
         if (edges.length <= 1) {
             edges.forEach(e => {
@@ -351,11 +351,11 @@ function computePortOffsets() {
             return;
         }
 
-        // Sort edges by target node's Y position for consistent ordering
+        // Sort edges by target node's X position for consistent ordering
         edges.sort((a, b) => {
             const targetA = graphData.nodes.find(n => n.id === a.from);
             const targetB = graphData.nodes.find(n => n.id === b.from);
-            return (targetA?.y || 0) - (targetB?.y || 0);
+            return (targetA?.x || 0) - (targetB?.x || 0);
         });
 
         const step = (2 * maxPortOffset) / (edges.length - 1 || 1);
@@ -366,7 +366,7 @@ function computePortOffsets() {
         });
     });
 
-    // Compute offsets for edges entering each target node (left side)
+    // Compute offsets for edges entering each target node (top side)
     targetEdges.forEach((edges, nodeId) => {
         if (edges.length <= 1) {
             edges.forEach(e => {
@@ -377,11 +377,11 @@ function computePortOffsets() {
             return;
         }
 
-        // Sort edges by source node's Y position for consistent ordering
+        // Sort edges by source node's X position for consistent ordering
         edges.sort((a, b) => {
             const sourceA = graphData.nodes.find(n => n.id === a.to);
             const sourceB = graphData.nodes.find(n => n.id === b.to);
-            return (sourceA?.y || 0) - (sourceB?.y || 0);
+            return (sourceA?.x || 0) - (sourceB?.x || 0);
         });
 
         const step = (2 * maxPortOffset) / (edges.length - 1 || 1);
@@ -395,15 +395,18 @@ function computePortOffsets() {
     return offsets;
 }
 
-function bezierPath(source, target, sourceYOffset = 0, targetYOffset = 0) {
-    const sourceX = source.x + LAYOUT.nodeWidth / 2;
-    const sourceY = source.y + sourceYOffset;
-    // Arrowhead marker has refX=8 with 10-unit path, so tip extends 2 units past path end
+function stepPath(source, target, sourceXOffset = 0, targetXOffset = 0) {
+    // For top-down layout: edges go from bottom of source to top of target
+    const sourceX = source.x + sourceXOffset;
+    const sourceY = source.y + LAYOUT.nodeHeight / 2;
+    const targetX = target.x + targetXOffset;
+    // Arrowhead marker has refY=8 with 10-unit path, so tip extends 2 units past path end
     // End path 2 units before node edge so arrowhead tip touches the edge
-    const targetX = target.x - LAYOUT.nodeWidth / 2 - 2;
-    const targetY = target.y + targetYOffset;
-    const midX = (sourceX + targetX) / 2;
-    return `M ${sourceX} ${sourceY} C ${midX} ${sourceY}, ${midX} ${targetY}, ${targetX} ${targetY}`;
+    const targetY = target.y - LAYOUT.nodeHeight / 2 - 2;
+
+    // Step path: go down halfway, then horizontal, then down to target
+    const midY = (sourceY + targetY) / 2;
+    return `M ${sourceX} ${sourceY} L ${sourceX} ${midY} L ${targetX} ${midY} L ${targetX} ${targetY}`;
 }
 
 function truncateLabel(text, maxLength) {

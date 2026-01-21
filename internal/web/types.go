@@ -48,9 +48,11 @@ type GraphData struct {
 
 // GraphNode represents a unit in the dependency graph.
 type GraphNode struct {
-	ID    string `json:"id"`
-	Level int    `json:"level"`
-	Tasks int    `json:"tasks"`
+	ID             string `json:"id"`
+	Level          int    `json:"level"`
+	Tasks          int    `json:"tasks"`
+	Status         string `json:"status,omitempty"`          // Initial status for resume support
+	CompletedTasks int    `json:"completed_tasks,omitempty"` // Completed task count for resume
 }
 
 // GraphEdge represents a dependency between two units.
