@@ -2,11 +2,16 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"os/exec"
 )
 
-// ClaudeProvider implements Provider using the Claude CLI
+// ClaudeProvider implements Provider using the Claude CLI.
+// Uses --dangerously-skip-permissions to run without interactive prompts.
 type ClaudeProvider struct {
+	// command is the path to the claude executable.
+	// Defaults to "claude" (resolved via PATH).
 	command string
 }
 
@@ -19,10 +24,23 @@ func NewClaude(command string) *ClaudeProvider {
 	return &ClaudeProvider{command: command}
 }
 
-// Invoke executes the Claude CLI with the given prompt.
-// NOTE: Full implementation deferred to provider-implementations unit.
+// Invoke executes Claude CLI with the given prompt.
+// The command runs in workdir with stdout/stderr connected to the provided writers.
+// Returns when the subprocess exits or context is cancelled.
 func (p *ClaudeProvider) Invoke(ctx context.Context, prompt string, workdir string, stdout, stderr io.Writer) error {
-	// Placeholder - full implementation in provider-implementations unit
+	args := []string{
+		"--dangerously-skip-permissions",
+		"-p", prompt,
+	}
+
+	cmd := exec.CommandContext(ctx, p.command, args...)
+	cmd.Dir = workdir
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("claude invocation failed: %w", err)
+	}
 	return nil
 }
 

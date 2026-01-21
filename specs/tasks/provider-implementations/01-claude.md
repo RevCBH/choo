@@ -1,7 +1,7 @@
 ---
 task: 1
-status: pending
-backpressure: "go build ./internal/provider/..."
+status: complete
+backpressure: "go test ./internal/provider/... -run Claude"
 depends_on: []
 ---
 
