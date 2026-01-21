@@ -7,6 +7,8 @@ import (
 
 	apiv1 "github.com/RevCBH/choo/pkg/api/v1"
 	"github.com/RevCBH/choo/internal/daemon/db"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // GRPCServer implements the DaemonService gRPC interface
@@ -132,4 +134,114 @@ func (s *GRPCServer) untrackJob(jobID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.activeJobs, jobID)
+}
+
+// StartJob creates and starts a new orchestration job
+func (s *GRPCServer) StartJob(ctx context.Context, req *apiv1.StartJobRequest) (*apiv1.StartJobResponse, error) {
+	// Check if server is shutting down
+	if s.isShuttingDown() {
+		return nil, status.Errorf(codes.Unavailable, "daemon is shutting down")
+	}
+
+	// Validate required fields
+	if req.TasksDir == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "tasks_dir is required")
+	}
+	if req.TargetBranch == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "target_branch is required")
+	}
+	if req.RepoPath == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "repo_path is required")
+	}
+
+	// Create job context for cancellation
+	jobCtx, cancel := context.WithCancel(context.Background())
+
+	jobID, err := s.jobManager.Start(jobCtx, JobConfig{
+		TasksDir:      req.TasksDir,
+		TargetBranch:  req.TargetBranch,
+		FeatureBranch: req.FeatureBranch,
+		Parallelism:   int(req.Parallelism),
+		RepoPath:      req.RepoPath,
+	})
+	if err != nil {
+		cancel() // Clean up context
+		return nil, status.Errorf(codes.Internal, "failed to start job: %v", err)
+	}
+
+	// Track job for shutdown coordination
+	s.trackJob(jobID, cancel)
+
+	return &apiv1.StartJobResponse{
+		JobId:  jobID,
+		Status: "running",
+	}, nil
+}
+
+// StopJob gracefully stops a running job
+func (s *GRPCServer) StopJob(ctx context.Context, req *apiv1.StopJobRequest) (*apiv1.StopJobResponse, error) {
+	// Validate required fields
+	if req.JobId == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "job_id is required")
+	}
+
+	// Check if job exists
+	job, err := s.jobManager.GetJob(req.JobId)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "job not found: %s", req.JobId)
+	}
+
+	// Check if job is already stopped
+	if job.Status == "completed" || job.Status == "failed" || job.Status == "cancelled" {
+		return nil, status.Errorf(codes.FailedPrecondition, "job already stopped: %s", job.Status)
+	}
+
+	// Stop the job
+	if err := s.jobManager.Stop(ctx, req.JobId, req.Force); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to stop job: %v", err)
+	}
+
+	// Untrack job
+	s.untrackJob(req.JobId)
+
+	message := "job stopped gracefully"
+	if req.Force {
+		message = "job force killed"
+	}
+
+	return &apiv1.StopJobResponse{
+		Success: true,
+		Message: message,
+	}, nil
+}
+
+// GetJobStatus returns the current status of a job
+func (s *GRPCServer) GetJobStatus(ctx context.Context, req *apiv1.GetJobStatusRequest) (*apiv1.GetJobStatusResponse, error) {
+	// Validate required fields
+	if req.JobId == "" {
+		return nil, status.Errorf(codes.InvalidArgument, "job_id is required")
+	}
+
+	// Get job state
+	job, err := s.jobManager.GetJob(req.JobId)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "job not found: %s", req.JobId)
+	}
+
+	return jobStateToProto(job), nil
+}
+
+// ListJobs returns all jobs matching the optional status filter
+func (s *GRPCServer) ListJobs(ctx context.Context, req *apiv1.ListJobsRequest) (*apiv1.ListJobsResponse, error) {
+	jobs, err := s.jobManager.ListJobs(req.StatusFilter)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to list jobs: %v", err)
+	}
+
+	resp := &apiv1.ListJobsResponse{}
+	for _, j := range jobs {
+		resp.Jobs = append(resp.Jobs, jobSummaryToProto(j))
+	}
+
+	return resp, nil
 }

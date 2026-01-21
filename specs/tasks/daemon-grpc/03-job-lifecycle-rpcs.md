@@ -1,6 +1,6 @@
 ---
 task: 3
-status: pending
+status: complete
 backpressure: "go test ./internal/daemon/... -run TestGRPC_Job"
 depends_on: [1, 2]
 ---
