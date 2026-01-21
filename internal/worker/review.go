@@ -3,7 +3,9 @@ package worker
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
 	"github.com/RevCBH/choo/internal/events"
 	"github.com/RevCBH/choo/internal/provider"
@@ -86,8 +88,138 @@ func (w *Worker) getBaseRef() string {
 	return "main"
 }
 
-// runReviewFixLoop attempts to fix review issues iteratively.
-// This is a stub for Task #3 implementation.
-func (w *Worker) runReviewFixLoop(ctx context.Context, issues []provider.ReviewIssue) {
-	// TODO: Task #3 will implement this
+// runReviewFixLoop attempts to fix review issues up to MaxFixIterations times.
+// Returns true if all issues were resolved (a fix was committed).
+func (w *Worker) runReviewFixLoop(ctx context.Context, issues []provider.ReviewIssue) bool {
+	maxIterations := 1
+	if w.reviewConfig != nil {
+		maxIterations = w.reviewConfig.MaxFixIterations
+	}
+
+	for i := 0; i < maxIterations; i++ {
+		// Emit fix attempt event
+		if w.events != nil {
+			evt := events.NewEvent(events.CodeReviewFixAttempt, w.unit.ID).
+				WithPayload(map[string]any{
+					"iteration":      i + 1,
+					"max_iterations": maxIterations,
+				})
+			w.events.Emit(evt)
+		}
+
+		if w.reviewConfig != nil && w.reviewConfig.Verbose {
+			fmt.Fprintf(os.Stderr, "Fix attempt %d/%d\n", i+1, maxIterations)
+		}
+
+		// Build fix prompt and invoke provider
+		fixPrompt := BuildReviewFixPrompt(issues)
+		if err := w.invokeProviderForFix(ctx, fixPrompt); err != nil {
+			fmt.Fprintf(os.Stderr, "Fix attempt failed: %v\n", err)
+			w.cleanupWorktree(ctx) // Reset any partial changes
+			continue
+		}
+
+		// Commit any fix changes
+		committed, err := w.commitReviewFixes(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to commit review fixes: %v\n", err)
+			w.cleanupWorktree(ctx)
+			continue
+		}
+
+		if committed {
+			if w.events != nil {
+				evt := events.NewEvent(events.CodeReviewFixApplied, w.unit.ID).
+					WithPayload(map[string]any{"iteration": i + 1})
+				w.events.Emit(evt)
+			}
+			return true // Success
+		}
+
+		// No changes made - provider didn't fix anything
+		if w.reviewConfig != nil && w.reviewConfig.Verbose {
+			fmt.Fprintf(os.Stderr, "No changes made by fix attempt %d\n", i+1)
+		}
+	}
+
+	// Cleanup any uncommitted changes left by fix attempts
+	w.cleanupWorktree(ctx)
+	return false
+}
+
+// invokeProviderForFix asks the task provider to address review issues.
+// Uses the same provider that executed the unit tasks.
+func (w *Worker) invokeProviderForFix(ctx context.Context, fixPrompt string) error {
+	if w.provider == nil {
+		return fmt.Errorf("no provider configured")
+	}
+
+	// Invoke provider with fix prompt
+	// stdout discarded (we only care about file changes)
+	// stderr passed through for visibility
+	return w.provider.Invoke(ctx, fixPrompt, w.worktreePath, io.Discard, os.Stderr)
+}
+
+// commitReviewFixes commits any changes made during the fix attempt.
+// Returns (true, nil) if changes were committed, (false, nil) if no changes.
+func (w *Worker) commitReviewFixes(ctx context.Context) (bool, error) {
+	// 1. Check for staged/unstaged changes using git status
+	hasChanges, err := w.hasUncommittedChanges(ctx)
+	if err != nil {
+		return false, fmt.Errorf("checking for changes: %w", err)
+	}
+	if !hasChanges {
+		return false, nil // No changes to commit
+	}
+
+	// 2. Stage all changes
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "add", "-A"); err != nil {
+		return false, fmt.Errorf("staging changes: %w", err)
+	}
+
+	// 3. Commit with standardized message (--no-verify to skip hooks)
+	commitMsg := "fix: address code review feedback"
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "commit", "-m", commitMsg, "--no-verify"); err != nil {
+		return false, fmt.Errorf("committing changes: %w", err)
+	}
+
+	return true, nil
+}
+
+// hasUncommittedChanges returns true if there are staged or unstaged changes.
+func (w *Worker) hasUncommittedChanges(ctx context.Context) (bool, error) {
+	// git status --porcelain returns empty string if clean
+	output, err := w.runner().Exec(ctx, w.worktreePath, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(output) != "", nil
+}
+
+// cleanupWorktree resets any uncommitted changes left by failed fix attempts.
+// This ensures the worktree is clean before proceeding to merge.
+// Errors are logged but not returned - cleanup is best-effort.
+func (w *Worker) cleanupWorktree(ctx context.Context) {
+	// 1. Reset staged changes (git reset)
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "reset", "HEAD"); err != nil {
+		if w.reviewConfig != nil && w.reviewConfig.Verbose {
+			fmt.Fprintf(os.Stderr, "Warning: git reset failed: %v\n", err)
+		}
+		// Continue with cleanup
+	}
+
+	// 2. Clean untracked files (git clean -fd)
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "clean", "-fd"); err != nil {
+		if w.reviewConfig != nil && w.reviewConfig.Verbose {
+			fmt.Fprintf(os.Stderr, "Warning: git clean failed: %v\n", err)
+		}
+		// Continue with cleanup
+	}
+
+	// 3. Restore modified files (git restore .)
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "restore", "."); err != nil {
+		if w.reviewConfig != nil && w.reviewConfig.Verbose {
+			fmt.Fprintf(os.Stderr, "Warning: git restore failed: %v\n", err)
+		}
+	}
 }
