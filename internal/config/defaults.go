@@ -22,11 +22,8 @@ var DefaultProviderType ProviderType = ProviderClaude
 // DefaultProviderConfig returns provider config with default values.
 func DefaultProviderConfig() ProviderConfig {
 	return ProviderConfig{
-		Type: DefaultProviderType,
-		Providers: map[ProviderType]ProviderSettings{
-			ProviderClaude: {Command: DefaultClaudeCommand},
-			ProviderCodex:  {Command: DefaultCodexCommand},
-		},
+		Type:      DefaultProviderType,
+		Providers: make(map[ProviderType]ProviderSettings),
 	}
 }
 
