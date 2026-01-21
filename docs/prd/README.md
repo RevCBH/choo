@@ -11,6 +11,7 @@ This directory contains Product Requirements Documents for choo features.
 | [web-ui](WEB-UI.md) | Web UI Monitoring | In Progress | v0.3 | self-hosting |
 | [feature-workflow](FEATURE-WORKFLOW.md) | PRD-Based Feature Workflow | Draft | v0.4 | web-ui |
 | [daemon-architecture](DAEMON-ARCHITECTURE.md) | Charlotte Daemon Architecture | Draft | v0.5 | mvp-orchestrator, web-ui |
+| [code-review](CODE-REVIEW.md) | Advisory Code Review for Pre-Merge | Draft | v0.6 | mvp-orchestrator |
 
 ## Status Legend
 
