@@ -157,12 +157,15 @@ func (jm *jobManagerImpl) Start(ctx context.Context, cancel context.CancelFunc, 
 	}
 
 	orchConfig := orchestrator.Config{
-		Parallelism:  cfg.Concurrency,
-		TargetBranch: cfg.TargetBranch,
-		TasksDir:     tasksDir,
-		RepoRoot:     cfg.RepoPath,
-		DryRun:       cfg.DryRun,
-		WorktreeBase: repoCfg.Worktree.BasePath,
+		Parallelism:   cfg.Concurrency,
+		TargetBranch:  cfg.TargetBranch,
+		FeatureBranch: cfg.FeatureBranch,
+		FeatureMode:   cfg.FeatureBranch != "",
+		TasksDir:      tasksDir,
+		RepoRoot:      cfg.RepoPath,
+		DryRun:        cfg.DryRun,
+		WorktreeBase:  repoCfg.Worktree.BasePath,
+		ClaudeCommand: repoCfg.Claude.Command,
 	}
 
 	orchDeps := orchestrator.Dependencies{
