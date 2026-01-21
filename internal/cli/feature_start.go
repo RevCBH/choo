@@ -41,7 +41,7 @@ The start command initiates the feature workflow from a PRD. It will:
 	}
 
 	// Add flags
-	cmd.Flags().StringVar(&opts.PRDDir, "prd-dir", "docs/prds", "PRDs directory")
+	cmd.Flags().StringVar(&opts.PRDDir, "prd-dir", "docs/prd", "PRDs directory")
 	cmd.Flags().StringVar(&opts.SpecsDir, "specs-dir", "specs/tasks", "Output specs directory")
 	cmd.Flags().BoolVar(&opts.SkipSpecReview, "skip-spec-review", false, "Skip automated spec review loop")
 	cmd.Flags().IntVar(&opts.MaxReviewIter, "max-review-iter", 3, "Max spec review iterations")

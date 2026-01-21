@@ -234,7 +234,7 @@ type FeatureConfig struct {
 // Default values
 func DefaultFeatureConfig() FeatureConfig {
     return FeatureConfig{
-        PRDDir:       "docs/prds",
+        PRDDir:       "docs/prd",
         SpecsDir:     "specs",
         BranchPrefix: "feature/",
     }

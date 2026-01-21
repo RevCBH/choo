@@ -23,7 +23,7 @@ func TestCommitSpecs_Success(t *testing.T) {
 	runner := newFakeRunner()
 
 	// Stage all files
-	runner.stub("add -A", "", nil)
+	runner.stub("add specs/tasks/test-prd", "", nil)
 
 	// Get staged files
 	runner.stub("diff --cached --name-only", "specs/tasks/test-prd/01.md\nspecs/tasks/test-prd/02.md\n", nil)
@@ -64,7 +64,7 @@ func TestCommitSpecs_StagingFailure(t *testing.T) {
 	runner := newFakeRunner()
 
 	// Stage fails
-	runner.stub("add -A", "", errors.New("staging failed"))
+	runner.stub("add specs/tasks/test-prd", "", errors.New("staging failed"))
 
 	useRunner(t, runner)
 
@@ -85,7 +85,7 @@ func TestCommitSpecs_CommitFailure(t *testing.T) {
 	runner := newFakeRunner()
 
 	// Stage succeeds
-	runner.stub("add -A", "", nil)
+	runner.stub("add specs/tasks/test-prd", "", nil)
 
 	// Get staged files
 	runner.stub("diff --cached --name-only", "specs/tasks/test-prd/01.md\n", nil)
@@ -112,7 +112,7 @@ func TestCommitSpecs_PushRetry(t *testing.T) {
 	runner := newFakeRunner()
 
 	// Stage succeeds
-	runner.stub("add -A", "", nil)
+	runner.stub("add specs/tasks/test-prd", "", nil)
 
 	// Get staged files
 	runner.stub("diff --cached --name-only", "specs/tasks/test-prd/01.md\n", nil)
@@ -153,7 +153,7 @@ func TestCommitSpecs_PushFailsAfterRetry(t *testing.T) {
 	runner := newFakeRunner()
 
 	// Stage succeeds
-	runner.stub("add -A", "", nil)
+	runner.stub("add specs/tasks/test-prd", "", nil)
 
 	// Get staged files
 	runner.stub("diff --cached --name-only", "specs/tasks/test-prd/01.md\n", nil)

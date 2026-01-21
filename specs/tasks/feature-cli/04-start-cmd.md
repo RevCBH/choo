@@ -61,7 +61,7 @@ func NewFeatureStartCmd(app *App) *cobra.Command {
     //   Short: "Create feature branch, generate specs with review, generate tasks"
     //   Args: cobra.ExactArgs(1)
     // Add flags:
-    //   --prd-dir (default: "docs/prds")
+    //   --prd-dir (default: "docs/prd")
     //   --specs-dir (default: "specs/tasks")
     //   --skip-spec-review (default: false)
     //   --max-review-iter (default: 3)
@@ -103,7 +103,7 @@ Arguments:
   prd-id    The PRD ID to start (e.g., "streaming-events")
 
 Flags:
-  --prd-dir string        PRDs directory (default: docs/prds)
+  --prd-dir string        PRDs directory (default: docs/prd)
   --specs-dir string      Output specs directory (default: specs/tasks)
   --skip-spec-review      Skip automated spec review loop
   --max-review-iter int   Max spec review iterations (default: 3)

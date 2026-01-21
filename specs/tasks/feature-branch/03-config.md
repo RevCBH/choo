@@ -57,7 +57,7 @@ func DefaultFeatureConfig() FeatureConfig
 
 | Field | Default Value |
 |-------|---------------|
-| PRDDir | `"docs/prds"` |
+| PRDDir | `"docs/prd"` |
 | SpecsDir | `"specs"` |
 | BranchPrefix | `"feature/"` |
 
@@ -97,7 +97,7 @@ go build ./internal/config/...
 | Test | Assertion |
 |------|-----------|
 | Build succeeds | No compilation errors |
-| `DefaultFeatureConfig().PRDDir` | Returns `"docs/prds"` |
+| `DefaultFeatureConfig().PRDDir` | Returns `"docs/prd"` |
 | `DefaultFeatureConfig().SpecsDir` | Returns `"specs"` |
 | `DefaultFeatureConfig().BranchPrefix` | Returns `"feature/"` |
 
@@ -122,7 +122,7 @@ None required - pure type definitions.
 
 ```yaml
 feature:
-  prd_dir: "docs/prds"
+  prd_dir: "docs/prd"
   specs_dir: "specs"
   branch_prefix: "feature/"
 ```

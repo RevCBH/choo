@@ -65,8 +65,8 @@ func TestFeatureStartCmd_Flags(t *testing.T) {
 	if prdDirFlag == nil {
 		t.Error("prd-dir flag not registered")
 	}
-	if prdDirFlag.DefValue != "docs/prds" {
-		t.Errorf("prd-dir default should be 'docs/prds', got '%s'", prdDirFlag.DefValue)
+	if prdDirFlag.DefValue != "docs/prd" {
+		t.Errorf("prd-dir default should be 'docs/prd', got '%s'", prdDirFlag.DefValue)
 	}
 
 	specsDirFlag := cmd.Flags().Lookup("specs-dir")
@@ -124,7 +124,7 @@ func TestFeatureStartCmd_DryRun(t *testing.T) {
 		t.Error("Dry run output should contain 'Dry run - showing planned actions'")
 	}
 
-	if !strings.Contains(output, "1. Read PRD from docs/prds/test-prd.md") {
+	if !strings.Contains(output, "1. Read PRD from docs/prd/test-prd.md") {
 		t.Error("Dry run should show PRD read step")
 	}
 
@@ -224,7 +224,7 @@ func TestRunFeatureStart_ValidatesInput(t *testing.T) {
 	// Test empty PRD ID
 	opts := FeatureStartOptions{
 		PRDID:         "",
-		PRDDir:        "docs/prds",
+		PRDDir:        "docs/prd",
 		SpecsDir:      "specs/tasks",
 		MaxReviewIter: 3,
 		DryRun:        false,

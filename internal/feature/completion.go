@@ -87,7 +87,7 @@ func (c *CompletionChecker) TriggerCompletion(ctx context.Context) error {
 // allUnitsComplete checks if all units have merged PRs
 func (c *CompletionChecker) allUnitsComplete() (bool, error) {
 	// Find all task spec files for this PRD
-	specsDir := filepath.Join("specs/tasks", c.prd.Body)
+	specsDir := filepath.Join("specs/tasks", c.prd.ID)
 
 	// Check if specs directory exists
 	if _, err := os.Stat(specsDir); os.IsNotExist(err) {
@@ -155,18 +155,24 @@ func (c *CompletionChecker) findExistingPR(ctx context.Context) (*github.PRInfo,
 
 // openFeaturePR creates the PR from feature branch to main
 func (c *CompletionChecker) openFeaturePR(ctx context.Context) error {
+	// Determine the feature branch name
+	featureBranch := c.prd.FeatureBranch
+	if featureBranch == "" {
+		featureBranch = fmt.Sprintf("feature/%s", c.prd.ID)
+	}
+
 	// According to the PRClient implementation, CreatePR is delegated to Claude via gh CLI
 	// This returns an error indicating the operation should be performed externally
 	_, err := c.github.CreatePR(ctx,
-		fmt.Sprintf("feat: %s", c.prd.Body),
-		fmt.Sprintf("Completes feature: %s", c.prd.Body),
-		"feature-branch",
+		fmt.Sprintf("feat: %s", c.prd.Title),
+		fmt.Sprintf("Completes feature: %s (%s)", c.prd.Title, c.prd.ID),
+		featureBranch,
 	)
 
 	// The error from CreatePR indicates this should be delegated
 	// For testing purposes, we'll emit an event instead
 	if c.events != nil {
-		c.events.Emit(events.NewEvent(events.PRCreated, c.prd.Body))
+		c.events.Emit(events.NewEvent(events.PRCreated, c.prd.ID))
 	}
 
 	return err

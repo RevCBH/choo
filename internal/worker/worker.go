@@ -337,9 +337,16 @@ func (w *Worker) mergeToFeatureBranch(ctx context.Context) error {
 		return fmt.Errorf("failed to rebase onto target branch (possible conflict): %w", err)
 	}
 
-	// 4. Merge unit branch into target branch in the MAIN repo (not worktree)
-	// This updates the local target branch so dependent units see the changes
-	// Note: We run git commands in RepoRoot (main repo) where target branch is checked out
+	// 4. Merge unit branch into target branch in the RepoRoot
+	// This updates the local target branch so dependent units see the changes.
+	//
+	// Context assumption: RepoRoot must have TargetBranch checked out. This is satisfied when:
+	// - Feature mode with worktree: RepoRoot is the feature worktree (feature branch checked out)
+	// - Feature mode from repo root: RepoRoot is the main repo (must have feature branch checked out)
+	// - Non-feature mode: RepoRoot is the main repo (main branch checked out)
+	//
+	// The orchestrator is responsible for ensuring RepoRoot is in the correct state before
+	// starting workers. No implicit checkout is performed here.
 	if _, err := w.runner().Exec(ctx, w.config.RepoRoot, "merge", w.branch, "--ff-only"); err != nil {
 		// Fall back to regular merge if fast-forward fails
 		if _, err := w.runner().Exec(ctx, w.config.RepoRoot, "merge", w.branch, "-m", fmt.Sprintf("Merge unit %s", w.unit.ID)); err != nil {

@@ -22,7 +22,7 @@ type NextFeatureOptions struct {
 // NewNextFeatureCmd creates the next-feature command
 func NewNextFeatureCmd(app *App) *cobra.Command {
 	opts := NextFeatureOptions{
-		PRDDir:  "docs/prds",
+		PRDDir:  "docs/prd",
 		Explain: false,
 		TopN:    3,
 		JSON:    false,
@@ -87,16 +87,18 @@ func (a *App) RunNextFeature(ctx context.Context, opts NextFeatureOptions) error
 		ShowReason: opts.Explain,
 	}
 
-	// TODO: This will require an actual agent invoker implementation
-	// For now, this will fail at runtime until agent integration is complete
-	// The spec says "Agent invocation implementation (uses interface from Task #3)" is NOT in scope
-	// So we create a stub that will be implemented later
-	var invoker feature.AgentInvoker = nil
+	// Get the agent invoker from app configuration
+	// The agent invoker must be set up during app initialization
+	invoker := a.agentInvoker
+	if invoker == nil {
+		return fmt.Errorf("agent invoker not configured: choo next-feature requires Claude agent integration.\n" +
+			"Run with ANTHROPIC_API_KEY environment variable set, or configure an agent invoker.")
+	}
 
 	// Run prioritization
 	result, err := prioritizer.Prioritize(ctx, invoker, prioritizeOpts)
 	if err != nil {
-		return fmt.Errorf("Failed to analyze PRDs: %v", err)
+		return fmt.Errorf("failed to analyze PRDs: %w", err)
 	}
 
 	// Format and display output

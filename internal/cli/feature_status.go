@@ -74,8 +74,8 @@ their status, branch, review iterations, and next actions.`,
 
 // ShowFeatureStatus displays feature workflow status
 func (a *App) ShowFeatureStatus(opts FeatureStatusOptions) error {
-	// Determine PRD directory (default to .ralph/prds)
-	prdDir := filepath.Join(".ralph", "prds")
+	// Determine PRD directory (default to docs/prd)
+	prdDir := "docs/prd"
 
 	// Load features from PRD directory
 	features, err := a.loadFeatures(prdDir)

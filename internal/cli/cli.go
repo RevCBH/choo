@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"github.com/RevCBH/choo/internal/feature"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +23,9 @@ type App struct {
 
 	// Version information
 	versionInfo VersionInfo
+
+	// Agent invoker for Claude-powered features (e.g., next-feature)
+	agentInvoker feature.AgentInvoker
 }
 
 // New creates a new CLI application
@@ -45,6 +49,11 @@ func (a *App) SetVersion(version, commit, date string) {
 		Commit:  commit,
 		Date:    date,
 	}
+}
+
+// SetAgentInvoker sets the Claude agent invoker for features that require it
+func (a *App) SetAgentInvoker(invoker feature.AgentInvoker) {
+	a.agentInvoker = invoker
 }
 
 // setupRootCmd configures the root Cobra command

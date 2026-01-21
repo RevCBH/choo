@@ -34,7 +34,7 @@ func TestCompletionChecker_AllUnitsComplete(t *testing.T) {
 	os.Chdir(tmpDir)
 
 	prd := &PRD{
-		Body: "test-prd",
+		ID: "test-prd",
 		Units: []Unit{
 			{Name: "01-unit", Status: "complete"},
 			{Name: "02-unit", Status: "complete"},
@@ -75,7 +75,7 @@ func TestCompletionChecker_SomeUnitsPending(t *testing.T) {
 	os.Chdir(tmpDir)
 
 	prd := &PRD{
-		Body: "test-prd",
+		ID: "test-prd",
 		Units: []Unit{
 			{Name: "01-unit", Status: "complete"},
 			{Name: "02-unit", Status: "in_progress"},
@@ -99,7 +99,7 @@ func TestCompletionChecker_BranchClean(t *testing.T) {
 	runner.stub("status --porcelain", "", nil) // Empty output = clean
 	useRunner(t, runner)
 
-	prd := &PRD{Body: "test-prd"}
+	prd := &PRD{ID: "test-prd"}
 	checker := NewCompletionChecker(prd, &git.Client{WorktreePath: "/tmp/worktree"}, nil, nil)
 
 	if !checker.branchIsClean() {
@@ -113,7 +113,7 @@ func TestCompletionChecker_BranchDirty(t *testing.T) {
 	runner.stub("status --porcelain", " M file.txt\n", nil) // Modified file
 	useRunner(t, runner)
 
-	prd := &PRD{Body: "test-prd"}
+	prd := &PRD{ID: "test-prd"}
 	checker := NewCompletionChecker(prd, &git.Client{WorktreePath: "/tmp/worktree"}, nil, nil)
 
 	if checker.branchIsClean() {
@@ -139,7 +139,7 @@ func TestCompletionChecker_ExistingPR(t *testing.T) {
 	runner.stub("status --porcelain", "", nil)
 	useRunner(t, runner)
 
-	prd := &PRD{Body: "test-prd", Units: []Unit{}}
+	prd := &PRD{ID: "test-prd", Units: []Unit{}}
 	checker := NewCompletionChecker(prd, &git.Client{WorktreePath: tmpDir}, nil, nil)
 
 	status, err := checker.Check(context.Background())
@@ -193,7 +193,7 @@ func TestCompletionChecker_TriggerSuccess(t *testing.T) {
 		eventReceived <- e
 	})
 
-	prd := &PRD{Body: "test-prd", Units: []Unit{}}
+	prd := &PRD{ID: "test-prd", Units: []Unit{}}
 
 	// Mock GitHub client (CreatePR will return error as it's delegated to CLI)
 	ghClient, _ := github.NewPRClient(github.PRClientConfig{
@@ -248,7 +248,7 @@ func TestCompletionChecker_ReadyForPR(t *testing.T) {
 	useRunner(t, runner)
 
 	prd := &PRD{
-		Body: "test-prd",
+		ID: "test-prd",
 		Units: []Unit{
 			{Name: "01-unit", Status: "complete"},
 		},

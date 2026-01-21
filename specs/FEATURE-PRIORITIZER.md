@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Feature Prioritizer analyzes all PRDs in the `docs/prds/` directory and recommends which feature to implement next. It uses Claude to evaluate dependencies, refactoring impact, and codebase state to produce a ranked list of PRDs with detailed reasoning.
+The Feature Prioritizer analyzes all PRDs in the `docs/prd/` directory and recommends which feature to implement next. It uses Claude to evaluate dependencies, refactoring impact, and codebase state to produce a ranked list of PRDs with detailed reasoning.
 
 The system consists of two parts: a `Prioritizer` component that invokes Claude with a custom agent prompt, and a `choo next-feature` CLI command that surfaces recommendations to the user. PRD frontmatter can include optional `depends_on` hints, but the prioritizer performs its own dependency analysis from PRD content.
 
@@ -11,7 +11,7 @@ The system consists of two parts: a `Prioritizer` component that invokes Claude 
 │                         Feature Prioritizer                              │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                         │
-│   docs/prds/                                                            │
+│   docs/prd/                                                            │
 │   ├── auth.md           ──────┐                                         │
 │   ├── dashboard.md      ──────┼───▶  Prioritizer  ───▶  PriorityResult  │
 │   ├── notifications.md  ──────┤      (Claude)          ├── Recommendations
@@ -282,7 +282,7 @@ Provide your analysis in this exact JSON format:
 ### Prioritization Flow
 
 ```
-Input: docs/prds/ directory path
+Input: docs/prd/ directory path
 
 1. Verify prdDir exists and contains .md files
 2. Load all PRD files:
@@ -480,7 +480,7 @@ func (p *Prioritizer) Prioritize(ctx context.Context, opts PrioritizeOptions) (*
 ```go
 func NewNextFeatureCmd(app *App) *cobra.Command {
     opts := NextFeatureOptions{
-        PRDDir:  "docs/prds",
+        PRDDir:  "docs/prd",
         Explain: false,
         TopN:    3,
         JSON:    false,
@@ -817,14 +817,14 @@ func TestNextFeatureOptions_Defaults(t *testing.T) {
 
     // Execute with no args to check defaults
     opts := NextFeatureOptions{
-        PRDDir:  "docs/prds",
+        PRDDir:  "docs/prd",
         Explain: false,
         TopN:    3,
         JSON:    false,
     }
 
-    if opts.PRDDir != "docs/prds" {
-        t.Errorf("default PRDDir = %q, want %q", opts.PRDDir, "docs/prds")
+    if opts.PRDDir != "docs/prd" {
+        t.Errorf("default PRDDir = %q, want %q", opts.PRDDir, "docs/prd")
     }
     if opts.TopN != 3 {
         t.Errorf("default TopN = %d, want %d", opts.TopN, 3)
@@ -844,14 +844,14 @@ func TestNextFeatureOptions_Defaults(t *testing.T) {
 | Scenario | Setup |
 |----------|-------|
 | Full prioritization flow | Fixture with 3 PRDs, mock Claude response, verify output |
-| Empty PRD directory | Empty docs/prds/, verify helpful error message |
+| Empty PRD directory | Empty docs/prd/, verify helpful error message |
 | Invalid PRD frontmatter | PRD with malformed YAML, verify graceful skip |
 | JSON output mode | Run with --json, verify valid JSON output |
 | TopN limiting | Request top 2 of 5 PRDs, verify only 2 returned |
 
 ### Manual Testing
 
-- [ ] `choo next-feature` produces recommendations from docs/prds/
+- [ ] `choo next-feature` produces recommendations from docs/prd/
 - [ ] `choo next-feature --explain` shows detailed reasoning
 - [ ] `choo next-feature --top 5` shows 5 recommendations
 - [ ] `choo next-feature --json` outputs valid JSON

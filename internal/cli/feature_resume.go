@@ -55,7 +55,7 @@ func (a *App) RunFeatureResume(ctx context.Context, opts FeatureResumeOptions) e
 	}
 
 	// Validate PRD exists
-	prdDir := ".ralph/prds"
+	prdDir := "docs/prd"
 	store := feature.NewPRDStore(prdDir)
 
 	metadata, _, err := store.Load(opts.PRDID)

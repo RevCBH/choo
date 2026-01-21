@@ -80,7 +80,7 @@ func TestRunFeatureResume_NotBlocked(t *testing.T) {
 
 	// Create temp directory for test
 	tmpDir := t.TempDir()
-	prdDir := filepath.Join(tmpDir, ".ralph", "prds")
+	prdDir := filepath.Join(tmpDir, "docs", "prd")
 	if err := os.MkdirAll(prdDir, 0755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestRunFeatureResume_PRDNotFound(t *testing.T) {
 
 	// Create temp directory for test
 	tmpDir := t.TempDir()
-	prdDir := filepath.Join(tmpDir, ".ralph", "prds")
+	prdDir := filepath.Join(tmpDir, "docs", "prd")
 	if err := os.MkdirAll(prdDir, 0755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestRunFeatureResume_SkipReview(t *testing.T) {
 
 	// Create temp directory for test
 	tmpDir := t.TempDir()
-	prdDir := filepath.Join(tmpDir, ".ralph", "prds")
+	prdDir := filepath.Join(tmpDir, "docs", "prd")
 	if err := os.MkdirAll(prdDir, 0755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
@@ -259,7 +259,7 @@ func TestRunFeatureResume_FromValidation(t *testing.T) {
 
 	// Create temp directory for test
 	tmpDir := t.TempDir()
-	prdDir := filepath.Join(tmpDir, ".ralph", "prds")
+	prdDir := filepath.Join(tmpDir, "docs", "prd")
 	if err := os.MkdirAll(prdDir, 0755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}

@@ -78,7 +78,7 @@ go test ./internal/cli/... -run TestNextFeature -v
 
 | Test | Assertion |
 |------|-----------|
-| `TestNewNextFeatureCmd_Defaults` | PRDDir="docs/prds", TopN=3, Explain=false, JSON=false |
+| `TestNewNextFeatureCmd_Defaults` | PRDDir="docs/prd", TopN=3, Explain=false, JSON=false |
 | `TestNewNextFeatureCmd_Flags` | All flags registered and parseable |
 | `TestFormatStandardOutput_Basic` | Formats rank, ID, title correctly |
 | `TestFormatStandardOutput_Explain` | Includes full reasoning text |
@@ -98,7 +98,7 @@ go test ./internal/cli/... -run TestNextFeature -v
 - `--explain`: Show detailed reasoning (default: false)
 - `--top N`: Number of recommendations (default: 3)
 - `--json`: Output as JSON (default: false)
-- Positional arg: custom PRD directory (default: "docs/prds")
+- Positional arg: custom PRD directory (default: "docs/prd")
 
 ### Output Formats
 

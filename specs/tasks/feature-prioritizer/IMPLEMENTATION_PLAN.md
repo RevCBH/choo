@@ -7,7 +7,7 @@ depends_on: [feature-discovery]
 
 ## Overview
 
-The Feature Prioritizer analyzes PRDs in `docs/prds/` and recommends which feature to implement next. It uses Claude to evaluate dependencies, refactoring impact, and codebase state. The system extends the PRD loading capabilities from feature-discovery and adds a new `choo next-feature` CLI command.
+The Feature Prioritizer analyzes PRDs in `docs/prd/` and recommends which feature to implement next. It uses Claude to evaluate dependencies, refactoring impact, and codebase state. The system extends the PRD loading capabilities from feature-discovery and adds a new `choo next-feature` CLI command.
 
 ## Decomposition Strategy
 

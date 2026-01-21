@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Feature Discovery module provides the foundation for PRD-driven workflow orchestration. It handles parsing YAML frontmatter from PRD files stored in `docs/prds/`, discovering available PRDs from the filesystem, and defines the event types that track feature lifecycle state changes.
+The Feature Discovery module provides the foundation for PRD-driven workflow orchestration. It handles parsing YAML frontmatter from PRD files stored in `docs/prd/`, discovering available PRDs from the filesystem, and defines the event types that track feature lifecycle state changes.
 
 This module serves as the entry point for the feature workflow system. Before any feature can be processed, its PRD must be discovered and parsed. The module enforces a single-writer model where only the orchestrator on a feature branch updates PRD frontmatter, ensuring consistent state management across parallel unit work.
 
@@ -18,7 +18,7 @@ The discovery system also supports drift detection by computing content hashes o
 4. Parse orchestrator-managed fields (feature_branch, feature_status, timestamps, review tracking)
 5. Extract markdown body content after frontmatter delimiter
 6. Compute SHA-256 hash of body content for drift detection
-7. Discover all PRD files in `docs/prds/` directory recursively
+7. Discover all PRD files in `docs/prd/` directory recursively
 8. Filter PRDs by status (draft, approved, in_progress, complete, archived)
 9. Validate PRD frontmatter against required field schema
 10. Emit feature and PRD lifecycle events through the event bus
@@ -554,7 +554,7 @@ func TestParseFrontmatter_EdgeCases(t *testing.T) {
 
 ### Manual Testing
 
-- [ ] Create PRD file in `docs/prds/` with valid frontmatter
+- [ ] Create PRD file in `docs/prd/` with valid frontmatter
 - [ ] Create PRD with missing required field, verify validation error
 - [ ] Create PRD with invalid prd_id format, verify error message
 - [ ] Run discovery on directory with mixed valid/invalid PRDs

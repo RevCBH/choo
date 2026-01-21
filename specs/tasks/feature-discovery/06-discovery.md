@@ -12,7 +12,7 @@ depends_on: [1, 4, 5]
 
 ## Objective
 
-Implement filesystem discovery functions to find PRD files in `docs/prds/` directory with optional status filtering.
+Implement filesystem discovery functions to find PRD files in `docs/prd/` directory with optional status filtering.
 
 ## Dependencies
 

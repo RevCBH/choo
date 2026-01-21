@@ -15,7 +15,7 @@ These commands orchestrate the end-to-end workflow from PRD to committed specs a
 ### Functional Requirements
 
 1. **Feature Start Command**
-   - Read PRD from configurable directory (default: `docs/prds/<prd-id>.md`)
+   - Read PRD from configurable directory (default: `docs/prd/<prd-id>.md`)
    - Create feature branch `feature/<prd-id>` from main
    - Track workflow state via PRD frontmatter `feature_status` field
    - Invoke spec-generator, spec-reviewer (with iteration loop), spec-validator, and task-generator agents
@@ -273,7 +273,7 @@ Arguments:
   prd-id    The PRD ID to start (e.g., "streaming-events")
 
 Flags:
-  --prd-dir string        PRDs directory (default: docs/prds)
+  --prd-dir string        PRDs directory (default: docs/prd)
   --specs-dir string      Output specs directory (default: specs/tasks)
   --skip-spec-review      Skip automated spec review loop
   --max-review-iter int   Max spec review iterations (default: 3)
@@ -286,7 +286,7 @@ Examples:
 ```
 
 **Workflow Steps:**
-1. Read PRD from `docs/prds/<prd-id>.md`
+1. Read PRD from `docs/prd/<prd-id>.md`
 2. Create feature branch `feature/<prd-id>` from main
 3. Update PRD frontmatter: `feature_status: generating_specs`
 4. Invoke spec-generator agent with PRD
@@ -627,7 +627,7 @@ func TestFeatureStartCmd_Integration(t *testing.T) {
 
     // Set up temp directory with test PRD
     tmpDir := t.TempDir()
-    prdDir := filepath.Join(tmpDir, "docs/prds")
+    prdDir := filepath.Join(tmpDir, "docs/prd")
     require.NoError(t, os.MkdirAll(prdDir, 0755))
 
     prdContent := `---
@@ -776,7 +776,7 @@ func TestFeatureCommands(t *testing.T) {
 
 ## References
 
-- PRD: `docs/prds/prd-workflow-system.md` sections 4.2, 4.3, 4.4, 10
+- PRD: `docs/prd/prd-workflow-system.md` sections 4.2, 4.3, 4.4, 10
 - Existing CLI pattern: `internal/cli/root.go`
 - Cobra documentation: https://cobra.dev/
 - YAML frontmatter parsing: `gopkg.in/yaml.v3`

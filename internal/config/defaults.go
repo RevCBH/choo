@@ -10,7 +10,7 @@ const (
 	DefaultReviewTimeout      = "2h"
 	DefaultReviewPollInterval = "30s"
 	DefaultLogLevel           = "info"
-	DefaultPRDDir             = "docs/prds"
+	DefaultPRDDir             = "docs/prd"
 	DefaultSpecsDir           = "specs"
 	DefaultBranchPrefix       = "feature/"
 )

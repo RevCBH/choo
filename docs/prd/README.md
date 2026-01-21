@@ -48,7 +48,7 @@ depends_on:                   # Other PRD IDs this depends on
 
 ## Adding a New PRD
 
-1. Create a new file: `docs/prds/YOUR-FEATURE.md`
+1. Create a new file: `docs/prd/YOUR-FEATURE.md`
 2. Add frontmatter with required fields (`prd_id`, `title`, `status`)
 3. Add optional `depends_on` hints for the prioritizer
 4. Document the feature following the standard sections

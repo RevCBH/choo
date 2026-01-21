@@ -48,7 +48,7 @@ A fully automated feature development pipeline:
 │                     PRD-Based Feature Workflow                               │
 └─────────────────────────────────────────────────────────────────────────────┘
 
- docs/prds/                     .claude/agents/                 specs/tasks/
+ docs/prd/                     .claude/agents/                 specs/tasks/
  ┌─────────────┐               ┌─────────────────┐             ┌─────────────┐
  │ FEATURE-A   │───┬──────────▶│ prd-prioritizer │────────────▶│ feature-a/  │
  │ FEATURE-B   │   │           │ spec-generator  │             │   ├ IMPL..  │
@@ -87,7 +87,7 @@ A fully automated feature development pipeline:
 
 ### 2.1 Location
 
-PRDs stored under `docs/prds/` with standardized YAML frontmatter.
+PRDs stored under `docs/prd/` with standardized YAML frontmatter.
 
 ### 2.2 Frontmatter Schema
 
@@ -165,7 +165,7 @@ Task tool with subagent_type: "general-purpose"
 
 Prompt: "Analyze PRDs and recommend next feature to implement.
 
-PRD Directory: docs/prds/
+PRD Directory: docs/prd/
 Current specs: specs/tasks/
 
 Consider:
@@ -198,7 +198,7 @@ Task tool with subagent_type: "general-purpose"
 
 Prompt: "Review the generated specs for {FEATURE}.
 
-PRD: docs/prds/{FEATURE}.md
+PRD: docs/prd/{FEATURE}.md
 Specs: specs/tasks/{feature}/
 
 Review criteria:
@@ -299,7 +299,7 @@ Examples:
 ```
 
 **Workflow**:
-1. Read PRD from `docs/prds/<prd-id>.md`
+1. Read PRD from `docs/prd/<prd-id>.md`
 2. Create feature branch `feature/<prd-id>` from main
 3. Update PRD frontmatter: `feature_status: generating_specs`
 4. Invoke spec-generator agent with PRD
@@ -807,7 +807,7 @@ const (
 ### Phase 1: PRD Foundation
 
 **Tasks**:
-1. Create `docs/prds/README.md` template
+1. Create `docs/prd/README.md` template
 2. Implement `internal/feature/discovery.go` - PRD frontmatter parsing
 3. Add feature event types to `internal/events/types.go`
 
@@ -924,7 +924,7 @@ const (
 | `internal/cli/feature.go` | `choo feature` subcommands |
 | `.claude/agents/prd-prioritizer.md` | Prioritizer agent definition |
 | `.claude/agents/spec-reviewer.md` | Reviewer agent definition |
-| `docs/prds/README.md` | PRD index and format guide |
+| `docs/prd/README.md` | PRD index and format guide |
 
 ## 12. Files to Modify
 

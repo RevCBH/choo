@@ -38,6 +38,12 @@ func StageAll(ctx context.Context, worktreePath string) error {
 	return err
 }
 
+// StagePath stages changes in a specific path (git add <path>)
+func StagePath(ctx context.Context, worktreePath string, path string) error {
+	_, err := gitExec(ctx, worktreePath, "add", path)
+	return err
+}
+
 // HasUncommittedChanges checks if there are uncommitted changes
 func HasUncommittedChanges(ctx context.Context, worktreePath string) (bool, error) {
 	output, err := gitExec(ctx, worktreePath, "status", "--porcelain")

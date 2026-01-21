@@ -17,7 +17,7 @@ func TestFeatureStatusCmd_NoArgs(t *testing.T) {
 
 	// Create temp directory and copy test fixtures
 	tmpDir := t.TempDir()
-	prdDir := filepath.Join(tmpDir, ".ralph", "prds")
+	prdDir := filepath.Join(tmpDir, "docs", "prd")
 	if err := os.MkdirAll(prdDir, 0755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestFeatureStatusCmd_WithPRDID(t *testing.T) {
 
 	// Create temp directory and copy test fixtures
 	tmpDir := t.TempDir()
-	prdDir := filepath.Join(tmpDir, ".ralph", "prds")
+	prdDir := filepath.Join(tmpDir, "docs", "prd")
 	if err := os.MkdirAll(prdDir, 0755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestFeatureStatusCmd_JSON(t *testing.T) {
 
 	// Create temp directory and copy test fixtures
 	tmpDir := t.TempDir()
-	prdDir := filepath.Join(tmpDir, ".ralph", "prds")
+	prdDir := filepath.Join(tmpDir, "docs", "prd")
 	if err := os.MkdirAll(prdDir, 0755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestShowFeatureStatus_NoFeatures(t *testing.T) {
 
 	// Create temp directory with empty PRD directory
 	tmpDir := t.TempDir()
-	prdDir := filepath.Join(tmpDir, ".ralph", "prds")
+	prdDir := filepath.Join(tmpDir, "docs", "prd")
 	if err := os.MkdirAll(prdDir, 0755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestShowFeatureStatus_Blocked(t *testing.T) {
 
 	// Create temp directory and copy test fixtures
 	tmpDir := t.TempDir()
-	prdDir := filepath.Join(tmpDir, ".ralph", "prds")
+	prdDir := filepath.Join(tmpDir, "docs", "prd")
 	if err := os.MkdirAll(prdDir, 0755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}
@@ -321,7 +321,7 @@ func TestShowFeatureStatus_Ready(t *testing.T) {
 
 	// Create temp directory and copy test fixtures
 	tmpDir := t.TempDir()
-	prdDir := filepath.Join(tmpDir, ".ralph", "prds")
+	prdDir := filepath.Join(tmpDir, "docs", "prd")
 	if err := os.MkdirAll(prdDir, 0755); err != nil {
 		t.Fatalf("Failed to create test directory: %v", err)
 	}

@@ -143,8 +143,7 @@ func (w *Workflow) CommitSpecs(ctx context.Context) error {
 	}
 
 	// Commit the specs
-	prdID := w.prd.Body // Using body as ID for now
-	_, err := CommitSpecs(ctx, w.git, prdID)
+	_, err := CommitSpecs(ctx, w.git, w.prd.ID)
 	if err != nil {
 		return fmt.Errorf("failed to commit specs: %w", err)
 	}
@@ -184,7 +183,7 @@ func (w *Workflow) transitionTo(status FeatureStatus) error {
 
 	// Emit state change event
 	if w.events != nil {
-		event := events.NewEvent(events.EventType(fmt.Sprintf("workflow.%s", status)), w.prd.Body)
+		event := events.NewEvent(events.EventType(fmt.Sprintf("workflow.%s", status)), w.prd.ID)
 		event.Payload = map[string]string{
 			"from": string(oldStatus),
 			"to":   string(status),
@@ -199,7 +198,7 @@ func (w *Workflow) transitionTo(status FeatureStatus) error {
 func (w *Workflow) escalate(msg string, err error) error {
 	// Emit escalation event
 	if w.events != nil {
-		event := events.NewEvent(events.EventType("workflow.escalation"), w.prd.Body)
+		event := events.NewEvent(events.EventType("workflow.escalation"), w.prd.ID)
 		event.Payload = msg
 		if err != nil {
 			event = event.WithError(err)

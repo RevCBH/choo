@@ -7,7 +7,7 @@ depends_on: []
 
 ## Overview
 
-The Feature Discovery module provides PRD parsing and filesystem discovery for the PRD-driven workflow system. It handles parsing YAML frontmatter from PRD files stored in `docs/prds/`, discovering available PRDs, computing content hashes for drift detection, and defines feature/PRD lifecycle event types.
+The Feature Discovery module provides PRD parsing and filesystem discovery for the PRD-driven workflow system. It handles parsing YAML frontmatter from PRD files stored in `docs/prd/`, discovering available PRDs, computing content hashes for drift detection, and defines feature/PRD lifecycle event types.
 
 ## Decomposition Strategy
 

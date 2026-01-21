@@ -42,8 +42,8 @@ func CommitSpecsWithOptions(ctx context.Context, gitClient *git.Client, prdID st
 		}, nil
 	}
 
-	// Stage all generated spec files
-	if err := git.StageAll(ctx, gitClient.WorktreePath); err != nil {
+	// Stage only the specs directory (not the entire worktree)
+	if err := git.StagePath(ctx, gitClient.WorktreePath, specsDir); err != nil {
 		return nil, fmt.Errorf("failed to stage specs: %w", err)
 	}
 
@@ -81,9 +81,6 @@ func CommitSpecsWithOptions(ctx context.Context, gitClient *git.Client, prdID st
 	if pushErr != nil {
 		return nil, fmt.Errorf("failed to push specs after retry: %w", pushErr)
 	}
-
-	// Use specsDir to avoid unused variable warning
-	_ = specsDir
 
 	return &CommitResult{
 		CommitHash: commitHash,
