@@ -2,6 +2,11 @@ package config
 
 import "os"
 
+const (
+	EnvProvider = "RALPH_PROVIDER"
+	EnvCodexCmd = "RALPH_CODEX_CMD"
+)
+
 // envOverrides maps environment variables to config field setters.
 var envOverrides = []struct {
 	envVar string
@@ -23,6 +28,21 @@ var envOverrides = []struct {
 		envVar: "RALPH_LOG_LEVEL",
 		apply: func(c *Config, v string) {
 			c.LogLevel = v
+		},
+	},
+	{
+		envVar: EnvProvider,
+		apply: func(c *Config, v string) {
+			c.Provider.Type = ProviderType(v)
+		},
+	},
+	{
+		envVar: EnvCodexCmd,
+		apply: func(c *Config, v string) {
+			if c.Provider.Providers == nil {
+				c.Provider.Providers = make(map[ProviderType]ProviderSettings)
+			}
+			c.Provider.Providers[ProviderCodex] = ProviderSettings{Command: v}
 		},
 	},
 }
