@@ -337,7 +337,7 @@ func (w *Worker) runBaselinePhase(ctx context.Context) error {
 // This ensures dependent units have access to their predecessors' code
 func (w *Worker) mergeToFeatureBranch(ctx context.Context) error {
 	// 1. Review placeholder (log what would be reviewed)
-	w.logReviewPlaceholder(ctx)
+	w.runCodeReview(ctx)
 
 	// 2-5 are serialized via mergeMu to prevent concurrent merge conflicts
 	// Acquire merge lock - only one worker can merge at a time
@@ -551,18 +551,6 @@ func (w *Worker) mergeWithCleanup(ctx context.Context) error {
 	return nil
 }
 
-// logReviewPlaceholder logs the diff that would be reviewed
-// Future: integrate codex review here
-func (w *Worker) logReviewPlaceholder(ctx context.Context) {
-	// Get the diff between target branch and current HEAD
-	diff, err := w.runner().Exec(ctx, w.worktreePath, "diff", fmt.Sprintf("origin/%s...HEAD", w.config.TargetBranch), "--stat")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Review placeholder - could not get diff: %v\n", err)
-		return
-	}
-
-	fmt.Fprintf(os.Stderr, "Review placeholder - changes to review for unit %s:\n%s\n", w.unit.ID, diff)
-}
 
 // updateUnitStatus updates the unit frontmatter status in the IMPLEMENTATION_PLAN.md
 func (w *Worker) updateUnitStatus(status discovery.UnitStatus) error {
