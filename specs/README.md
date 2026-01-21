@@ -70,29 +70,9 @@ These specs close the gaps between v0.1 components and a fully operational self-
 
 | Spec | Description | Dependencies |
 |------|-------------|--------------|
-| **[WEB](WEB.md)** | Real-time web dashboard daemon for orchestrator monitoring via HTTP/SSE | EVENTS, CLI |
-| **[WEB-PUSHER](WEB-PUSHER.md)** | Event pusher that connects `choo run` to web UI via Unix socket | WEB, EVENTS |
-| **[WEB-FRONTEND](WEB-FRONTEND.md)** | Browser UI with D3.js dependency graph visualization | WEB |
-
-### Dependency Graph
-
-```
-   ┌────────┐   ┌────────┐
-   │ EVENTS │   │  CLI   │
-   └───┬────┘   └───┬────┘
-       │            │
-       └──────┬─────┘
-              ▼
-          ┌───────┐
-          │  WEB  │
-          └───┬───┘
-              │
-       ┌──────┴──────┐
-       ▼             ▼
-┌────────────┐ ┌─────────────┐
-│ WEB-PUSHER │ │ WEB-FRONTEND│
-└────────────┘ └─────────────┘
-```
+| **[WEB](completed/WEB.md)** | Real-time web dashboard daemon for orchestrator monitoring via HTTP/SSE (superseded by DAEMON in v0.5) | EVENTS, CLI |
+| **[WEB-PUSHER](completed/WEB-PUSHER.md)** | Event pusher that connects `choo run` to web UI via Unix socket | WEB, EVENTS |
+| **[WEB-FRONTEND](completed/WEB-FRONTEND.md)** | Browser UI with D3.js dependency graph visualization | WEB |
 
 ### Implementation Order
 
@@ -144,3 +124,67 @@ These specs enable PRD-based automated feature development:
 2. **FEATURE-PRIORITIZER** + **FEATURE-BRANCH** + **SPEC-REVIEW** (parallel, depend on FEATURE-DISCOVERY)
 3. **FEATURE-WORKFLOW** (depends on FEATURE-DISCOVERY, FEATURE-BRANCH, SPEC-REVIEW)
 4. **FEATURE-CLI** (depends on FEATURE-WORKFLOW)
+
+## History Specs (v0.5)
+
+| Spec | Description | Dependencies |
+|------|-------------|--------------|
+| **[HISTORY-TYPES](HISTORY-TYPES.md)** | Canonical shared type definitions for history system | - |
+| **[HISTORY-STORE](HISTORY-STORE.md)** | SQLite storage layer with WAL mode for persisting orchestration run history | HISTORY-TYPES, EVENTS |
+| **[DAEMON](DAEMON.md)** | Long-running daemon process that owns history writes and serves web UI (replaces WEB) | HISTORY-TYPES, HISTORY-STORE |
+| **[HISTORY-API](HISTORY-API.md)** | HTTP API endpoints for querying and managing historical run data | HISTORY-TYPES, DAEMON |
+| **[HISTORY-UI](HISTORY-UI.md)** | Frontend JavaScript module for viewing historical runs with timeline and graph visualization | HISTORY-TYPES, HISTORY-API, WEB-FRONTEND |
+
+### Dependency Graph
+
+```
+   ┌────────┐   ┌────────┐
+   │ EVENTS │   │  CLI   │
+   └───┬────┘   └───┬────┘
+       │            │
+       └──────┬─────┘
+              ▼
+       ┌─────────────┐
+       │ WEB (v0.3)  │  ◀── superseded by DAEMON
+       └──────┬──────┘
+              │
+       ┌──────┴──────┐
+       ▼             ▼
+┌────────────┐ ┌─────────────┐
+│ WEB-PUSHER │ │ WEB-FRONTEND│
+└────────────┘ └─────────────┘
+                     │
+                     │
+┌───────────────┐    │
+│ HISTORY-TYPES │◀───┼──────────────────┐
+└───────┬───────┘    │                  │
+        │            │                  │
+        ▼            │                  │
+┌─────────────┐      │                  │
+│HISTORY-STORE│      │                  │
+└──────┬──────┘      │                  │
+       │             │                  │
+       ▼             │                  │
+  ┌────────┐         │                  │
+  │ DAEMON │─────────┤  (replaces WEB)  │
+  └───┬────┘         │                  │
+      │              │                  │
+      ▼              │                  │
+┌─────────────┐      │                  │
+│ HISTORY-API │──────┼──────────────────┘
+└──────┬──────┘      │
+       │             │
+       └──────┬──────┘
+              ▼
+       ┌────────────┐
+       │ HISTORY-UI │
+       └────────────┘
+```
+
+### Implementation Order
+
+1. **HISTORY-TYPES** (no dependencies - canonical type definitions)
+2. **HISTORY-STORE** (depends on HISTORY-TYPES, EVENTS - foundational storage layer)
+3. **DAEMON** (depends on HISTORY-TYPES, HISTORY-STORE - daemon process lifecycle, replaces WEB)
+4. **HISTORY-API** (depends on HISTORY-TYPES, DAEMON - HTTP endpoints)
+5. **HISTORY-UI** (depends on HISTORY-TYPES, HISTORY-API, WEB-FRONTEND - browser interface)
