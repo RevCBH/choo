@@ -245,7 +245,7 @@ func (m *mockClaudeInvoker) invokeClaude(ctx context.Context, prompt string) err
 	if m.invokeFunc != nil {
 		return m.invokeFunc(ctx, TaskPrompt{Content: prompt})
 	}
-	return m.Worker.invokeClaudeForTask(ctx, TaskPrompt{Content: prompt})
+	return m.Worker.invokeProvider(ctx, TaskPrompt{Content: prompt})
 }
 
 // wrapWorkerForMocking wraps a worker to allow mocking invokeClaude

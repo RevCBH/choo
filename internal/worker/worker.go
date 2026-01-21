@@ -298,8 +298,8 @@ func (w *Worker) runBaselinePhase(ctx context.Context) error {
 		promptContent := BuildBaselineFixPrompt(output, baselineCommands.String())
 		prompt := TaskPrompt{Content: promptContent}
 
-		// Invoke Claude to fix (using same method as task execution)
-		if err := w.invokeClaudeForTask(ctx, prompt); err != nil {
+		// Invoke Provider to fix (using same method as task execution)
+		if err := w.invokeProvider(ctx, prompt); err != nil {
 			// Continue to next retry
 			continue
 		}
