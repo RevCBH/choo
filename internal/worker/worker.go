@@ -328,7 +328,7 @@ func (w *Worker) mergeToFeatureBranch(ctx context.Context) error {
 	// 1. Review placeholder (log what would be reviewed)
 	w.logReviewPlaceholder(ctx)
 
-	// 2-4 are serialized via mergeMu to prevent concurrent merge conflicts
+	// 2-5 are serialized via mergeMu to prevent concurrent merge conflicts
 	// Acquire merge lock - only one worker can merge at a time
 	if w.mergeMu != nil {
 		w.mergeMu.Lock()
@@ -340,12 +340,20 @@ func (w *Worker) mergeToFeatureBranch(ctx context.Context) error {
 		return fmt.Errorf("failed to fetch target branch: %w", err)
 	}
 
-	// 3. Rebase unit branch onto feature branch (handle any drift)
-	if _, err := w.runner().Exec(ctx, w.worktreePath, "rebase", fmt.Sprintf("origin/%s", w.config.TargetBranch)); err != nil {
-		// If rebase fails, abort and return error
-		// (shouldn't happen with proper deps, but handle gracefully)
-		_, _ = w.runner().Exec(ctx, w.worktreePath, "rebase", "--abort")
-		return fmt.Errorf("failed to rebase onto target branch (possible conflict): %w", err)
+	// 3. Rebase unit branch onto feature branch with conflict resolution
+	targetRef := fmt.Sprintf("origin/%s", w.config.TargetBranch)
+	hasConflicts, err := git.Rebase(ctx, w.worktreePath, targetRef)
+	if err != nil {
+		return fmt.Errorf("rebase failed: %w", err)
+	}
+
+	if hasConflicts {
+		// Attempt to resolve conflicts using Claude
+		if err := w.resolveConflictsWithClaude(ctx); err != nil {
+			// Clean up - abort the rebase
+			_ = git.AbortRebase(ctx, w.worktreePath)
+			return fmt.Errorf("failed to resolve merge conflicts: %w", err)
+		}
 	}
 
 	// 4. Merge unit branch into target branch in the RepoRoot
@@ -375,6 +383,75 @@ func (w *Worker) mergeToFeatureBranch(ctx context.Context) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Successfully merged unit %s to %s (local)\n", w.unit.ID, w.config.TargetBranch)
+	return nil
+}
+
+// resolveConflictsWithClaude uses Claude to resolve merge conflicts during rebase
+func (w *Worker) resolveConflictsWithClaude(ctx context.Context) error {
+	// Get list of conflicted files
+	conflictedFiles, err := git.GetConflictedFiles(ctx, w.worktreePath)
+	if err != nil {
+		return fmt.Errorf("failed to get conflicted files: %w", err)
+	}
+
+	// Emit conflict event for observability
+	if w.events != nil {
+		evt := events.NewEvent(events.PRConflict, w.unit.ID).
+			WithPayload(map[string]any{
+				"files": conflictedFiles,
+			})
+		w.events.Emit(evt)
+	}
+
+	fmt.Fprintf(os.Stderr, "Merge conflicts detected in %d files, invoking Claude to resolve...\n", len(conflictedFiles))
+
+	// Build conflict resolution prompt
+	prompt := BuildConflictPrompt(w.config.TargetBranch, conflictedFiles)
+
+	// Retry loop for conflict resolution
+	retryResult := RetryWithBackoff(ctx, DefaultRetryConfig, func(ctx context.Context) error {
+		if err := w.invokeClaude(ctx, prompt); err != nil {
+			return err
+		}
+
+		// Verify rebase completed (no longer in rebase state)
+		inRebase, err := git.IsRebaseInProgress(ctx, w.worktreePath)
+		if err != nil {
+			return err
+		}
+		if inRebase {
+			// Claude didn't complete the rebase - check if there are still conflicts
+			stillConflicted, _ := git.GetConflictedFiles(ctx, w.worktreePath)
+			if len(stillConflicted) > 0 {
+				return fmt.Errorf("claude did not resolve all conflicts: %v", stillConflicted)
+			}
+			return fmt.Errorf("claude did not complete rebase (git rebase --continue)")
+		}
+		return nil
+	})
+
+	if !retryResult.Success {
+		// Escalate to user if escalator is available
+		if w.escalator != nil {
+			_ = w.escalator.Escalate(ctx, escalate.Escalation{
+				Severity: escalate.SeverityBlocking,
+				Unit:     w.unit.ID,
+				Title:    "Failed to resolve merge conflicts",
+				Message: fmt.Sprintf(
+					"Claude could not resolve conflicts after %d attempts",
+					retryResult.Attempts,
+				),
+				Context: map[string]string{
+					"files":  strings.Join(conflictedFiles, ", "),
+					"target": w.config.TargetBranch,
+					"error":  retryResult.LastErr.Error(),
+				},
+			})
+		}
+		return retryResult.LastErr
+	}
+
+	fmt.Fprintf(os.Stderr, "Successfully resolved merge conflicts\n")
 	return nil
 }
 
