@@ -115,11 +115,11 @@ func TestRunCodeReview_IssuesFound(t *testing.T) {
 	// Wait for events to be processed
 	waitForEvents(eventBus)
 
-	require.Len(t, *collected, 2)
+	// Should emit: started, issues_found, fix_attempt (fails because no provider)
+	require.Len(t, *collected, 3)
 	assert.Equal(t, events.CodeReviewStarted, (*collected)[0].Type)
 	assert.Equal(t, events.CodeReviewIssuesFound, (*collected)[1].Type)
-	// Note: we can't verify fix loop was called without refactoring,
-	// but the config check ensures it would be called if implemented
+	assert.Equal(t, events.CodeReviewFixAttempt, (*collected)[2].Type)
 }
 
 func TestRunCodeReview_IssuesFound_ZeroIterations(t *testing.T) {
