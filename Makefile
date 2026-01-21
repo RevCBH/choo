@@ -27,3 +27,17 @@ test:
 .PHONY: build
 build:
 	go build ./...
+
+.PHONY: vet
+vet:
+	go vet ./...
+
+.PHONY: check
+check: build vet lint test
+	@echo "All checks passed!"
+
+.PHONY: install-hooks
+install-hooks: lint-install
+	@echo "Installing git hooks..."
+	@git config core.hooksPath scripts
+	@echo "Git hooks installed (using core.hooksPath). Run 'make check' to test locally."

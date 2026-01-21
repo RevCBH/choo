@@ -1,0 +1,52 @@
+#!/bin/bash
+# Pre-push hook to ensure CI checks will pass
+# Install with: make install-hooks
+
+set -e
+
+echo "Running pre-push checks..."
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+NC='\033[0m' # No Color
+
+check_failed() {
+    echo -e "${RED}Pre-push check failed: $1${NC}"
+    echo "Fix the issues above before pushing."
+    exit 1
+}
+
+check_passed() {
+    echo -e "${GREEN}✓ $1${NC}"
+}
+
+# 1. Build
+echo "Building..."
+if ! go build ./... 2>&1; then
+    check_failed "build"
+fi
+check_passed "Build"
+
+# 2. Vet
+echo "Running go vet..."
+if ! go vet ./... 2>&1; then
+    check_failed "go vet"
+fi
+check_passed "Vet"
+
+# 3. Lint
+echo "Running golangci-lint..."
+if ! golangci-lint run ./... 2>&1; then
+    check_failed "golangci-lint"
+fi
+check_passed "Lint"
+
+# 4. Tests with race detector
+echo "Running tests with race detector..."
+if ! go test -race ./... 2>&1; then
+    check_failed "tests"
+fi
+check_passed "Tests"
+
+echo -e "${GREEN}All pre-push checks passed!${NC}"
