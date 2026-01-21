@@ -1,6 +1,6 @@
 ---
 task: 1
-status: pending
+status: complete
 backpressure: "go test ./internal/provider/... -run Claude"
 depends_on: []
 ---

@@ -99,7 +99,48 @@ These specs close the gaps between v0.1 components and a fully operational self-
 1. **WEB** (depends on v0.1 EVENTS and CLI)
 2. **WEB-PUSHER** + **WEB-FRONTEND** (parallel, both depend on WEB)
 
-## Feature Workflow Specs (v0.4)
+## Multi-Provider Specs (v0.4)
+
+| Spec | Description | Dependencies |
+|------|-------------|--------------|
+| **[PROVIDER-INTERFACE](PROVIDER-INTERFACE.md)** | Provider interface definition and factory pattern for CLI-based LLM providers | - |
+| **[PROVIDER-IMPLEMENTATIONS](PROVIDER-IMPLEMENTATIONS.md)** | Claude and Codex CLI subprocess implementations of the Provider interface | PROVIDER-INTERFACE |
+| **[PROVIDER-CONFIG](PROVIDER-CONFIG.md)** | Configuration schema, environment variables, CLI flags, and precedence resolution | CONFIG, CLI, DISCOVERY |
+| **[PROVIDER-INTEGRATION](PROVIDER-INTEGRATION.md)** | Worker and orchestrator changes to use Provider abstraction for task execution | PROVIDER-INTERFACE, PROVIDER-IMPLEMENTATIONS, PROVIDER-CONFIG |
+
+### Dependency Graph
+
+```
+                              ┌────────┐  ┌─────┐  ┌───────────┐
+                              │ CONFIG │  │ CLI │  │ DISCOVERY │
+                              └───┬────┘  └──┬──┘  └─────┬─────┘
+                                  │         │           │
+                                  └─────────┴───────────┘
+                                            │
+┌──────────────────┐                        ▼
+│PROVIDER-INTERFACE│              ┌─────────────────┐
+└────────┬─────────┘              │ PROVIDER-CONFIG │
+         │                        └────────┬────────┘
+         ▼                                 │
+┌────────────────────────┐                 │
+│PROVIDER-IMPLEMENTATIONS│                 │
+└────────────┬───────────┘                 │
+             │                             │
+             └──────────────┬──────────────┘
+                            │
+                            ▼
+                ┌────────────────────┐
+                │PROVIDER-INTEGRATION│
+                └────────────────────┘
+```
+
+### Implementation Order
+
+1. **PROVIDER-INTERFACE** + **PROVIDER-CONFIG** (parallel - interface has no deps, config depends on v0.1)
+2. **PROVIDER-IMPLEMENTATIONS** (depends on PROVIDER-INTERFACE)
+3. **PROVIDER-INTEGRATION** (depends on all three above specs)
+
+## Feature Workflow Specs (v0.5)
 
 These specs enable PRD-based automated feature development:
 
