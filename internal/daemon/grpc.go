@@ -245,3 +245,60 @@ func (s *GRPCServer) ListJobs(ctx context.Context, req *apiv1.ListJobsRequest) (
 
 	return resp, nil
 }
+
+// WatchJob streams events for a job until completion or client disconnect.
+// Supports resuming from a specific sequence number for reconnection scenarios.
+func (s *GRPCServer) WatchJob(req *apiv1.WatchJobRequest, stream apiv1.DaemonService_WatchJobServer) error {
+	// Validate required fields
+	if req.JobId == "" {
+		return status.Errorf(codes.InvalidArgument, "job_id is required")
+	}
+
+	// Validate job exists
+	job, err := s.jobManager.GetJob(req.JobId)
+	if err != nil {
+		return status.Errorf(codes.NotFound, "job not found: %s", req.JobId)
+	}
+
+	// If job is already complete and no replay requested, return immediately
+	if isTerminalStatus(job.Status) && req.FromSequence == 0 {
+		return nil
+	}
+
+	// Subscribe to job events starting from requested sequence
+	events, unsub := s.jobManager.Subscribe(req.JobId, int(req.FromSequence))
+	defer unsub()
+
+	// Stream events until channel closes (job complete) or client disconnects
+	for {
+		select {
+		case event, ok := <-events:
+			if !ok {
+				// Channel closed - job completed
+				return nil
+			}
+			if err := stream.Send(eventToProto(event)); err != nil {
+				// Client disconnected or stream error
+				return err
+			}
+
+		case <-stream.Context().Done():
+			// Client disconnected
+			return stream.Context().Err()
+
+		case <-s.shutdownCh:
+			// Server shutting down
+			return status.Errorf(codes.Unavailable, "daemon is shutting down")
+		}
+	}
+}
+
+// isTerminalStatus returns true if the job status indicates completion
+func isTerminalStatus(status string) bool {
+	switch status {
+	case "completed", "failed", "cancelled":
+		return true
+	default:
+		return false
+	}
+}
