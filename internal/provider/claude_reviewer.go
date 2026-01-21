@@ -2,8 +2,10 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
+	"strings"
 )
 
 // ClaudeReviewer implements Reviewer using Claude with diff-based prompts.
@@ -76,13 +78,96 @@ func (r *ClaudeReviewer) getDiff(ctx context.Context, workdir, baseBranch string
 	return string(output), nil
 }
 
-// parseOutput parses Claude's response into a ReviewResult.
-// This is a stub implementation that will be replaced in Task #3.
+// parseOutput extracts and parses JSON from Claude's response.
+// Returns graceful degradation (passed=true) if parsing fails.
 func (r *ClaudeReviewer) parseOutput(output string) (*ReviewResult, error) {
+	// Extract JSON from Claude's response
+	jsonStr := extractJSON(output)
+	if jsonStr == "" {
+		return &ReviewResult{
+			Passed:    true,
+			Summary:   "No structured review output",
+			RawOutput: output,
+		}, nil
+	}
+
+	var parsed struct {
+		Passed  bool          `json:"passed"`
+		Summary string        `json:"summary"`
+		Issues  []ReviewIssue `json:"issues"`
+	}
+
+	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
+		return &ReviewResult{
+			Passed:    true,
+			Summary:   "Failed to parse review output",
+			RawOutput: output,
+		}, nil
+	}
+
 	return &ReviewResult{
-		Passed:    true,
-		Summary:   "",
-		Issues:    nil,
+		Passed:    parsed.Passed,
+		Summary:   parsed.Summary,
+		Issues:    parsed.Issues,
 		RawOutput: output,
 	}, nil
+}
+
+// extractJSON finds and returns the first JSON object in the output.
+// Handles JSON in markdown code fences and bare JSON.
+// Returns empty string if no valid JSON found.
+func extractJSON(output string) string {
+	// First, try to extract JSON from markdown code fence
+	if jsonStr := extractJSONFromCodeFence(output); jsonStr != "" {
+		return jsonStr
+	}
+
+	// Fall back to finding bare JSON by brace matching
+	return extractJSONByBraces(output)
+}
+
+// extractJSONFromCodeFence extracts JSON from markdown code fences.
+// Looks for ```json or ``` followed by JSON content.
+func extractJSONFromCodeFence(output string) string {
+	markers := []string{"```json\n", "```\n"}
+	for _, marker := range markers {
+		start := strings.Index(output, marker)
+		if start == -1 {
+			continue
+		}
+		contentStart := start + len(marker)
+		// Find the closing ```
+		end := strings.Index(output[contentStart:], "```")
+		if end == -1 {
+			continue
+		}
+		content := strings.TrimSpace(output[contentStart : contentStart+end])
+		if strings.HasPrefix(content, "{") {
+			return content
+		}
+	}
+	return ""
+}
+
+// extractJSONByBraces finds JSON by matching braces.
+// Scans for first { and tracks depth until matching } found.
+func extractJSONByBraces(output string) string {
+	start := -1
+	depth := 0
+
+	for i, ch := range output {
+		if ch == '{' {
+			if start == -1 {
+				start = i
+			}
+			depth++
+		} else if ch == '}' {
+			depth--
+			if depth == 0 && start != -1 {
+				return output[start : i+1]
+			}
+		}
+	}
+
+	return ""
 }
