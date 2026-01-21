@@ -1,0 +1,2005 @@
+package db
+
+import (
+	"strings"
+	"sync"
+	"testing"
+)
+
+// TestOpen verifies that opening an in-memory database works without error
+func TestOpen(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+}
+
+// TestOpenWALMode verifies that WAL mode is enabled after open
+func TestOpenWALMode(t *testing.T) {
+	// Use a temporary file for WAL mode test (in-memory databases don't support WAL)
+	tmpDB := t.TempDir() + "/test.db"
+	db, err := Open(tmpDB)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	var journalMode string
+	err = db.conn.QueryRow("PRAGMA journal_mode").Scan(&journalMode)
+	if err != nil {
+		t.Fatalf("Failed to query journal_mode: %v", err)
+	}
+
+	if journalMode != "wal" {
+		t.Errorf("Expected WAL mode, got %s", journalMode)
+	}
+}
+
+// TestOpenForeignKeys verifies that foreign keys are enabled after open
+func TestOpenForeignKeys(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	var foreignKeys int
+	err = db.conn.QueryRow("PRAGMA foreign_keys").Scan(&foreignKeys)
+	if err != nil {
+		t.Fatalf("Failed to query foreign_keys: %v", err)
+	}
+
+	if foreignKeys != 1 {
+		t.Errorf("Expected foreign keys enabled (1), got %d", foreignKeys)
+	}
+}
+
+// TestOpenMigration verifies that all tables exist after open
+func TestOpenMigration(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	tables := []string{"runs", "units", "events"}
+	for _, table := range tables {
+		var name string
+		query := "SELECT name FROM sqlite_master WHERE type='table' AND name=?"
+		err = db.conn.QueryRow(query, table).Scan(&name)
+		if err != nil {
+			t.Errorf("Table %s does not exist: %v", table, err)
+		}
+		if name != table {
+			t.Errorf("Expected table %s, got %s", table, name)
+		}
+	}
+}
+
+// TestClose verifies that Close returns no error
+func TestClose(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+
+	err = db.Close()
+	if err != nil {
+		t.Errorf("Close failed: %v", err)
+	}
+}
+
+// TestRunCreate verifies that CreateRun inserts and GetRun retrieves with matching fields
+func TestRunCreate(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	retrieved, err := db.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("GetRun failed: %v", err)
+	}
+
+	if retrieved == nil {
+		t.Fatal("GetRun returned nil")
+	}
+
+	if retrieved.ID != run.ID {
+		t.Errorf("Expected ID %s, got %s", run.ID, retrieved.ID)
+	}
+	if retrieved.FeatureBranch != run.FeatureBranch {
+		t.Errorf("Expected FeatureBranch %s, got %s", run.FeatureBranch, retrieved.FeatureBranch)
+	}
+	if retrieved.RepoPath != run.RepoPath {
+		t.Errorf("Expected RepoPath %s, got %s", run.RepoPath, retrieved.RepoPath)
+	}
+	if retrieved.Status != run.Status {
+		t.Errorf("Expected Status %s, got %s", run.Status, retrieved.Status)
+	}
+}
+
+// TestRunCreateDuplicate verifies that CreateRun returns error for same branch/repo
+func TestRunCreateDuplicate(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	run1 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run1)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	run2 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run2)
+	if err == nil {
+		t.Fatal("Expected error for duplicate run, got nil")
+	}
+}
+
+// TestRunGetByBranch verifies that GetRunByBranch finds run by branch and repo path
+func TestRunGetByBranch(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	retrieved, err := db.GetRunByBranch("feature/test", "/path/to/repo")
+	if err != nil {
+		t.Fatalf("GetRunByBranch failed: %v", err)
+	}
+
+	if retrieved == nil {
+		t.Fatal("GetRunByBranch returned nil")
+	}
+
+	if retrieved.ID != run.ID {
+		t.Errorf("Expected ID %s, got %s", run.ID, retrieved.ID)
+	}
+}
+
+// TestRunGetNotFound verifies that GetRun returns nil, nil for non-existent ID
+func TestRunGetNotFound(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	retrieved, err := db.GetRun("nonexistent")
+	if err != nil {
+		t.Fatalf("GetRun failed: %v", err)
+	}
+
+	if retrieved != nil {
+		t.Errorf("Expected nil run, got %v", retrieved)
+	}
+}
+
+// TestRunUpdateStatus verifies that UpdateRunStatus changes status and sets timestamps
+func TestRunUpdateStatus(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Update to Running should set started_at
+	err = db.UpdateRunStatus(run.ID, RunStatusRunning, nil)
+	if err != nil {
+		t.Fatalf("UpdateRunStatus failed: %v", err)
+	}
+
+	retrieved, err := db.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("GetRun failed: %v", err)
+	}
+
+	if retrieved.Status != RunStatusRunning {
+		t.Errorf("Expected status Running, got %s", retrieved.Status)
+	}
+	if retrieved.StartedAt == nil {
+		t.Error("Expected started_at to be set")
+	}
+
+	// Update to Completed should set completed_at
+	err = db.UpdateRunStatus(run.ID, RunStatusCompleted, nil)
+	if err != nil {
+		t.Fatalf("UpdateRunStatus failed: %v", err)
+	}
+
+	retrieved, err = db.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("GetRun failed: %v", err)
+	}
+
+	if retrieved.Status != RunStatusCompleted {
+		t.Errorf("Expected status Completed, got %s", retrieved.Status)
+	}
+	if retrieved.CompletedAt == nil {
+		t.Error("Expected completed_at to be set")
+	}
+}
+
+// TestRunUpdateStatusWithError verifies that UpdateRunStatus stores error message
+func TestRunUpdateStatusWithError(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	errorMsg := "test error message"
+	err = db.UpdateRunStatus(run.ID, RunStatusFailed, &errorMsg)
+	if err != nil {
+		t.Fatalf("UpdateRunStatus failed: %v", err)
+	}
+
+	retrieved, err := db.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("GetRun failed: %v", err)
+	}
+
+	if retrieved.Status != RunStatusFailed {
+		t.Errorf("Expected status Failed, got %s", retrieved.Status)
+	}
+	if retrieved.Error == nil {
+		t.Fatal("Expected error to be set")
+	}
+	if *retrieved.Error != errorMsg {
+		t.Errorf("Expected error %s, got %s", errorMsg, *retrieved.Error)
+	}
+}
+
+// TestRunListByStatus verifies that ListRunsByStatus returns only matching runs
+func TestRunListByStatus(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create runs with different statuses
+	run1 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test1",
+		RepoPath:      "/path/to/repo1",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+	run2 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test2",
+		RepoPath:      "/path/to/repo2",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusRunning,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+	run3 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test3",
+		RepoPath:      "/path/to/repo3",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run1)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	err = db.CreateRun(run2)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	err = db.CreateRun(run3)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// List pending runs
+	pending, err := db.ListRunsByStatus(RunStatusPending)
+	if err != nil {
+		t.Fatalf("ListRunsByStatus failed: %v", err)
+	}
+
+	if len(pending) != 2 {
+		t.Errorf("Expected 2 pending runs, got %d", len(pending))
+	}
+
+	// List running runs
+	running, err := db.ListRunsByStatus(RunStatusRunning)
+	if err != nil {
+		t.Fatalf("ListRunsByStatus failed: %v", err)
+	}
+
+	if len(running) != 1 {
+		t.Errorf("Expected 1 running run, got %d", len(running))
+	}
+}
+
+// TestRunListIncomplete verifies that ListIncompleteRuns returns pending and running runs
+func TestRunListIncomplete(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create runs with different statuses
+	run1 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test1",
+		RepoPath:      "/path/to/repo1",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+	run2 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test2",
+		RepoPath:      "/path/to/repo2",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusRunning,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+	run3 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test3",
+		RepoPath:      "/path/to/repo3",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusCompleted,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run1)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	err = db.CreateRun(run2)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	err = db.CreateRun(run3)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// List incomplete runs
+	incomplete, err := db.ListIncompleteRuns()
+	if err != nil {
+		t.Fatalf("ListIncompleteRuns failed: %v", err)
+	}
+
+	if len(incomplete) != 2 {
+		t.Errorf("Expected 2 incomplete runs, got %d", len(incomplete))
+	}
+
+	// Verify that they are the pending and running ones
+	statuses := make(map[RunStatus]bool)
+	for _, r := range incomplete {
+		statuses[r.Status] = true
+	}
+
+	if !statuses[RunStatusPending] || !statuses[RunStatusRunning] {
+		t.Error("Expected incomplete runs to be pending and running")
+	}
+}
+
+// TestRunDelete verifies that DeleteRun removes run from database
+func TestRunDelete(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	err = db.DeleteRun(run.ID)
+	if err != nil {
+		t.Fatalf("DeleteRun failed: %v", err)
+	}
+
+	// Verify run no longer exists
+	retrieved, err := db.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("GetRun failed: %v", err)
+	}
+
+	if retrieved != nil {
+		t.Errorf("Expected nil run after delete, got %v", retrieved)
+	}
+}
+
+// TestUnitCreate verifies that CreateUnit inserts and GetUnit retrieves with matching fields
+func TestUnitCreate(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run first
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Create a unit
+	unitID := "task-1"
+	unit := &UnitRecord{
+		ID:     MakeUnitRecordID(run.ID, unitID),
+		RunID:  run.ID,
+		UnitID: unitID,
+		Status: string(UnitStatusPending),
+	}
+
+	err = db.CreateUnit(unit)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+
+	// Retrieve the unit
+	retrieved, err := db.GetUnit(unit.ID)
+	if err != nil {
+		t.Fatalf("GetUnit failed: %v", err)
+	}
+
+	if retrieved == nil {
+		t.Fatal("GetUnit returned nil")
+	}
+
+	if retrieved.ID != unit.ID {
+		t.Errorf("Expected ID %s, got %s", unit.ID, retrieved.ID)
+	}
+	if retrieved.RunID != unit.RunID {
+		t.Errorf("Expected RunID %s, got %s", unit.RunID, retrieved.RunID)
+	}
+	if retrieved.UnitID != unit.UnitID {
+		t.Errorf("Expected UnitID %s, got %s", unit.UnitID, retrieved.UnitID)
+	}
+	if retrieved.Status != unit.Status {
+		t.Errorf("Expected Status %s, got %s", unit.Status, retrieved.Status)
+	}
+}
+
+// TestUnitCreateWithoutRun verifies that CreateUnit returns foreign key error for non-existent run
+func TestUnitCreateWithoutRun(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Try to create a unit without a parent run
+	unitID := "task-1"
+	runID := "nonexistent-run-id"
+	unit := &UnitRecord{
+		ID:     MakeUnitRecordID(runID, unitID),
+		RunID:  runID,
+		UnitID: unitID,
+		Status: string(UnitStatusPending),
+	}
+
+	err = db.CreateUnit(unit)
+	if err == nil {
+		t.Fatal("Expected error for unit without parent run, got nil")
+	}
+}
+
+// TestUnitGetNotFound verifies that GetUnit returns nil, nil for non-existent ID
+func TestUnitGetNotFound(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	retrieved, err := db.GetUnit("nonexistent")
+	if err != nil {
+		t.Fatalf("GetUnit failed: %v", err)
+	}
+
+	if retrieved != nil {
+		t.Errorf("Expected nil unit, got %v", retrieved)
+	}
+}
+
+// TestUnitUpdateStatus verifies that UpdateUnitStatus changes status and sets timestamps
+func TestUnitUpdateStatus(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Create a unit
+	unitID := "task-1"
+	unit := &UnitRecord{
+		ID:     MakeUnitRecordID(run.ID, unitID),
+		RunID:  run.ID,
+		UnitID: unitID,
+		Status: string(UnitStatusPending),
+	}
+
+	err = db.CreateUnit(unit)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+
+	// Update to Running should set started_at
+	err = db.UpdateUnitStatus(unit.ID, UnitStatusRunning, nil)
+	if err != nil {
+		t.Fatalf("UpdateUnitStatus failed: %v", err)
+	}
+
+	retrieved, err := db.GetUnit(unit.ID)
+	if err != nil {
+		t.Fatalf("GetUnit failed: %v", err)
+	}
+
+	if retrieved.Status != string(UnitStatusRunning) {
+		t.Errorf("Expected status Running, got %s", retrieved.Status)
+	}
+	if retrieved.StartedAt == nil {
+		t.Error("Expected started_at to be set")
+	}
+
+	// Update to Completed should set completed_at
+	err = db.UpdateUnitStatus(unit.ID, UnitStatusCompleted, nil)
+	if err != nil {
+		t.Fatalf("UpdateUnitStatus failed: %v", err)
+	}
+
+	retrieved, err = db.GetUnit(unit.ID)
+	if err != nil {
+		t.Fatalf("GetUnit failed: %v", err)
+	}
+
+	if retrieved.Status != string(UnitStatusCompleted) {
+		t.Errorf("Expected status Completed, got %s", retrieved.Status)
+	}
+	if retrieved.CompletedAt == nil {
+		t.Error("Expected completed_at to be set")
+	}
+}
+
+// TestUnitUpdateStatusWithError verifies that UpdateUnitStatus stores error message
+func TestUnitUpdateStatusWithError(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Create a unit
+	unitID := "task-1"
+	unit := &UnitRecord{
+		ID:     MakeUnitRecordID(run.ID, unitID),
+		RunID:  run.ID,
+		UnitID: unitID,
+		Status: string(UnitStatusPending),
+	}
+
+	err = db.CreateUnit(unit)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+
+	// Update status with error
+	errorMsg := "test error message"
+	err = db.UpdateUnitStatus(unit.ID, UnitStatusFailed, &errorMsg)
+	if err != nil {
+		t.Fatalf("UpdateUnitStatus failed: %v", err)
+	}
+
+	retrieved, err := db.GetUnit(unit.ID)
+	if err != nil {
+		t.Fatalf("GetUnit failed: %v", err)
+	}
+
+	if retrieved.Status != string(UnitStatusFailed) {
+		t.Errorf("Expected status Failed, got %s", retrieved.Status)
+	}
+	if retrieved.Error == nil {
+		t.Fatal("Expected error to be set")
+	}
+	if *retrieved.Error != errorMsg {
+		t.Errorf("Expected error %s, got %s", errorMsg, *retrieved.Error)
+	}
+}
+
+// TestUnitUpdateBranch verifies that UpdateUnitBranch sets branch and worktree path
+func TestUnitUpdateBranch(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Create a unit
+	unitID := "task-1"
+	unit := &UnitRecord{
+		ID:     MakeUnitRecordID(run.ID, unitID),
+		RunID:  run.ID,
+		UnitID: unitID,
+		Status: string(UnitStatusPending),
+	}
+
+	err = db.CreateUnit(unit)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+
+	// Update branch and worktree path
+	branch := "ralph/task-1"
+	worktreePath := "/path/to/worktree"
+	err = db.UpdateUnitBranch(unit.ID, branch, worktreePath)
+	if err != nil {
+		t.Fatalf("UpdateUnitBranch failed: %v", err)
+	}
+
+	retrieved, err := db.GetUnit(unit.ID)
+	if err != nil {
+		t.Fatalf("GetUnit failed: %v", err)
+	}
+
+	if retrieved.Branch == nil {
+		t.Fatal("Expected branch to be set")
+	}
+	if *retrieved.Branch != branch {
+		t.Errorf("Expected branch %s, got %s", branch, *retrieved.Branch)
+	}
+	if retrieved.WorktreePath == nil {
+		t.Fatal("Expected worktree_path to be set")
+	}
+	if *retrieved.WorktreePath != worktreePath {
+		t.Errorf("Expected worktree_path %s, got %s", worktreePath, *retrieved.WorktreePath)
+	}
+}
+
+// TestUnitListByRun verifies that ListUnitsByRun returns all units for a run
+func TestUnitListByRun(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Create multiple units
+	unit1 := &UnitRecord{
+		ID:     MakeUnitRecordID(run.ID, "task-1"),
+		RunID:  run.ID,
+		UnitID: "task-1",
+		Status: string(UnitStatusPending),
+	}
+	unit2 := &UnitRecord{
+		ID:     MakeUnitRecordID(run.ID, "task-2"),
+		RunID:  run.ID,
+		UnitID: "task-2",
+		Status: string(UnitStatusRunning),
+	}
+	unit3 := &UnitRecord{
+		ID:     MakeUnitRecordID(run.ID, "task-3"),
+		RunID:  run.ID,
+		UnitID: "task-3",
+		Status: string(UnitStatusCompleted),
+	}
+
+	err = db.CreateUnit(unit1)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+	err = db.CreateUnit(unit2)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+	err = db.CreateUnit(unit3)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+
+	// List all units for the run
+	units, err := db.ListUnitsByRun(run.ID)
+	if err != nil {
+		t.Fatalf("ListUnitsByRun failed: %v", err)
+	}
+
+	if len(units) != 3 {
+		t.Errorf("Expected 3 units, got %d", len(units))
+	}
+
+	// Verify ordering by unit_id
+	if len(units) >= 3 {
+		if units[0].UnitID != "task-1" {
+			t.Errorf("Expected first unit to be task-1, got %s", units[0].UnitID)
+		}
+		if units[1].UnitID != "task-2" {
+			t.Errorf("Expected second unit to be task-2, got %s", units[1].UnitID)
+		}
+		if units[2].UnitID != "task-3" {
+			t.Errorf("Expected third unit to be task-3, got %s", units[2].UnitID)
+		}
+	}
+}
+
+// TestUnitListByStatus verifies that ListUnitsByStatus returns only units with matching status
+func TestUnitListByStatus(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Create multiple units with different statuses
+	unit1 := &UnitRecord{
+		ID:     MakeUnitRecordID(run.ID, "task-1"),
+		RunID:  run.ID,
+		UnitID: "task-1",
+		Status: string(UnitStatusPending),
+	}
+	unit2 := &UnitRecord{
+		ID:     MakeUnitRecordID(run.ID, "task-2"),
+		RunID:  run.ID,
+		UnitID: "task-2",
+		Status: string(UnitStatusPending),
+	}
+	unit3 := &UnitRecord{
+		ID:     MakeUnitRecordID(run.ID, "task-3"),
+		RunID:  run.ID,
+		UnitID: "task-3",
+		Status: string(UnitStatusRunning),
+	}
+
+	err = db.CreateUnit(unit1)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+	err = db.CreateUnit(unit2)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+	err = db.CreateUnit(unit3)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+
+	// List pending units
+	pending, err := db.ListUnitsByStatus(run.ID, UnitStatusPending)
+	if err != nil {
+		t.Fatalf("ListUnitsByStatus failed: %v", err)
+	}
+
+	if len(pending) != 2 {
+		t.Errorf("Expected 2 pending units, got %d", len(pending))
+	}
+
+	// List running units
+	running, err := db.ListUnitsByStatus(run.ID, UnitStatusRunning)
+	if err != nil {
+		t.Fatalf("ListUnitsByStatus failed: %v", err)
+	}
+
+	if len(running) != 1 {
+		t.Errorf("Expected 1 running unit, got %d", len(running))
+	}
+}
+
+// TestEventAppend verifies that AppendEvent inserts event with auto-assigned sequence
+func TestEventAppend(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Append an event
+	err = db.AppendEvent(run.ID, "test_event", nil, nil)
+	if err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+
+	// List events to verify it was inserted
+	events, err := db.ListEvents(run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(events))
+	}
+
+	if events[0].RunID != run.ID {
+		t.Errorf("Expected run_id %s, got %s", run.ID, events[0].RunID)
+	}
+	if events[0].EventType != "test_event" {
+		t.Errorf("Expected event_type 'test_event', got %s", events[0].EventType)
+	}
+	if events[0].Sequence != 1 {
+		t.Errorf("Expected sequence 1, got %d", events[0].Sequence)
+	}
+}
+
+// TestEventSequencing verifies that multiple AppendEvent calls produce consecutive sequences starting at 1
+func TestEventSequencing(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Append multiple events
+	for i := 0; i < 5; i++ {
+		err = db.AppendEvent(run.ID, "test_event", nil, nil)
+		if err != nil {
+			t.Fatalf("AppendEvent failed: %v", err)
+		}
+	}
+
+	// List events to verify sequences
+	events, err := db.ListEvents(run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+
+	if len(events) != 5 {
+		t.Fatalf("Expected 5 events, got %d", len(events))
+	}
+
+	// Verify consecutive sequences starting at 1
+	for i, event := range events {
+		expectedSeq := i + 1
+		if event.Sequence != expectedSeq {
+			t.Errorf("Expected sequence %d, got %d", expectedSeq, event.Sequence)
+		}
+	}
+}
+
+// TestEventWithPayload verifies that AppendEvent serializes payload to JSON
+func TestEventWithPayload(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Append an event with a payload
+	payload := map[string]interface{}{
+		"key1": "value1",
+		"key2": 42,
+	}
+
+	err = db.AppendEvent(run.ID, "test_event", nil, payload)
+	if err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+
+	// List events to verify payload
+	events, err := db.ListEvents(run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(events))
+	}
+
+	if events[0].PayloadJSON == nil {
+		t.Fatal("Expected payload_json to be set")
+	}
+
+	// Verify JSON content
+	expectedJSON := `{"key1":"value1","key2":42}`
+	if *events[0].PayloadJSON != expectedJSON {
+		t.Errorf("Expected payload_json %s, got %s", expectedJSON, *events[0].PayloadJSON)
+	}
+}
+
+// TestEventWithUnitID verifies that AppendEvent stores optional unit ID
+func TestEventWithUnitID(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Append an event with a unit ID
+	unitID := "task-1"
+	err = db.AppendEvent(run.ID, "test_event", &unitID, nil)
+	if err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+
+	// List events to verify unit ID
+	events, err := db.ListEvents(run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+
+	if len(events) != 1 {
+		t.Fatalf("Expected 1 event, got %d", len(events))
+	}
+
+	if events[0].UnitID == nil {
+		t.Fatal("Expected unit_id to be set")
+	}
+
+	if *events[0].UnitID != unitID {
+		t.Errorf("Expected unit_id %s, got %s", unitID, *events[0].UnitID)
+	}
+}
+
+// TestEventWithoutRun verifies that AppendEvent returns error for non-existent run
+func TestEventWithoutRun(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Try to append an event for a non-existent run
+	err = db.AppendEvent("nonexistent-run", "test_event", nil, nil)
+	if err == nil {
+		t.Fatal("Expected error for event without parent run, got nil")
+	}
+}
+
+// TestEventList verifies that ListEvents returns all events in sequence order
+func TestEventList(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Append multiple events with different types
+	eventTypes := []string{"event1", "event2", "event3"}
+	for _, eventType := range eventTypes {
+		err = db.AppendEvent(run.ID, eventType, nil, nil)
+		if err != nil {
+			t.Fatalf("AppendEvent failed: %v", err)
+		}
+	}
+
+	// List all events
+	events, err := db.ListEvents(run.ID)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+
+	if len(events) != 3 {
+		t.Fatalf("Expected 3 events, got %d", len(events))
+	}
+
+	// Verify events are in sequence order
+	for i, event := range events {
+		expectedSeq := i + 1
+		if event.Sequence != expectedSeq {
+			t.Errorf("Expected sequence %d, got %d", expectedSeq, event.Sequence)
+		}
+		if event.EventType != eventTypes[i] {
+			t.Errorf("Expected event_type %s, got %s", eventTypes[i], event.EventType)
+		}
+	}
+}
+
+// TestEventListSince verifies that ListEventsSince returns only events after given sequence
+func TestEventListSince(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Append 5 events
+	for i := 0; i < 5; i++ {
+		err = db.AppendEvent(run.ID, "test_event", nil, nil)
+		if err != nil {
+			t.Fatalf("AppendEvent failed: %v", err)
+		}
+	}
+
+	// List events since sequence 2
+	events, err := db.ListEventsSince(run.ID, 2)
+	if err != nil {
+		t.Fatalf("ListEventsSince failed: %v", err)
+	}
+
+	// Should get events with sequence 3, 4, 5
+	if len(events) != 3 {
+		t.Fatalf("Expected 3 events, got %d", len(events))
+	}
+
+	// Verify sequences are > 2
+	for _, event := range events {
+		if event.Sequence <= 2 {
+			t.Errorf("Expected sequence > 2, got %d", event.Sequence)
+		}
+	}
+
+	// Verify first event has sequence 3
+	if events[0].Sequence != 3 {
+		t.Errorf("Expected first event to have sequence 3, got %d", events[0].Sequence)
+	}
+}
+
+// TestEventGetNextSequence verifies that GetNextSequence returns 1 for new run, increments after each event
+func TestEventGetNextSequence(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a parent run
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Get next sequence for a new run (should be 1)
+	nextSeq, err := db.GetNextSequence(run.ID)
+	if err != nil {
+		t.Fatalf("GetNextSequence failed: %v", err)
+	}
+
+	if nextSeq != 1 {
+		t.Errorf("Expected next sequence 1 for new run, got %d", nextSeq)
+	}
+
+	// Append an event
+	err = db.AppendEvent(run.ID, "test_event", nil, nil)
+	if err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+
+	// Get next sequence (should be 2)
+	nextSeq, err = db.GetNextSequence(run.ID)
+	if err != nil {
+		t.Fatalf("GetNextSequence failed: %v", err)
+	}
+
+	if nextSeq != 2 {
+		t.Errorf("Expected next sequence 2 after one event, got %d", nextSeq)
+	}
+
+	// Append another event
+	err = db.AppendEvent(run.ID, "test_event", nil, nil)
+	if err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+
+	// Get next sequence (should be 3)
+	nextSeq, err = db.GetNextSequence(run.ID)
+	if err != nil {
+		t.Fatalf("GetNextSequence failed: %v", err)
+	}
+
+	if nextSeq != 3 {
+		t.Errorf("Expected next sequence 3 after two events, got %d", nextSeq)
+	}
+}
+
+// Integration Tests
+
+// setupTestDB creates an in-memory database for testing
+func setupTestDB(t *testing.T) *DB {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	// Set max open connections to 1 for in-memory databases to ensure
+	// all goroutines share the same connection/database instance
+	db.conn.SetMaxOpenConns(1)
+	t.Cleanup(func() {
+		db.Close()
+	})
+	return db
+}
+
+// createTestRun creates a run with unique branch for testing
+func createTestRun(t *testing.T, db *DB) string {
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: NewRunID(), // Use ULID as unique branch name
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err := db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	return run.ID
+}
+
+// TestCascadeDelete verifies that deleting a run removes all associated
+// units and events automatically via foreign key cascade
+func TestCascadeDelete(t *testing.T) {
+	db := setupTestDB(t)
+
+	// 1. Create run
+	runID := createTestRun(t, db)
+
+	// 2. Create multiple units for run
+	unit1 := &UnitRecord{
+		ID:     MakeUnitRecordID(runID, "task-1"),
+		RunID:  runID,
+		UnitID: "task-1",
+		Status: string(UnitStatusPending),
+	}
+	unit2 := &UnitRecord{
+		ID:     MakeUnitRecordID(runID, "task-2"),
+		RunID:  runID,
+		UnitID: "task-2",
+		Status: string(UnitStatusPending),
+	}
+
+	err := db.CreateUnit(unit1)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+	err = db.CreateUnit(unit2)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+
+	// 3. Append multiple events for run
+	err = db.AppendEvent(runID, "event1", nil, nil)
+	if err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+	err = db.AppendEvent(runID, "event2", nil, nil)
+	if err != nil {
+		t.Fatalf("AppendEvent failed: %v", err)
+	}
+
+	// 4. Delete run
+	err = db.DeleteRun(runID)
+	if err != nil {
+		t.Fatalf("DeleteRun failed: %v", err)
+	}
+
+	// 5. Assert ListUnitsByRun returns empty
+	units, err := db.ListUnitsByRun(runID)
+	if err != nil {
+		t.Fatalf("ListUnitsByRun failed: %v", err)
+	}
+	if len(units) != 0 {
+		t.Errorf("Expected 0 units after cascade delete, got %d", len(units))
+	}
+
+	// 6. Assert ListEvents returns empty
+	events, err := db.ListEvents(runID)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("Expected 0 events after cascade delete, got %d", len(events))
+	}
+}
+
+// TestUniqueConstraintBranchRepo verifies that only one run can exist
+// for a given branch/repo combination
+func TestUniqueConstraintBranchRepo(t *testing.T) {
+	db := setupTestDB(t)
+
+	// 1. Create run with branch "feature/test" and repo "/repo"
+	run1 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err := db.CreateRun(run1)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// 2. Attempt to create second run with same branch/repo
+	run2 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run2)
+
+	// 3. Assert error contains "UNIQUE constraint"
+	if err == nil {
+		t.Fatal("Expected UNIQUE constraint error, got nil")
+	}
+	errStr := err.Error()
+	if !containsIgnoreCase(errStr, "UNIQUE") && !containsIgnoreCase(errStr, "constraint") {
+		t.Errorf("Expected error to contain 'UNIQUE constraint', got: %s", errStr)
+	}
+
+	// 4. Create run with different branch, same repo -> succeeds
+	run3 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/different",
+		RepoPath:      "/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run3)
+	if err != nil {
+		t.Errorf("Expected success with different branch, got error: %v", err)
+	}
+
+	// 5. Create run with same branch, different repo -> succeeds
+	run4 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/different-repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(run4)
+	if err != nil {
+		t.Errorf("Expected success with different repo, got error: %v", err)
+	}
+}
+
+// containsIgnoreCase checks if a string contains a substring (case insensitive)
+func containsIgnoreCase(s, substr string) bool {
+	s = strings.ToLower(s)
+	substr = strings.ToLower(substr)
+	return strings.Contains(s, substr)
+}
+
+// TestRunLifecycle verifies a complete run through all status transitions
+func TestRunLifecycle(t *testing.T) {
+	db := setupTestDB(t)
+
+	// 1. Create run with Pending status
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/lifecycle",
+		RepoPath:      "/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err := db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// 2. Update to Running -> assert started_at is set
+	err = db.UpdateRunStatus(run.ID, RunStatusRunning, nil)
+	if err != nil {
+		t.Fatalf("UpdateRunStatus to Running failed: %v", err)
+	}
+
+	retrieved, err := db.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("GetRun failed: %v", err)
+	}
+
+	if retrieved.Status != RunStatusRunning {
+		t.Errorf("Expected status Running, got %s", retrieved.Status)
+	}
+	if retrieved.StartedAt == nil {
+		t.Error("Expected started_at to be set")
+	}
+
+	// 3. Update to Completed -> assert completed_at is set
+	err = db.UpdateRunStatus(run.ID, RunStatusCompleted, nil)
+	if err != nil {
+		t.Fatalf("UpdateRunStatus to Completed failed: %v", err)
+	}
+
+	retrieved, err = db.GetRun(run.ID)
+	if err != nil {
+		t.Fatalf("GetRun failed: %v", err)
+	}
+
+	if retrieved.Status != RunStatusCompleted {
+		t.Errorf("Expected status Completed, got %s", retrieved.Status)
+	}
+	if retrieved.CompletedAt == nil {
+		t.Error("Expected completed_at to be set")
+	}
+
+	// 4. Retrieve and verify all fields
+	if retrieved.ID != run.ID {
+		t.Errorf("Expected ID %s, got %s", run.ID, retrieved.ID)
+	}
+	if retrieved.FeatureBranch != run.FeatureBranch {
+		t.Errorf("Expected FeatureBranch %s, got %s", run.FeatureBranch, retrieved.FeatureBranch)
+	}
+	if retrieved.StartedAt == nil {
+		t.Error("Expected started_at to be set after lifecycle")
+	}
+	if retrieved.CompletedAt == nil {
+		t.Error("Expected completed_at to be set after lifecycle")
+	}
+}
+
+// TestUnitLifecycle verifies a complete unit through all status transitions
+func TestUnitLifecycle(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create parent run
+	runID := createTestRun(t, db)
+
+	// 1. Create unit with Pending status
+	unit := &UnitRecord{
+		ID:     MakeUnitRecordID(runID, "task-1"),
+		RunID:  runID,
+		UnitID: "task-1",
+		Status: string(UnitStatusPending),
+	}
+
+	err := db.CreateUnit(unit)
+	if err != nil {
+		t.Fatalf("CreateUnit failed: %v", err)
+	}
+
+	// 2. Update to InProgress -> assert started_at is set
+	err = db.UpdateUnitStatus(unit.ID, UnitStatusRunning, nil)
+	if err != nil {
+		t.Fatalf("UpdateUnitStatus to InProgress failed: %v", err)
+	}
+
+	retrieved, err := db.GetUnit(unit.ID)
+	if err != nil {
+		t.Fatalf("GetUnit failed: %v", err)
+	}
+
+	if retrieved.Status != string(UnitStatusRunning) {
+		t.Errorf("Expected status Running, got %s", retrieved.Status)
+	}
+	if retrieved.StartedAt == nil {
+		t.Error("Expected started_at to be set")
+	}
+
+	// 3. Update branch and worktree path
+	branch := "ralph/task-1"
+	worktreePath := "/path/to/worktree"
+	err = db.UpdateUnitBranch(unit.ID, branch, worktreePath)
+	if err != nil {
+		t.Fatalf("UpdateUnitBranch failed: %v", err)
+	}
+
+	retrieved, err = db.GetUnit(unit.ID)
+	if err != nil {
+		t.Fatalf("GetUnit failed: %v", err)
+	}
+
+	if retrieved.Branch == nil || *retrieved.Branch != branch {
+		t.Errorf("Expected branch %s, got %v", branch, retrieved.Branch)
+	}
+	if retrieved.WorktreePath == nil || *retrieved.WorktreePath != worktreePath {
+		t.Errorf("Expected worktree_path %s, got %v", worktreePath, retrieved.WorktreePath)
+	}
+
+	// 4. Update to Complete -> assert completed_at is set
+	err = db.UpdateUnitStatus(unit.ID, UnitStatusCompleted, nil)
+	if err != nil {
+		t.Fatalf("UpdateUnitStatus to Complete failed: %v", err)
+	}
+
+	retrieved, err = db.GetUnit(unit.ID)
+	if err != nil {
+		t.Fatalf("GetUnit failed: %v", err)
+	}
+
+	if retrieved.Status != string(UnitStatusCompleted) {
+		t.Errorf("Expected status Completed, got %s", retrieved.Status)
+	}
+	if retrieved.CompletedAt == nil {
+		t.Error("Expected completed_at to be set")
+	}
+
+	// 5. Retrieve and verify all fields
+	if retrieved.ID != unit.ID {
+		t.Errorf("Expected ID %s, got %s", unit.ID, retrieved.ID)
+	}
+	if retrieved.UnitID != unit.UnitID {
+		t.Errorf("Expected UnitID %s, got %s", unit.UnitID, retrieved.UnitID)
+	}
+	if retrieved.StartedAt == nil {
+		t.Error("Expected started_at to be set after lifecycle")
+	}
+	if retrieved.CompletedAt == nil {
+		t.Error("Expected completed_at to be set after lifecycle")
+	}
+	if retrieved.Branch == nil || *retrieved.Branch != branch {
+		t.Error("Expected branch to be preserved after lifecycle")
+	}
+	if retrieved.WorktreePath == nil || *retrieved.WorktreePath != worktreePath {
+		t.Error("Expected worktree_path to be preserved after lifecycle")
+	}
+}
+
+// TestEventSequencingConcurrent verifies that concurrent event appends
+// receive unique sequence numbers
+func TestEventSequencingConcurrent(t *testing.T) {
+	db := setupTestDB(t)
+
+	// 1. Create run
+	runID := createTestRun(t, db)
+
+	// 2. Launch multiple goroutines appending events
+	numGoroutines := 10
+	eventsPerGoroutine := 10
+	totalEvents := numGoroutines * eventsPerGoroutine
+
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < eventsPerGoroutine; j++ {
+				err := db.AppendEvent(runID, "concurrent_event", nil, nil)
+				if err != nil {
+					t.Errorf("AppendEvent failed: %v", err)
+				}
+			}
+		}()
+	}
+
+	// 3. Wait for completion
+	wg.Wait()
+
+	// 4. Assert all sequence numbers are unique and consecutive
+	events, err := db.ListEvents(runID)
+	if err != nil {
+		t.Fatalf("ListEvents failed: %v", err)
+	}
+
+	if len(events) != totalEvents {
+		t.Fatalf("Expected %d events, got %d", totalEvents, len(events))
+	}
+
+	// Check uniqueness and consecutiveness
+	sequences := make(map[int]bool)
+	for i, event := range events {
+		expectedSeq := i + 1
+		if event.Sequence != expectedSeq {
+			t.Errorf("Expected sequence %d at position %d, got %d", expectedSeq, i, event.Sequence)
+		}
+		if sequences[event.Sequence] {
+			t.Errorf("Duplicate sequence number: %d", event.Sequence)
+		}
+		sequences[event.Sequence] = true
+	}
+}
+
+// TestResumability verifies that incomplete runs can be found after restart
+func TestResumability(t *testing.T) {
+	db := setupTestDB(t)
+
+	// 1. Create runs with various statuses: Pending, Running, Completed, Failed
+	run1 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/pending",
+		RepoPath:      "/repo1",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	run2 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/running",
+		RepoPath:      "/repo2",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusRunning,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	run3 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/completed",
+		RepoPath:      "/repo3",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusCompleted,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	run4 := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/failed",
+		RepoPath:      "/repo4",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusFailed,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err := db.CreateRun(run1)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	err = db.CreateRun(run2)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	err = db.CreateRun(run3)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+	err = db.CreateRun(run4)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// 2. Call ListIncompleteRuns
+	incomplete, err := db.ListIncompleteRuns()
+	if err != nil {
+		t.Fatalf("ListIncompleteRuns failed: %v", err)
+	}
+
+	// 3. Assert only Pending and Running runs are returned
+	if len(incomplete) != 2 {
+		t.Fatalf("Expected 2 incomplete runs, got %d", len(incomplete))
+	}
+
+	// Verify statuses
+	statuses := make(map[RunStatus]bool)
+	for _, run := range incomplete {
+		statuses[run.Status] = true
+	}
+
+	if !statuses[RunStatusPending] {
+		t.Error("Expected Pending run in incomplete list")
+	}
+	if !statuses[RunStatusRunning] {
+		t.Error("Expected Running run in incomplete list")
+	}
+
+	// 4. Assert Completed and Failed runs are not returned
+	if statuses[RunStatusCompleted] {
+		t.Error("Completed run should not be in incomplete list")
+	}
+	if statuses[RunStatusFailed] {
+		t.Error("Failed run should not be in incomplete list")
+	}
+}
+
+// TestGetRunByBranchPartialMatch ensures exact matching on branch/repo
+func TestGetRunByBranchPartialMatch(t *testing.T) {
+	db := setupTestDB(t)
+
+	// 1. Create run with branch "feature/test"
+	run := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusPending,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err := db.CreateRun(run)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// 2. GetRunByBranch with "feature" -> returns nil
+	retrieved, err := db.GetRunByBranch("feature", "/repo")
+	if err != nil {
+		t.Fatalf("GetRunByBranch failed: %v", err)
+	}
+
+	if retrieved != nil {
+		t.Error("Expected nil for partial branch match 'feature', got a run")
+	}
+
+	// 3. GetRunByBranch with "feature/test" -> returns run
+	retrieved, err = db.GetRunByBranch("feature/test", "/repo")
+	if err != nil {
+		t.Fatalf("GetRunByBranch failed: %v", err)
+	}
+
+	if retrieved == nil {
+		t.Fatal("Expected run for exact branch match 'feature/test', got nil")
+	}
+
+	if retrieved.ID != run.ID {
+		t.Errorf("Expected run ID %s, got %s", run.ID, retrieved.ID)
+	}
+}

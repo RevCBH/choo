@@ -381,6 +381,7 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 			}
 			return o.buildResult(startTime, ctx.Err()), ctx.Err()
 		default:
+			// Continue - not shutting down
 		}
 
 		// Attempt to dispatch next ready unit

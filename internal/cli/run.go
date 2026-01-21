@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/RevCBH/choo/internal/cli/tui"
+	"github.com/RevCBH/choo/internal/client"
 	"github.com/RevCBH/choo/internal/config"
 	"github.com/RevCBH/choo/internal/escalate"
 	"github.com/RevCBH/choo/internal/events"
@@ -34,6 +36,7 @@ type RunOptions struct {
 	WebSocket    string // Custom Unix socket path (optional)
 	NoTUI        bool   // Disable TUI even when stdout is a TTY
 	Feature      string // PRD ID to work on in feature mode
+	UseDaemon    bool   // Use daemon mode
 
 	// Provider is the default provider for task execution
 	// Units without frontmatter override use this provider
@@ -66,6 +69,46 @@ func (opts RunOptions) Validate() error {
 	}
 
 	return nil
+}
+
+// runWithDaemon executes a job via the daemon and attaches to event stream
+func runWithDaemon(ctx context.Context, tasksDir string, parallelism int, target, feature string) error {
+	c, err := client.New(defaultSocketPath())
+	if err != nil {
+		return fmt.Errorf("failed to connect to daemon: %w (is daemon running?)", err)
+	}
+	defer c.Close()
+
+	repoPath, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
+	jobID, err := c.StartJob(ctx, client.JobConfig{
+		TasksDir:      tasksDir,
+		TargetBranch:  target,
+		FeatureBranch: feature,
+		Parallelism:   parallelism,
+		RepoPath:      repoPath,
+	})
+	if err != nil {
+		// Check if this is a connection error and provide helpful message
+		if strings.Contains(err.Error(), "connection error") || strings.Contains(err.Error(), "connect:") {
+			return fmt.Errorf("failed to connect to daemon: %w (is daemon running?)", err)
+		}
+		return err
+	}
+
+	fmt.Printf("Started job %s\n", jobID)
+
+	// Attach to event stream and display events
+	return c.WatchJob(ctx, jobID, 0, displayEvent)
+}
+
+// runInline executes jobs directly without daemon (existing behavior)
+func runInline(ctx context.Context, opts RunOptions, app *App) error {
+	// This will contain the existing inline execution logic
+	return app.RunOrchestrator(ctx, opts)
 }
 
 // NewRunCmd creates the run command
@@ -115,7 +158,7 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 			}
 
 			// Ensure target branch exists on remote (auto-push if not)
-			if !opts.DryRun {
+			if !opts.DryRun && !opts.UseDaemon {
 				pushed, err := git.EnsureBranchOnRemote(ctx, wd, opts.TargetBranch)
 				if err != nil {
 					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not verify target branch on remote: %v\n", err)
@@ -130,8 +173,11 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 				os.Exit(2)
 			}
 
-			// Run orchestrator
-			return app.RunOrchestrator(ctx, opts)
+			// Dispatch based on mode
+			if opts.UseDaemon {
+				return runWithDaemon(ctx, opts.TasksDir, opts.Parallelism, opts.TargetBranch, opts.Feature)
+			}
+			return runInline(ctx, opts, app)
 		},
 	}
 
@@ -146,6 +192,7 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 	cmd.Flags().StringVar(&opts.WebSocket, "web-socket", "", "Custom Unix socket path (default: ~/.choo/web.sock)")
 	cmd.Flags().BoolVar(&opts.NoTUI, "no-tui", false, "Disable interactive TUI (use summary-only output)")
 	cmd.Flags().StringVar(&opts.Feature, "feature", "", "PRD ID for feature mode (targets feature branch)")
+	cmd.Flags().BoolVar(&opts.UseDaemon, "use-daemon", true, "Use daemon mode")
 
 	// Provider flags
 	cmd.Flags().StringVar(&opts.Provider, "provider", "", "Default provider for task execution (claude, codex). Units without frontmatter override use this.")

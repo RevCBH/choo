@@ -83,6 +83,7 @@ func (s *SocketServer) acceptLoop() {
 		case <-s.done:
 			return
 		default:
+			// Continue accepting connections
 		}
 
 		conn, err := s.listener.Accept()

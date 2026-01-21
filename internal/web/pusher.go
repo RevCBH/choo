@@ -166,6 +166,7 @@ func (p *SocketPusher) pushLoop(ctx context.Context) {
 		case e := <-p.eventCh:
 			if err := p.writeEvent(e); err != nil {
 				// Connection failed, attempt reconnect with backoff
+			reconnectLoop:
 				for {
 					select {
 					case <-p.done:
@@ -182,9 +183,8 @@ func (p *SocketPusher) pushLoop(ctx context.Context) {
 						backoff = p.cfg.ReconnectBackoff
 						// Try to write the event again (ignore error, will retry on next event)
 						_ = p.writeEvent(e)
-						break
+						break reconnectLoop
 					}
-					break
 				}
 			}
 		}

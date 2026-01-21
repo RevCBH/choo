@@ -10,6 +10,7 @@ This directory contains Product Requirements Documents for choo features.
 | [self-hosting](SELF-HOSTING.md) | Choo Self-Hosting | Complete | v0.2 | mvp-orchestrator |
 | [web-ui](WEB-UI.md) | Web UI Monitoring | In Progress | v0.3 | self-hosting |
 | [feature-workflow](FEATURE-WORKFLOW.md) | PRD-Based Feature Workflow | Draft | v0.4 | web-ui |
+| [daemon-architecture](DAEMON-ARCHITECTURE.md) | Charlotte Daemon Architecture | Draft | v0.5 | mvp-orchestrator, web-ui |
 
 ## Status Legend
 
