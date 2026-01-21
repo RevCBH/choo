@@ -90,3 +90,27 @@ func (c *Client) GetJobStatus(ctx context.Context, jobID string) (*JobStatus, er
 	}
 	return protoToJobStatus(resp), nil
 }
+
+// Health checks daemon health and returns version info.
+// This is a lightweight call suitable for polling.
+func (c *Client) Health(ctx context.Context) (*HealthInfo, error) {
+	req := &apiv1.HealthRequest{}
+	resp, err := c.daemon.Health(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return protoToHealthInfo(resp), nil
+}
+
+// Shutdown requests daemon termination.
+// If waitForJobs is true, the daemon waits for active jobs to complete
+// before shutting down, up to the specified timeout in seconds.
+// If waitForJobs is false, active jobs are cancelled immediately.
+func (c *Client) Shutdown(ctx context.Context, waitForJobs bool, timeout int) error {
+	req := &apiv1.ShutdownRequest{
+		WaitForJobs:    waitForJobs,
+		TimeoutSeconds: int32(timeout),
+	}
+	_, err := c.daemon.Shutdown(ctx, req)
+	return err
+}
