@@ -337,8 +337,8 @@ depends_on: []
 	app := New()
 	cmd := NewRunCmd(app)
 
-	// Set args for dry-run
-	cmd.SetArgs([]string{tasksDir, "--dry-run"})
+	// Set args for dry-run with use-daemon=false to avoid requiring daemon
+	cmd.SetArgs([]string{tasksDir, "--dry-run", "--use-daemon=false"})
 
 	// Capture output
 	var out bytes.Buffer
