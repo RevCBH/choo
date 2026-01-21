@@ -31,7 +31,7 @@ func jobStateToProto(j *JobState) *apiv1.GetJobStatusResponse {
 	resp := &apiv1.GetJobStatusResponse{
 		JobId:       j.ID,
 		Status:      j.Status,
-		StartedAt:   timeToProto(j.StartedAt),
+		StartedAt:   timeToProto(&j.StartedAt),
 		CompletedAt: timeToProto(j.CompletedAt),
 	}
 	if j.Error != nil {

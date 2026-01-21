@@ -1,6 +1,6 @@
 ---
 task: 5
-status: pending
+status: complete
 backpressure: "go test ./internal/daemon/... -run TestJobEvents"
 depends_on: [4]
 ---
