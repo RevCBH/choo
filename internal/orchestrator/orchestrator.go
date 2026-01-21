@@ -101,6 +101,9 @@ type Config struct {
 	// ClaudeCommand is the Claude CLI command for non-task operations
 	// (conflict resolution, PR creation, etc.) - always uses Claude regardless of task provider
 	ClaudeCommand string
+
+	// CodeReview contains code review configuration from .choo.yaml
+	CodeReview config.CodeReviewConfig
 }
 
 // Dependencies bundles external dependencies for injection
@@ -351,11 +354,19 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 		ClaudeCommand:       o.cfg.ClaudeCommand,
 	}
 
+	// Resolve reviewer for code review (may be nil if disabled)
+	reviewer, err := o.resolveReviewer()
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve reviewer: %w", err)
+	}
+
 	workerDeps := worker.WorkerDeps{
-		Events: o.bus,
-		Git:    o.git,
-		GitHub: o.github,
+		Events:   o.bus,
+		Git:      o.git,
+		GitHub:   o.github,
+		Reviewer: reviewer, // Pass reviewer to pool
 		// Note: Provider is not set here - factory handles per-unit resolution
+		// Note: MergeMu is managed by the Pool internally, not passed here
 	}
 
 	// Use factory-based pool construction for per-unit provider resolution
@@ -663,6 +674,34 @@ func (o *Orchestrator) resolveProviderForUnit(unit *discovery.Unit) (provider.Pr
 func (o *Orchestrator) createProviderFactory() worker.ProviderFactory {
 	return func(unit *discovery.Unit) (provider.Provider, error) {
 		return o.resolveProviderForUnit(unit)
+	}
+}
+
+// resolveReviewer creates the appropriate Reviewer based on configuration.
+// Returns nil if code review is disabled (not an error).
+// Uses the same resolution pattern as resolveProviderForUnit but for reviewers.
+func (o *Orchestrator) resolveReviewer() (provider.Reviewer, error) {
+	cfg := o.cfg.CodeReview
+
+	// If code review is disabled, return nil (no reviewer)
+	if !cfg.Enabled {
+		return nil, nil
+	}
+
+	// Determine reviewer type from config
+	reviewerType := cfg.Provider
+	if reviewerType == "" {
+		reviewerType = config.ReviewProviderCodex // Default to codex
+	}
+
+	// Create the appropriate reviewer
+	switch reviewerType {
+	case config.ReviewProviderCodex:
+		return provider.NewCodexReviewer(cfg.Command), nil
+	case config.ReviewProviderClaude:
+		return provider.NewClaudeReviewer(cfg.Command), nil
+	default:
+		return nil, fmt.Errorf("unknown review provider: %s", reviewerType)
 	}
 }
 

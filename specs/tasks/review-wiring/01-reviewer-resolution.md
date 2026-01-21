@@ -1,6 +1,6 @@
 ---
 task: 1
-status: pending
+status: complete
 backpressure: "go test ./internal/orchestrator/... -run TestResolveReviewer"
 depends_on: []
 ---

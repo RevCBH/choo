@@ -23,7 +23,8 @@ type Pool struct {
 	events          *events.Bus
 	git             *git.WorktreeManager
 	github          *github.PRClient
-	providerFactory ProviderFactory // NEW: factory for creating providers per-unit
+	providerFactory ProviderFactory   // NEW: factory for creating providers per-unit
+	reviewer        provider.Reviewer // Shared reviewer for code review (may be nil)
 	workers         map[string]*Worker
 	mu              sync.Mutex
 	mergeMu         sync.Mutex // Serializes merge operations to prevent conflicts
@@ -53,6 +54,7 @@ func NewPoolWithFactory(maxWorkers int, cfg WorkerConfig, deps WorkerDeps, facto
 		git:             deps.Git,
 		github:          deps.GitHub,
 		providerFactory: factory,
+		reviewer:        deps.Reviewer, // Store reviewer from deps
 		workers:         make(map[string]*Worker),
 		sem:             make(chan struct{}, maxWorkers),
 		cancelCtx:       ctx,
@@ -101,6 +103,7 @@ func (p *Pool) Submit(unit *discovery.Unit) error {
 		GitHub:   p.github,
 		Provider: prov,
 		MergeMu:  &p.mergeMu,
+		Reviewer: p.reviewer, // Pass reviewer to worker
 	})
 
 	// Add to workers map

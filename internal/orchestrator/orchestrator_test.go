@@ -1022,3 +1022,107 @@ func TestResolveProviderForUnit_CommandOverride(t *testing.T) {
 		t.Errorf("expected codex, got %s", prov.Name())
 	}
 }
+
+func TestResolveReviewer_Disabled(t *testing.T) {
+	orch := &Orchestrator{
+		cfg: Config{
+			CodeReview: config.CodeReviewConfig{
+				Enabled: false,
+			},
+		},
+	}
+
+	reviewer, err := orch.resolveReviewer()
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if reviewer != nil {
+		t.Error("expected nil reviewer when disabled")
+	}
+}
+
+func TestResolveReviewer_Codex(t *testing.T) {
+	orch := &Orchestrator{
+		cfg: Config{
+			CodeReview: config.CodeReviewConfig{
+				Enabled:  true,
+				Provider: config.ReviewProviderCodex,
+				Command:  "/custom/codex",
+			},
+		},
+	}
+
+	reviewer, err := orch.resolveReviewer()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reviewer == nil {
+		t.Fatal("expected non-nil reviewer")
+	}
+	if reviewer.Name() != provider.ProviderCodex {
+		t.Errorf("expected codex reviewer, got %s", reviewer.Name())
+	}
+}
+
+func TestResolveReviewer_Claude(t *testing.T) {
+	orch := &Orchestrator{
+		cfg: Config{
+			CodeReview: config.CodeReviewConfig{
+				Enabled:  true,
+				Provider: config.ReviewProviderClaude,
+			},
+		},
+	}
+
+	reviewer, err := orch.resolveReviewer()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reviewer == nil {
+		t.Fatal("expected non-nil reviewer")
+	}
+	if reviewer.Name() != provider.ProviderClaude {
+		t.Errorf("expected claude reviewer, got %s", reviewer.Name())
+	}
+}
+
+func TestResolveReviewer_DefaultToCodex(t *testing.T) {
+	orch := &Orchestrator{
+		cfg: Config{
+			CodeReview: config.CodeReviewConfig{
+				Enabled:  true,
+				Provider: "", // Empty defaults to codex
+			},
+		},
+	}
+
+	reviewer, err := orch.resolveReviewer()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if reviewer == nil {
+		t.Fatal("expected non-nil reviewer")
+	}
+	if reviewer.Name() != provider.ProviderCodex {
+		t.Errorf("expected codex reviewer (default), got %s", reviewer.Name())
+	}
+}
+
+func TestResolveReviewer_UnknownProvider(t *testing.T) {
+	orch := &Orchestrator{
+		cfg: Config{
+			CodeReview: config.CodeReviewConfig{
+				Enabled:  true,
+				Provider: "unknown-provider",
+			},
+		},
+	}
+
+	_, err := orch.resolveReviewer()
+	if err == nil {
+		t.Error("expected error for unknown provider")
+	}
+	if !strings.Contains(err.Error(), "unknown review provider") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+}
