@@ -1,230 +1,232 @@
 ---
 task: 2
 status: pending
-backpressure: "go test ./internal/provider/... -run Provider"
-depends_on:
-  - 1
+backpressure: "go test ./internal/provider/... -run Codex"
+depends_on: []
 ---
 
-# Codex Provider Implementation
+# Implement CodexProvider
 
 **Parent spec**: `/specs/PROVIDER-IMPLEMENTATIONS.md`
 **Task**: #2 of 2 in implementation plan
 
 ## Objective
 
-Implement CodexProvider struct with Invoke and Name methods that invoke the OpenAI Codex CLI as a subprocess. Also add unit tests for both providers.
+Implement the CodexProvider struct that invokes the Codex CLI as a subprocess. The provider runs `codex exec --yolo <prompt>` in the specified working directory with stdout/stderr connected to provided writers.
 
 ## Dependencies
 
 ### Task Dependencies (within this unit)
-- Task #1 (01-claude.md): ClaudeProvider must exist for test patterns
+- None (can be implemented in parallel with Task #1)
 
-### External Spec Dependencies
-- `provider-interface`: Provider interface and ProviderType constants
-
-### Package Dependencies
-- `context` (standard library)
-- `fmt` (standard library)
-- `io` (standard library)
-- `os/exec` (standard library)
-- `errors` (standard library)
-- `testing` (standard library)
-- `bytes` (standard library)
-- `time` (standard library)
+### External Dependencies
+- `internal/provider/provider.go` must exist with `Provider` interface and `ProviderCodex` constant (from provider-interface unit)
 
 ## Deliverables
 
 ### Files to Create/Modify
 ```
 internal/provider/
-├── codex.go         # CREATE: CodexProvider implementation
-├── claude_test.go   # CREATE: ClaudeProvider unit tests
-└── codex_test.go    # CREATE: CodexProvider unit tests
+├── codex.go       # CREATE: CodexProvider implementation
+└── codex_test.go  # CREATE: Unit tests
 ```
 
-### Types to Implement
+### Implementation (codex.go)
 
 ```go
 // internal/provider/codex.go
 package provider
 
 import (
-    "context"
-    "errors"
-    "fmt"
-    "io"
-    "os/exec"
+	"context"
+	"fmt"
+	"io"
+	"os/exec"
 )
 
-// CodexProvider implements Provider using the OpenAI Codex CLI
+// CodexProvider implements Provider using the OpenAI Codex CLI.
+// Uses exec subcommand with --yolo flag for autonomous execution.
 type CodexProvider struct {
-    // command is the path to the codex executable
-    command string
+	// command is the path to the codex executable.
+	// Defaults to "codex" (resolved via PATH).
+	command string
 }
 
 // NewCodex creates a Codex provider with the specified command path.
 // If command is empty, defaults to "codex".
 func NewCodex(command string) *CodexProvider {
-    if command == "" {
-        command = "codex"
-    }
-    return &CodexProvider{command: command}
+	if command == "" {
+		command = "codex"
+	}
+	return &CodexProvider{command: command}
 }
 
-// Invoke executes the Codex CLI with the given prompt.
-// Uses --quiet and --full-auto for automated execution.
+// Invoke executes Codex CLI with the given prompt.
+// The command runs in workdir with stdout/stderr connected to the provided writers.
+// Returns when the subprocess exits or context is cancelled.
 func (p *CodexProvider) Invoke(ctx context.Context, prompt string, workdir string, stdout, stderr io.Writer) error {
-    // Build command with flags for automated execution
-    // --quiet: Suppress interactive prompts
-    // --full-auto: Enable autonomous operation without confirmations
-    cmd := exec.CommandContext(ctx, p.command,
-        "--quiet",
-        "--full-auto",
-        prompt,
-    )
-    cmd.Dir = workdir
-    cmd.Stdout = stdout
-    cmd.Stderr = stderr
+	args := []string{
+		"exec",
+		"--yolo",
+		prompt,
+	}
 
-    if err := cmd.Run(); err != nil {
-        // Check if context was cancelled
-        if ctx.Err() != nil {
-            return fmt.Errorf("codex invocation cancelled: %w", ctx.Err())
-        }
-        // Wrap error with provider name and exit code if available
-        var exitErr *exec.ExitError
-        if errors.As(err, &exitErr) {
-            return fmt.Errorf("codex exited with code %d: %w", exitErr.ExitCode(), err)
-        }
-        return fmt.Errorf("codex invocation failed: %w", err)
-    }
+	cmd := exec.CommandContext(ctx, p.command, args...)
+	cmd.Dir = workdir
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 
-    return nil
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("codex invocation failed: %w", err)
+	}
+	return nil
 }
 
-// Name returns the provider type identifier
+// Name returns the provider type identifier.
 func (p *CodexProvider) Name() ProviderType {
-    return ProviderCodex
+	return ProviderCodex
 }
 ```
 
-### Unit Tests
-
-```go
-// internal/provider/claude_test.go
-package provider
-
-import (
-    "bytes"
-    "context"
-    "testing"
-    "time"
-)
-
-func TestClaudeProvider_Name(t *testing.T) {
-    p := NewClaude("")
-    if got := p.Name(); got != ProviderClaude {
-        t.Errorf("Name() = %v, want %v", got, ProviderClaude)
-    }
-}
-
-func TestClaudeProvider_DefaultCommand(t *testing.T) {
-    p := NewClaude("")
-    if p.command != "claude" {
-        t.Errorf("default command = %v, want 'claude'", p.command)
-    }
-}
-
-func TestClaudeProvider_CustomCommand(t *testing.T) {
-    p := NewClaude("/opt/claude/bin/claude")
-    if p.command != "/opt/claude/bin/claude" {
-        t.Errorf("custom command = %v, want '/opt/claude/bin/claude'", p.command)
-    }
-}
-
-func TestClaudeProvider_ContextCancellation(t *testing.T) {
-    // Use sleep as a stand-in for a long-running command
-    p := NewClaude("sleep")
-
-    ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-    defer cancel()
-
-    var stdout, stderr bytes.Buffer
-    err := p.Invoke(ctx, "10", "/tmp", &stdout, &stderr)
-
-    if err == nil {
-        t.Error("expected error due to context cancellation")
-    }
-}
-
-func TestClaudeProvider_CommandNotFound(t *testing.T) {
-    p := NewClaude("/nonexistent/path/to/claude")
-
-    var stdout, stderr bytes.Buffer
-    err := p.Invoke(context.Background(), "test", "/tmp", &stdout, &stderr)
-
-    if err == nil {
-        t.Error("expected error for nonexistent command")
-    }
-}
-```
+### Test File (codex_test.go)
 
 ```go
 // internal/provider/codex_test.go
 package provider
 
 import (
-    "bytes"
-    "context"
-    "testing"
-    "time"
+	"bytes"
+	"context"
+	"io"
+	"strings"
+	"testing"
+	"time"
 )
 
+func TestCodexProvider_NewWithDefault(t *testing.T) {
+	p := NewCodex("")
+	if p.command != "codex" {
+		t.Errorf("expected default command 'codex', got %q", p.command)
+	}
+}
+
+func TestCodexProvider_NewWithCustomCommand(t *testing.T) {
+	p := NewCodex("/opt/codex/bin/codex")
+	if p.command != "/opt/codex/bin/codex" {
+		t.Errorf("expected custom command '/opt/codex/bin/codex', got %q", p.command)
+	}
+}
+
 func TestCodexProvider_Name(t *testing.T) {
-    p := NewCodex("")
-    if got := p.Name(); got != ProviderCodex {
-        t.Errorf("Name() = %v, want %v", got, ProviderCodex)
-    }
+	p := NewCodex("")
+	if got := p.Name(); got != ProviderCodex {
+		t.Errorf("Name() = %v, want %v", got, ProviderCodex)
+	}
 }
 
-func TestCodexProvider_DefaultCommand(t *testing.T) {
-    p := NewCodex("")
-    if p.command != "codex" {
-        t.Errorf("default command = %v, want 'codex'", p.command)
-    }
+func TestCodexProvider_Invoke_BuildsCorrectArgs(t *testing.T) {
+	// Use echo to verify the arguments passed
+	p := NewCodex("echo")
+
+	var stdout bytes.Buffer
+	err := p.Invoke(context.Background(), "test prompt", "/tmp", &stdout, io.Discard)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := strings.TrimSpace(stdout.String())
+	want := "exec --yolo test prompt"
+	if got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
 }
 
-func TestCodexProvider_CustomCommand(t *testing.T) {
-    p := NewCodex("/usr/local/bin/codex")
-    if p.command != "/usr/local/bin/codex" {
-        t.Errorf("custom command = %v, want '/usr/local/bin/codex'", p.command)
-    }
+func TestCodexProvider_Invoke_SetsWorkdir(t *testing.T) {
+	// Create a temp directory
+	tmpDir := t.TempDir()
+
+	// Use pwd to verify working directory
+	p := NewCodex("pwd")
+
+	var stdout bytes.Buffer
+	err := p.Invoke(context.Background(), "", tmpDir, &stdout, io.Discard)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := strings.TrimSpace(stdout.String())
+	if got != tmpDir {
+		t.Errorf("workdir = %q, want %q", got, tmpDir)
+	}
 }
 
-func TestCodexProvider_ContextCancellation(t *testing.T) {
-    p := NewCodex("sleep")
+func TestCodexProvider_Invoke_RespectsContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
 
-    ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-    defer cancel()
+	p := NewCodex("sleep")
+	err := p.Invoke(ctx, "10", "/tmp", io.Discard, io.Discard)
 
-    var stdout, stderr bytes.Buffer
-    err := p.Invoke(ctx, "10", "/tmp", &stdout, &stderr)
-
-    if err == nil {
-        t.Error("expected error due to context cancellation")
-    }
+	if err == nil {
+		t.Error("expected error from cancelled context, got nil")
+	}
 }
 
-func TestCodexProvider_CommandNotFound(t *testing.T) {
-    p := NewCodex("/nonexistent/path/to/codex")
+func TestCodexProvider_Invoke_CapturesStdout(t *testing.T) {
+	// Use echo which will output the args
+	p := NewCodex("echo")
 
-    var stdout, stderr bytes.Buffer
-    err := p.Invoke(context.Background(), "test", "/tmp", &stdout, &stderr)
+	var stdout bytes.Buffer
+	err := p.Invoke(context.Background(), "hello world", "/tmp", &stdout, io.Discard)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-    if err == nil {
-        t.Error("expected error for nonexistent command")
-    }
+	if !strings.Contains(stdout.String(), "hello world") {
+		t.Errorf("stdout should contain 'hello world', got: %q", stdout.String())
+	}
+}
+
+func TestCodexProvider_Invoke_ReturnsErrorOnFailure(t *testing.T) {
+	p := NewCodex("false") // 'false' command always exits with code 1
+
+	err := p.Invoke(context.Background(), "", "/tmp", io.Discard, io.Discard)
+	if err == nil {
+		t.Error("expected error from failing command, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "codex invocation failed") {
+		t.Errorf("error should contain 'codex invocation failed', got: %v", err)
+	}
+}
+
+func TestCodexProvider_Invoke_ContextTimeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	p := NewCodex("sleep")
+	err := p.Invoke(ctx, "10", "/tmp", io.Discard, io.Discard)
+
+	if err == nil {
+		t.Error("expected error from context timeout, got nil")
+	}
+}
+
+func TestCodexProvider_Invoke_EmptyPrompt(t *testing.T) {
+	// Verify that empty prompt is handled correctly (passed as empty string)
+	p := NewCodex("echo")
+
+	var stdout bytes.Buffer
+	err := p.Invoke(context.Background(), "", "/tmp", &stdout, io.Discard)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	got := strings.TrimSpace(stdout.String())
+	want := "exec --yolo"
+	if got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
 }
 ```
 
@@ -232,54 +234,20 @@ func TestCodexProvider_CommandNotFound(t *testing.T) {
 
 ### Validation Command
 ```bash
-go test ./internal/provider/... -run Provider
+go test ./internal/provider/... -run Codex
 ```
 
-### Must Pass
-| Test | Assertion |
-|------|-----------|
-| Build succeeds | No compilation errors |
-| CodexProvider compiles | Struct and methods defined |
-| Implements Provider | Interface satisfaction verified by compiler |
-| TestClaudeProvider_Name | Claude provider returns ProviderClaude |
-| TestClaudeProvider_DefaultCommand | Empty command defaults to "claude" |
-| TestClaudeProvider_CustomCommand | Custom path is preserved |
-| TestCodexProvider_Name | Codex provider returns ProviderCodex |
-| TestCodexProvider_DefaultCommand | Empty command defaults to "codex" |
-| TestCodexProvider_CustomCommand | Custom path is preserved |
-
-### CI Compatibility
-- [ ] `go build ./internal/provider/...` exits 0
-- [ ] `go test ./internal/provider/... -run Provider` exits 0
-- [ ] `go vet ./internal/provider/...` reports no issues
-
-## Implementation Notes
-
-### Codex CLI Flags
-
-The Codex CLI uses different flags than Claude:
-
-- `--quiet`: Suppresses the interactive UI and prompts
-- `--full-auto`: Enables autonomous operation, applying changes without confirmation
-- Prompt is passed as a positional argument (not via `-p` flag)
-
-### Error Wrapping
-
-All errors must be wrapped with "codex" prefix for identification:
-- Cancellation: `"codex invocation cancelled: ..."`
-- Exit error: `"codex exited with code N: ..."`
-- Other: `"codex invocation failed: ..."`
-
-### Test Strategy
-
-Tests use `sleep` command as a stand-in for provider CLIs to test:
-- Context cancellation behavior
-- Error handling for missing commands
-
-This avoids requiring actual Claude/Codex CLIs to be installed for unit tests.
+### Success Criteria
+- All `*Codex*` tests pass
+- `NewCodex("")` returns provider with command "codex"
+- `NewCodex("/custom/path")` returns provider with custom command
+- `Name()` returns `ProviderCodex`
+- `Invoke` builds correct argument list: `exec --yolo <prompt>`
+- `Invoke` respects context cancellation
 
 ## NOT In Scope
-- Integration tests requiring Codex CLI installed
-- Custom flag configuration per invocation
-- Retry logic on transient failures
-- Factory function (covered in PROVIDER-INTERFACE)
+- Factory function `FromConfig` (separate unit: provider-config)
+- Integration tests against real Codex CLI
+- ClaudeProvider implementation (Task #1)
+- Output parsing or structured data extraction
+- Retry logic (handled by worker layer)
