@@ -126,15 +126,6 @@ func New(cfg Config, deps Dependencies) *Orchestrator {
 	}
 }
 
-// getTargetBranch returns the appropriate target branch for PRs
-// Returns FeatureBranch if in feature mode, otherwise TargetBranch
-func (o *Orchestrator) getTargetBranch() string {
-	if o.cfg.FeatureMode {
-		return o.cfg.FeatureBranch
-	}
-	return o.cfg.TargetBranch
-}
-
 // Close releases all resources held by the orchestrator
 // Note: Does not close the event bus as it is owned by the caller
 func (o *Orchestrator) Close() error {

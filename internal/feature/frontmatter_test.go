@@ -92,7 +92,7 @@ status: draft`
 		t.Errorf("frontmatter mismatch\nexpected: %q\ngot: %q", expectedFrontmatter, string(frontmatter))
 	}
 
-	if body != nil && len(body) != 0 {
+	if len(body) != 0 {
 		t.Errorf("expected empty body, got: %q", string(body))
 	}
 }

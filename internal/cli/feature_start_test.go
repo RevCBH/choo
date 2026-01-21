@@ -63,7 +63,7 @@ func TestFeatureStartCmd_Flags(t *testing.T) {
 	// Check that all required flags exist
 	prdDirFlag := cmd.Flags().Lookup("prd-dir")
 	if prdDirFlag == nil {
-		t.Error("prd-dir flag not registered")
+		t.Fatal("prd-dir flag not registered")
 	}
 	if prdDirFlag.DefValue != "docs/prd" {
 		t.Errorf("prd-dir default should be 'docs/prd', got '%s'", prdDirFlag.DefValue)
@@ -71,7 +71,7 @@ func TestFeatureStartCmd_Flags(t *testing.T) {
 
 	specsDirFlag := cmd.Flags().Lookup("specs-dir")
 	if specsDirFlag == nil {
-		t.Error("specs-dir flag not registered")
+		t.Fatal("specs-dir flag not registered")
 	}
 	if specsDirFlag.DefValue != "specs/tasks" {
 		t.Errorf("specs-dir default should be 'specs/tasks', got '%s'", specsDirFlag.DefValue)
@@ -79,7 +79,7 @@ func TestFeatureStartCmd_Flags(t *testing.T) {
 
 	skipReviewFlag := cmd.Flags().Lookup("skip-spec-review")
 	if skipReviewFlag == nil {
-		t.Error("skip-spec-review flag not registered")
+		t.Fatal("skip-spec-review flag not registered")
 	}
 	if skipReviewFlag.DefValue != "false" {
 		t.Errorf("skip-spec-review default should be 'false', got '%s'", skipReviewFlag.DefValue)
@@ -87,7 +87,7 @@ func TestFeatureStartCmd_Flags(t *testing.T) {
 
 	maxIterFlag := cmd.Flags().Lookup("max-review-iter")
 	if maxIterFlag == nil {
-		t.Error("max-review-iter flag not registered")
+		t.Fatal("max-review-iter flag not registered")
 	}
 	if maxIterFlag.DefValue != "3" {
 		t.Errorf("max-review-iter default should be '3', got '%s'", maxIterFlag.DefValue)
@@ -95,7 +95,7 @@ func TestFeatureStartCmd_Flags(t *testing.T) {
 
 	dryRunFlag := cmd.Flags().Lookup("dry-run")
 	if dryRunFlag == nil {
-		t.Error("dry-run flag not registered")
+		t.Fatal("dry-run flag not registered")
 	}
 	if dryRunFlag.DefValue != "false" {
 		t.Errorf("dry-run default should be 'false', got '%s'", dryRunFlag.DefValue)

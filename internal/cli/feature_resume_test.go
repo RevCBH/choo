@@ -52,7 +52,7 @@ func TestFeatureResumeCmd_Flags(t *testing.T) {
 	// Check that all required flags exist
 	skipReviewFlag := cmd.Flags().Lookup("skip-review")
 	if skipReviewFlag == nil {
-		t.Error("skip-review flag not registered")
+		t.Fatal("skip-review flag not registered")
 	}
 	if skipReviewFlag.DefValue != "false" {
 		t.Errorf("skip-review default should be 'false', got '%s'", skipReviewFlag.DefValue)
@@ -60,7 +60,7 @@ func TestFeatureResumeCmd_Flags(t *testing.T) {
 
 	fromValidationFlag := cmd.Flags().Lookup("from-validation")
 	if fromValidationFlag == nil {
-		t.Error("from-validation flag not registered")
+		t.Fatal("from-validation flag not registered")
 	}
 	if fromValidationFlag.DefValue != "false" {
 		t.Errorf("from-validation default should be 'false', got '%s'", fromValidationFlag.DefValue)
@@ -68,7 +68,7 @@ func TestFeatureResumeCmd_Flags(t *testing.T) {
 
 	fromTasksFlag := cmd.Flags().Lookup("from-tasks")
 	if fromTasksFlag == nil {
-		t.Error("from-tasks flag not registered")
+		t.Fatal("from-tasks flag not registered")
 	}
 	if fromTasksFlag.DefValue != "false" {
 		t.Errorf("from-tasks default should be 'false', got '%s'", fromTasksFlag.DefValue)

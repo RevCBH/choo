@@ -79,9 +79,8 @@ func (rc *ReviewCycle) Run(ctx context.Context, specs []Spec) error {
 		result, err := rc.reviewer.Review(ctx, specs)
 		if err != nil {
 			if isMalformedOutput(err) {
-				rc.transitionFn(StatusReviewBlocked)
-				rc.escalateFn("Review produced malformed output", err)
-				return nil
+				_ = rc.transitionFn(StatusReviewBlocked)
+				return rc.escalateFn("Review produced malformed output", err)
 			}
 			return err
 		}
@@ -105,9 +104,8 @@ func (rc *ReviewCycle) Run(ctx context.Context, specs []Spec) error {
 	}
 
 	// Max iterations reached
-	rc.transitionFn(StatusReviewBlocked)
-	rc.escalateFn("Max review iterations reached", nil)
-	return nil
+	_ = rc.transitionFn(StatusReviewBlocked)
+	return rc.escalateFn("Max review iterations reached", nil)
 }
 
 // Resume continues from blocked state
@@ -125,9 +123,8 @@ func (rc *ReviewCycle) Resume(ctx context.Context, opts ResumeOptions) error {
 	result, err := rc.reviewer.Review(ctx, []Spec{})
 	if err != nil {
 		if isMalformedOutput(err) {
-			rc.transitionFn(StatusReviewBlocked)
-			rc.escalateFn("Review produced malformed output", err)
-			return nil
+			_ = rc.transitionFn(StatusReviewBlocked)
+			return rc.escalateFn("Review produced malformed output", err)
 		}
 		return err
 	}

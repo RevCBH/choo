@@ -380,21 +380,6 @@ func (w *Worker) logReviewPlaceholder(ctx context.Context) {
 	fmt.Fprintf(os.Stderr, "Review placeholder - changes to review for unit %s:\n%s\n", w.unit.ID, diff)
 }
 
-// cleanup removes the worktree
-func (w *Worker) cleanup(ctx context.Context) error {
-	if w.worktreePath == "" {
-		return nil
-	}
-
-	worktree := &git.Worktree{
-		Path:   w.worktreePath,
-		Branch: w.branch,
-		UnitID: w.unit.ID,
-	}
-
-	return w.git.RemoveWorktree(ctx, worktree)
-}
-
 // updateUnitStatus updates the unit frontmatter status in the IMPLEMENTATION_PLAN.md
 func (w *Worker) updateUnitStatus(status discovery.UnitStatus) error {
 	implPlanPath := filepath.Join(w.worktreePath, "specs", "units", w.unit.ID, "IMPLEMENTATION_PLAN.md")
