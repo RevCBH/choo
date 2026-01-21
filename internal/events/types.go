@@ -102,6 +102,33 @@ const (
 	FeatureFailed         EventType = "feature.failed"
 )
 
+// Code review events (advisory, never block merge)
+const (
+	// CodeReviewStarted is emitted when code review begins for a unit
+	// Payload: unit (string)
+	CodeReviewStarted EventType = "codereview.started"
+
+	// CodeReviewPassed is emitted when review finds no issues
+	// Payload: summary (string)
+	CodeReviewPassed EventType = "codereview.passed"
+
+	// CodeReviewIssuesFound is emitted when review discovers issues
+	// Payload: count (int), issues ([]ReviewIssue)
+	CodeReviewIssuesFound EventType = "codereview.issues_found"
+
+	// CodeReviewFixAttempt is emitted when a fix iteration begins
+	// Payload: iteration (int), max_iterations (int)
+	CodeReviewFixAttempt EventType = "codereview.fix_attempt"
+
+	// CodeReviewFixApplied is emitted when fix changes are successfully committed
+	// Payload: iteration (int)
+	CodeReviewFixApplied EventType = "codereview.fix_applied"
+
+	// CodeReviewFailed is emitted when review fails to run (non-blocking)
+	// Payload: error (string)
+	CodeReviewFailed EventType = "codereview.failed"
+)
+
 // PRD events
 const (
 	PRDDiscovered    EventType = "prd.discovered"
