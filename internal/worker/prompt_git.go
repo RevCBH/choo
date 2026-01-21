@@ -77,6 +77,23 @@ If the rebase continues successfully, do NOT push - the orchestrator will handle
 If you cannot resolve a conflict, explain why in your response.`, targetBranch, formatFileList(conflictedFiles))
 }
 
+// BuildMergeConflictPrompt creates the prompt for Claude to resolve merge conflicts during git merge
+func BuildMergeConflictPrompt(sourceBranch, targetBranch string, conflictedFiles []string) string {
+	return fmt.Sprintf(`A merge of branch %s into %s resulted in conflicts.
+
+Conflicted files:
+%s
+
+Please resolve all conflicts:
+1. Open each conflicted file
+2. Find the conflict markers (<<<<<<, =======, >>>>>>>)
+3. Edit to resolve - keep the correct code, remove markers
+4. Stage resolved files: git add <file>
+5. Complete the merge: git commit -m "Merge %s"
+
+If you cannot resolve a conflict, explain why in your response.`, sourceBranch, targetBranch, formatFileList(conflictedFiles), sourceBranch)
+}
+
 // BuildFeedbackPrompt constructs the Claude prompt for addressing PR feedback
 func BuildFeedbackPrompt(prURL string, comments []github.PRComment) string {
 	var commentText strings.Builder

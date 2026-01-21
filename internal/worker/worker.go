@@ -366,11 +366,8 @@ func (w *Worker) mergeToFeatureBranch(ctx context.Context) error {
 	//
 	// The orchestrator is responsible for ensuring RepoRoot is in the correct state before
 	// starting workers. No implicit checkout is performed here.
-	if _, err := w.runner().Exec(ctx, w.config.RepoRoot, "merge", w.branch, "--ff-only"); err != nil {
-		// Fall back to regular merge if fast-forward fails
-		if _, err := w.runner().Exec(ctx, w.config.RepoRoot, "merge", w.branch, "-m", fmt.Sprintf("Merge unit %s", w.unit.ID)); err != nil {
-			return fmt.Errorf("failed to merge unit branch into target: %w", err)
-		}
+	if err := w.mergeWithCleanup(ctx); err != nil {
+		return err
 	}
 
 	// 5. Emit UnitMerged event
@@ -452,6 +449,94 @@ func (w *Worker) resolveConflictsWithClaude(ctx context.Context) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Successfully resolved merge conflicts\n")
+	return nil
+}
+
+// mergeWithCleanup performs the merge to RepoRoot with conflict resolution and cleanup
+func (w *Worker) mergeWithCleanup(ctx context.Context) error {
+	// Try fast-forward merge first
+	_, err := w.runner().Exec(ctx, w.config.RepoRoot, "merge", w.branch, "--ff-only")
+	if err == nil {
+		return nil // Fast-forward succeeded
+	}
+
+	// Try regular merge
+	_, err = w.runner().Exec(ctx, w.config.RepoRoot, "merge", w.branch, "-m", fmt.Sprintf("Merge unit %s", w.unit.ID))
+	if err == nil {
+		return nil // Merge succeeded
+	}
+
+	// Check if merge failed due to conflicts
+	conflictedFiles, conflictErr := git.GetConflictedFiles(ctx, w.config.RepoRoot)
+	if conflictErr != nil || len(conflictedFiles) == 0 {
+		// Not a conflict error, or couldn't determine - abort and return original error
+		_, _ = w.runner().Exec(ctx, w.config.RepoRoot, "merge", "--abort")
+		return fmt.Errorf("failed to merge unit branch into target: %w", err)
+	}
+
+	// Emit conflict event
+	if w.events != nil {
+		evt := events.NewEvent(events.PRConflict, w.unit.ID).
+			WithPayload(map[string]any{
+				"files": conflictedFiles,
+				"stage": "merge_to_target",
+			})
+		w.events.Emit(evt)
+	}
+
+	fmt.Fprintf(os.Stderr, "Merge conflicts in RepoRoot (%d files), invoking Claude to resolve...\n", len(conflictedFiles))
+
+	// Build merge conflict resolution prompt (different from rebase - we're in RepoRoot now)
+	prompt := BuildMergeConflictPrompt(w.branch, w.config.TargetBranch, conflictedFiles)
+
+	// Retry loop for conflict resolution
+	retryResult := RetryWithBackoff(ctx, DefaultRetryConfig, func(ctx context.Context) error {
+		// Invoke Claude in RepoRoot to resolve conflicts
+		if err := w.invokeClaudeInDir(ctx, w.config.RepoRoot, prompt); err != nil {
+			return err
+		}
+
+		// Verify merge completed (no longer in merge state)
+		inMerge, err := git.IsMergeInProgress(ctx, w.config.RepoRoot)
+		if err != nil {
+			return err
+		}
+		if inMerge {
+			stillConflicted, _ := git.GetConflictedFiles(ctx, w.config.RepoRoot)
+			if len(stillConflicted) > 0 {
+				return fmt.Errorf("claude did not resolve all merge conflicts: %v", stillConflicted)
+			}
+			return fmt.Errorf("claude did not complete merge (need to commit)")
+		}
+		return nil
+	})
+
+	if !retryResult.Success {
+		// Clean up - abort the merge
+		_, _ = w.runner().Exec(ctx, w.config.RepoRoot, "merge", "--abort")
+
+		// Escalate to user
+		if w.escalator != nil {
+			_ = w.escalator.Escalate(ctx, escalate.Escalation{
+				Severity: escalate.SeverityBlocking,
+				Unit:     w.unit.ID,
+				Title:    "Failed to resolve merge conflicts in target branch",
+				Message: fmt.Sprintf(
+					"Claude could not resolve merge conflicts after %d attempts",
+					retryResult.Attempts,
+				),
+				Context: map[string]string{
+					"files":  strings.Join(conflictedFiles, ", "),
+					"branch": w.branch,
+					"target": w.config.TargetBranch,
+					"error":  retryResult.LastErr.Error(),
+				},
+			})
+		}
+		return fmt.Errorf("failed to resolve merge conflicts: %w", retryResult.LastErr)
+	}
+
+	fmt.Fprintf(os.Stderr, "Successfully resolved merge conflicts in target branch\n")
 	return nil
 }
 
