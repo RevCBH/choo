@@ -1,6 +1,8 @@
 package client
 
 import (
+	"context"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
@@ -38,4 +40,53 @@ func New(socketPath string) (*Client, error) {
 // It is safe to call Close multiple times.
 func (c *Client) Close() error {
 	return c.conn.Close()
+}
+
+// StartJob initiates a new orchestration job with the given configuration.
+// Returns the job ID on success.
+func (c *Client) StartJob(ctx context.Context, cfg JobConfig) (string, error) {
+	req := jobConfigToProto(cfg)
+	resp, err := c.daemon.StartJob(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	return resp.GetJobId(), nil
+}
+
+// StopJob cancels a running job.
+// If force is true, the job terminates immediately without cleanup.
+// If force is false, the job completes current tasks before stopping.
+func (c *Client) StopJob(ctx context.Context, jobID string, force bool) error {
+	req := &apiv1.StopJobRequest{
+		JobId: jobID,
+		Force: force,
+	}
+	_, err := c.daemon.StopJob(ctx, req)
+	return err
+}
+
+// ListJobs returns job summaries, optionally filtered by status.
+// Pass an empty slice for statusFilter to list all jobs.
+func (c *Client) ListJobs(ctx context.Context, statusFilter []string) ([]*JobSummary, error) {
+	req := &apiv1.ListJobsRequest{
+		StatusFilter: statusFilter,
+	}
+	resp, err := c.daemon.ListJobs(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return protoToJobSummaries(resp.GetJobs()), nil
+}
+
+// GetJobStatus returns detailed status for a specific job.
+// Returns an error if the job ID does not exist.
+func (c *Client) GetJobStatus(ctx context.Context, jobID string) (*JobStatus, error) {
+	req := &apiv1.GetJobStatusRequest{
+		JobId: jobID,
+	}
+	resp, err := c.daemon.GetJobStatus(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return protoToJobStatus(resp), nil
 }
