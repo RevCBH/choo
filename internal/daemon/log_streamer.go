@@ -37,7 +37,13 @@ func NewLogStreamer(containerID string, manager container.Manager, eventBus *eve
 // Start begins streaming and parsing logs.
 // It blocks until the context is cancelled or the log stream ends.
 func (s *LogStreamer) Start(ctx context.Context) error {
-	ctx, s.cancel = context.WithCancel(ctx)
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithCancel(ctx)
+
+	s.mu.Lock()
+	s.cancel = cancel
+	s.mu.Unlock()
+
 	defer close(s.done)
 
 	reader, err := s.manager.Logs(ctx, container.ContainerID(s.containerID))

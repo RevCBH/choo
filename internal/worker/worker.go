@@ -44,6 +44,9 @@ type Worker struct {
 	branch       string
 	currentTask  *discovery.Task
 
+	//nolint:unused // WIP: used when PR merge workflow is integrated
+	prNumber int
+
 	reviewer     provider.Reviewer        // For code review (may be nil if disabled)
 	reviewConfig *config.CodeReviewConfig // Review configuration
 

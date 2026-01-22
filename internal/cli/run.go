@@ -247,9 +247,6 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 	// Safety flags
 	cmd.Flags().BoolVar(&opts.Force, "force", false, "Force run even with uncommitted changes in working directory")
 
-	// Safety flags
-	cmd.Flags().BoolVar(&opts.Force, "force", false, "Force run even with uncommitted changes in working directory")
-
 	return cmd
 }
 

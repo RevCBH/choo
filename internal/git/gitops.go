@@ -96,8 +96,16 @@ func newGitOpsWithRunner(path string, opts GitOpsOpts, runner Runner) (GitOps, e
 	}
 	toplevel = strings.TrimSpace(toplevel)
 
+	// Resolve symlinks on toplevel for accurate comparison (e.g. macOS /var -> /private/var)
+	toplevelCanonical, err := filepath.EvalSymlinks(toplevel)
+	if err != nil {
+		// Fall back to original if symlink resolution fails
+		toplevelCanonical = toplevel
+	}
+	toplevelCanonical = filepath.Clean(toplevelCanonical)
+
 	// 7. Path matches toplevel
-	if filepath.Clean(toplevel) != canonical {
+	if toplevelCanonical != canonical {
 		return nil, fmt.Errorf("%w: toplevel=%s, path=%s", ErrPathMismatch, toplevel, canonical)
 	}
 
@@ -168,7 +176,14 @@ func (g *gitOps) validateRuntime(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("runtime check failed: not a git repo: %w", err)
 	}
-	if filepath.Clean(strings.TrimSpace(toplevel)) != g.path {
+	toplevel = strings.TrimSpace(toplevel)
+
+	// Resolve symlinks for accurate comparison (e.g. macOS /var -> /private/var)
+	toplevelCanonical, err := filepath.EvalSymlinks(toplevel)
+	if err != nil {
+		toplevelCanonical = toplevel
+	}
+	if filepath.Clean(toplevelCanonical) != g.path {
 		return fmt.Errorf("runtime check failed: toplevel changed")
 	}
 
