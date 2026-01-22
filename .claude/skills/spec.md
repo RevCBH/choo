@@ -171,10 +171,11 @@ Create a technical specification at `{{OUTPUT_PATH}}`.
 
 ### Module Structure
 ```
+path/to/module/
+├── file.go    # Purpose
+└── other.go   # Purpose
+```
 
-path/to/module/ ├── file.go # Purpose └── other.go # Purpose
-
-````
 ### Core Types
 ```go
 // Include ALL fields with types
@@ -182,7 +183,7 @@ path/to/module/ ├── file.go # Purpose └── other.go # Purpose
 type Example struct {
     Field string // Explain if needed
 }
-````
+```
 
 ### API Surface
 
@@ -370,4 +371,3 @@ PRD section 8 content, code snippets]
 - [ ] No vague language ("fast", "robust")
 - [ ] No marketing speak
 - [ ] Technical terms used correctly
-```
