@@ -14,8 +14,8 @@ func TestStore_NewStore(t *testing.T) {
 		t.Errorf("expected status 'waiting', got '%s'", store.status)
 	}
 
-	if store.connected {
-		t.Error("expected connected to be false")
+	if store.connectedCount != 0 {
+		t.Error("expected connectedCount to be 0")
 	}
 
 	if store.units == nil {
@@ -262,20 +262,54 @@ func TestStore_SummaryCalculation(t *testing.T) {
 func TestStore_SetConnected(t *testing.T) {
 	store := NewStore()
 
-	if store.connected {
-		t.Error("expected initial connected to be false")
+	if store.connectedCount != 0 {
+		t.Error("expected initial connectedCount to be 0")
 	}
 
+	// Test reference counting - first connection
 	store.SetConnected(true)
 
-	if !store.connected {
-		t.Error("expected connected to be true after SetConnected(true)")
+	if store.connectedCount != 1 {
+		t.Errorf("expected connectedCount 1 after first SetConnected(true), got %d", store.connectedCount)
 	}
 
+	// Second connection (concurrent job)
+	store.SetConnected(true)
+
+	if store.connectedCount != 2 {
+		t.Errorf("expected connectedCount 2 after second SetConnected(true), got %d", store.connectedCount)
+	}
+
+	// First job disconnects
 	store.SetConnected(false)
 
-	if store.connected {
-		t.Error("expected connected to be false after SetConnected(false)")
+	if store.connectedCount != 1 {
+		t.Errorf("expected connectedCount 1 after first SetConnected(false), got %d", store.connectedCount)
+	}
+
+	// Verify snapshot still shows connected
+	snapshot := store.Snapshot()
+	if !snapshot.Connected {
+		t.Error("expected snapshot.Connected to be true with connectedCount > 0")
+	}
+
+	// Second job disconnects
+	store.SetConnected(false)
+
+	if store.connectedCount != 0 {
+		t.Errorf("expected connectedCount 0 after second SetConnected(false), got %d", store.connectedCount)
+	}
+
+	// Verify snapshot shows disconnected
+	snapshot = store.Snapshot()
+	if snapshot.Connected {
+		t.Error("expected snapshot.Connected to be false with connectedCount == 0")
+	}
+
+	// Verify we don't go negative
+	store.SetConnected(false)
+	if store.connectedCount != 0 {
+		t.Errorf("expected connectedCount to stay at 0, got %d", store.connectedCount)
 	}
 }
 
@@ -283,7 +317,7 @@ func TestStore_Reset(t *testing.T) {
 	store := NewStore()
 
 	// Set up some state
-	store.connected = true
+	store.connectedCount = 2
 	store.status = "running"
 	store.startedAt = time.Now()
 	store.parallelism = 5
@@ -292,8 +326,8 @@ func TestStore_Reset(t *testing.T) {
 
 	store.Reset()
 
-	if store.connected {
-		t.Error("expected connected to be false after Reset")
+	if store.connectedCount != 0 {
+		t.Errorf("expected connectedCount to be 0 after Reset, got %d", store.connectedCount)
 	}
 
 	if store.status != "waiting" {

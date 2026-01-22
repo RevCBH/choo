@@ -9,13 +9,13 @@ import (
 // Store maintains the current orchestration state.
 // It is safe for concurrent access.
 type Store struct {
-	mu          sync.RWMutex
-	connected   bool              // true when orchestrator is connected
-	status      string            // "waiting", "running", "completed", "failed"
-	startedAt   time.Time
-	parallelism int
-	graph       *GraphData
-	units       map[string]*UnitState
+	mu             sync.RWMutex
+	connectedCount int               // number of connected jobs (for concurrent job support)
+	status         string            // "waiting", "running", "completed", "failed"
+	startedAt      time.Time
+	parallelism    int
+	graph          *GraphData
+	units          map[string]*UnitState
 }
 
 // NewStore creates an empty state store in "waiting" status.
@@ -52,13 +52,29 @@ func (s *Store) HandleEvent(e *Event) {
 		s.parallelism = payload.Parallelism
 		s.graph = payload.Graph
 
-		// Initialize unit states from graph nodes
+		// Initialize unit states from graph nodes (supports resume with pre-existing statuses)
 		if s.graph != nil {
 			for _, node := range s.graph.Nodes {
+				// Use initial status from graph if provided, otherwise default to pending
+				status := "pending"
+				if node.Status != "" {
+					status = node.Status
+				}
+
+				// For completed units, set CurrentTask to show all tasks done
+				currentTask := 0
+				if status == "complete" && node.Tasks > 0 {
+					currentTask = node.Tasks - 1
+				} else if node.CompletedTasks > 0 {
+					// For in-progress resumed units, show completed task progress
+					currentTask = node.CompletedTasks - 1
+				}
+
 				s.units[node.ID] = &UnitState{
-					ID:         node.ID,
-					Status:     "pending",
-					TotalTasks: node.Tasks,
+					ID:          node.ID,
+					Status:      status,
+					TotalTasks:  node.Tasks,
+					CurrentTask: currentTask,
 				}
 			}
 		}
@@ -164,7 +180,7 @@ func (s *Store) Snapshot() *StateSnapshot {
 	}
 
 	snapshot := &StateSnapshot{
-		Connected:   s.connected,
+		Connected:   s.connectedCount > 0,
 		Status:      s.status,
 		Parallelism: s.parallelism,
 		Units:       units,
@@ -189,10 +205,18 @@ func (s *Store) Graph() *GraphData {
 
 // SetConnected updates the connection status.
 // Called when orchestrator connects/disconnects from socket.
+// Uses reference counting to support multiple concurrent jobs:
+// - SetConnected(true) increments the count
+// - SetConnected(false) decrements the count
+// The store reports as "connected" when count > 0.
 func (s *Store) SetConnected(connected bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.connected = connected
+	if connected {
+		s.connectedCount++
+	} else if s.connectedCount > 0 {
+		s.connectedCount--
+	}
 }
 
 // Reset clears all state for a new run.
@@ -200,7 +224,7 @@ func (s *Store) SetConnected(connected bool) {
 func (s *Store) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.connected = false
+	s.connectedCount = 0
 	s.status = "waiting"
 	s.startedAt = time.Time{}
 	s.parallelism = 0

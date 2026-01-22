@@ -542,6 +542,100 @@ func TestRunDelete(t *testing.T) {
 	}
 }
 
+// TestDeleteNonActiveRunByBranch verifies that only completed/failed/cancelled runs are deleted
+func TestDeleteNonActiveRunByBranch(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a completed run
+	completedRun := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusCompleted,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(completedRun)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Delete non-active runs for this branch/repo
+	deleted, err := db.DeleteNonActiveRunByBranch("feature/test", "/path/to/repo")
+	if err != nil {
+		t.Fatalf("DeleteNonActiveRunByBranch failed: %v", err)
+	}
+
+	if deleted != 1 {
+		t.Errorf("Expected 1 deleted run, got %d", deleted)
+	}
+
+	// Verify run no longer exists
+	retrieved, err := db.GetRun(completedRun.ID)
+	if err != nil {
+		t.Fatalf("GetRun failed: %v", err)
+	}
+
+	if retrieved != nil {
+		t.Errorf("Expected nil run after delete, got %v", retrieved)
+	}
+}
+
+// TestDeleteNonActiveRunByBranch_PreservesRunning verifies that running runs are not deleted
+func TestDeleteNonActiveRunByBranch_PreservesRunning(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer db.Close()
+
+	// Create a running run
+	runningRun := &Run{
+		ID:            NewRunID(),
+		FeatureBranch: "feature/test",
+		RepoPath:      "/path/to/repo",
+		TargetBranch:  "main",
+		TasksDir:      "/path/to/tasks",
+		Parallelism:   4,
+		Status:        RunStatusRunning,
+		DaemonVersion: "1.0.0",
+		ConfigJSON:    "{}",
+	}
+
+	err = db.CreateRun(runningRun)
+	if err != nil {
+		t.Fatalf("CreateRun failed: %v", err)
+	}
+
+	// Attempt to delete non-active runs for this branch/repo
+	deleted, err := db.DeleteNonActiveRunByBranch("feature/test", "/path/to/repo")
+	if err != nil {
+		t.Fatalf("DeleteNonActiveRunByBranch failed: %v", err)
+	}
+
+	if deleted != 0 {
+		t.Errorf("Expected 0 deleted runs (running should be preserved), got %d", deleted)
+	}
+
+	// Verify run still exists
+	retrieved, err := db.GetRun(runningRun.ID)
+	if err != nil {
+		t.Fatalf("GetRun failed: %v", err)
+	}
+
+	if retrieved == nil {
+		t.Error("Expected running run to still exist")
+	}
+}
+
 // TestUnitCreate verifies that CreateUnit inserts and GetUnit retrieves with matching fields
 func TestUnitCreate(t *testing.T) {
 	db, err := Open(":memory:")

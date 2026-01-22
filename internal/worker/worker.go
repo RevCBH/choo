@@ -336,23 +336,28 @@ func (w *Worker) runBaselinePhase(ctx context.Context) error {
 // mergeToFeatureBranch performs local merge to the feature branch (replaces PR workflow)
 // This ensures dependent units have access to their predecessors' code
 func (w *Worker) mergeToFeatureBranch(ctx context.Context) error {
-	// 1. Review placeholder (log what would be reviewed)
+	// 1. Determine if we're working with a remote or local-only target branch
+	// Check if the remote tracking branch exists locally
+	targetRef, useRemote := w.getTargetRef(ctx)
+
+	// 2. Run code review (advisory - doesn't block merge)
 	w.runCodeReview(ctx)
 
-	// 2-5 are serialized via mergeMu to prevent concurrent merge conflicts
+	// 3-6 are serialized via mergeMu to prevent concurrent merge conflicts
 	// Acquire merge lock - only one worker can merge at a time
 	if w.mergeMu != nil {
 		w.mergeMu.Lock()
 		defer w.mergeMu.Unlock()
 	}
 
-	// 2. Fetch latest feature branch to ensure we're rebasing onto latest
-	if _, err := w.runner().Exec(ctx, w.worktreePath, "fetch", "origin", w.config.TargetBranch); err != nil {
-		return fmt.Errorf("failed to fetch target branch: %w", err)
+	// 3. Fetch latest feature branch if working with remote
+	if useRemote {
+		if _, err := w.runner().Exec(ctx, w.worktreePath, "fetch", "origin", w.config.TargetBranch); err != nil {
+			return fmt.Errorf("failed to fetch target branch: %w", err)
+		}
 	}
 
-	// 3. Rebase unit branch onto feature branch with conflict resolution
-	targetRef := fmt.Sprintf("origin/%s", w.config.TargetBranch)
+	// 4. Rebase unit branch onto feature branch with conflict resolution
 	hasConflicts, err := git.Rebase(ctx, w.worktreePath, targetRef)
 	if err != nil {
 		return fmt.Errorf("rebase failed: %w", err)
@@ -551,6 +556,22 @@ func (w *Worker) mergeWithCleanup(ctx context.Context) error {
 	return nil
 }
 
+// getTargetRef determines the appropriate git ref to use for rebasing/diffing.
+// Returns the ref string and whether we're using remote tracking branch.
+// For local-only branches (no remote tracking), returns the local branch name.
+func (w *Worker) getTargetRef(ctx context.Context) (ref string, useRemote bool) {
+	remoteRef := fmt.Sprintf("origin/%s", w.config.TargetBranch)
+
+	// Check if remote tracking branch exists locally (we've fetched it before)
+	_, err := w.runner().Exec(ctx, w.worktreePath, "rev-parse", "--verify", remoteRef)
+	if err == nil {
+		// Remote tracking branch exists, use it
+		return remoteRef, true
+	}
+
+	// Remote tracking branch doesn't exist, use local branch directly
+	return w.config.TargetBranch, false
+}
 
 // updateUnitStatus updates the unit frontmatter status in the IMPLEMENTATION_PLAN.md
 func (w *Worker) updateUnitStatus(status discovery.UnitStatus) error {

@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	apiv1 "github.com/RevCBH/choo/pkg/api/v1"
 	"github.com/RevCBH/choo/internal/daemon/db"
+	"github.com/RevCBH/choo/internal/web"
 	"google.golang.org/grpc"
 )
 
@@ -21,6 +23,7 @@ type Daemon struct {
 	grpcServer *grpc.Server
 	listener   net.Listener
 	pidFile    *PIDFile
+	webServer  *web.Server
 
 	shutdownCh chan struct{}
 	wg         sync.WaitGroup
@@ -91,9 +94,12 @@ func (d *Daemon) Start(ctx context.Context) error {
 
 	// 4. Create and register gRPC server
 	d.grpcServer = grpc.NewServer()
-	// Note: GRPCServer implementation is handled by DAEMON-GRPC spec
-	// For now, we create a basic server without service registration
-	// The full gRPC service will be wired up in a later task
+	adapter := newJobManagerAdapter(d.jobManager, d.db)
+	grpcImpl := NewGRPCServer(d.db, adapter, "dev", d.Shutdown) // TODO: pass actual version
+	apiv1.RegisterDaemonServiceServer(d.grpcServer, grpcImpl)
+
+	// Wire up job completion callback to clean up gRPC tracking
+	d.jobManager.OnJobComplete = grpcImpl.UntrackJob
 
 	// 5. Start gRPC server in goroutine
 	d.wg.Add(1)
@@ -104,10 +110,31 @@ func (d *Daemon) Start(ctx context.Context) error {
 		}
 	}()
 
-	// 6. Log startup message
+	// 6. Start web server (using job manager's Store for shared state)
+	webCfg := web.Config{
+		Addr:       d.cfg.WebAddr,
+		SocketPath: d.cfg.WebSocketPath,
+	}
+	// Use job manager's Store so state is shared regardless of startup order
+	webSrv, err := web.NewWithStore(webCfg, d.jobManager.Store())
+	if err != nil {
+		log.Printf("Warning: failed to create web server: %v", err)
+	} else {
+		if err := webSrv.Start(); err != nil {
+			log.Printf("Warning: failed to start web server: %v", err)
+		} else {
+			d.webServer = webSrv
+			log.Printf("Web server listening on http://localhost%s", d.cfg.WebAddr)
+
+			// Wire up SSE hub for broadcasting events to web clients
+			d.jobManager.SetWebHub(webSrv.Hub())
+		}
+	}
+
+	// 7. Log startup message
 	log.Printf("Daemon started on %s (PID: %d)", d.cfg.SocketPath, os.Getpid())
 
-	// 7. Wait for shutdown signal
+	// 8. Wait for shutdown signal
 	select {
 	case <-ctx.Done():
 		log.Println("Received context cancellation")
@@ -133,32 +160,25 @@ func (d *Daemon) Shutdown() {
 }
 
 // gracefulShutdown performs ordered shutdown of daemon components.
+// The order is critical for prompt shutdown:
+// 1. Cancel all jobs FIRST (proactive interruption)
+// 2. Wait briefly for jobs to start cleanup
+// 3. Stop gRPC server (streams complete quickly since jobs are cancelled)
+// 4. Stop web server
+// 5. Final cleanup
 func (d *Daemon) gracefulShutdown(ctx context.Context) error {
 	log.Println("Starting graceful shutdown...")
 
-	// 1. Stop accepting new gRPC connections
-	if d.grpcServer != nil {
-		stopped := make(chan struct{})
-		go func() {
-			d.grpcServer.GracefulStop()
-			close(stopped)
-		}()
-
-		// Wait for graceful stop or timeout
-		select {
-		case <-stopped:
-			log.Println("gRPC server stopped gracefully")
-		case <-time.After(5 * time.Second):
-			log.Println("gRPC server graceful stop timed out, forcing stop")
-			d.grpcServer.Stop()
-		}
+	// 1. IMMEDIATELY cancel all running jobs (proactive interruption)
+	// This must happen BEFORE stopping gRPC so that WatchJob streams can complete
+	activeJobs := d.jobManager.ActiveCount()
+	if activeJobs > 0 {
+		log.Printf("Cancelling %d running job(s)...", activeJobs)
+		d.jobManager.StopAll()
 	}
 
-	// 2. Signal all jobs to stop at safe points
-	log.Println("Stopping all running jobs...")
-	d.jobManager.StopAll()
-
-	// 3. Wait for jobs with timeout (30s)
+	// 2. Wait for jobs to finish with a short timeout (10 seconds)
+	// Jobs should respond to cancellation quickly
 	jobsDone := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(100 * time.Millisecond)
@@ -179,11 +199,42 @@ func (d *Daemon) gracefulShutdown(ctx context.Context) error {
 
 	select {
 	case <-jobsDone:
-		log.Println("All jobs stopped gracefully")
+		log.Println("All jobs stopped")
+	case <-time.After(10 * time.Second):
+		remaining := d.jobManager.ActiveCount()
+		if remaining > 0 {
+			log.Printf("Job shutdown timeout, %d job(s) still running - continuing shutdown", remaining)
+		}
 	case <-ctx.Done():
-		// 4. Force kill jobs if timeout exceeded
-		log.Printf("Shutdown timeout exceeded, %d jobs still running", d.jobManager.ActiveCount())
-		// Jobs are already cancelled via StopAll, so we just continue
+		log.Printf("Shutdown context cancelled, %d job(s) may not have stopped cleanly", d.jobManager.ActiveCount())
+	}
+
+	// 3. Stop gRPC server (should be quick now that jobs are cancelled)
+	if d.grpcServer != nil {
+		stopped := make(chan struct{})
+		go func() {
+			d.grpcServer.GracefulStop()
+			close(stopped)
+		}()
+
+		// Wait for graceful stop or timeout
+		select {
+		case <-stopped:
+			log.Println("gRPC server stopped")
+		case <-time.After(3 * time.Second):
+			log.Println("gRPC server graceful stop timed out, forcing stop")
+			d.grpcServer.Stop()
+		}
+	}
+
+	// 4. Stop web server
+	if d.webServer != nil {
+		log.Println("Stopping web server...")
+		webCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := d.webServer.Stop(webCtx); err != nil {
+			log.Printf("Error stopping web server: %v", err)
+		}
 	}
 
 	// Wait for gRPC goroutine to finish

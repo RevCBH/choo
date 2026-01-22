@@ -133,6 +133,44 @@ func (db *DB) GetRunByBranch(featureBranch, repoPath string) (*Run, error) {
 	return run, nil
 }
 
+// GetActiveRunByBranch retrieves a running job by feature branch and repo path.
+// Returns nil, nil if no matching running job exists.
+// This is used for CLI attach: if a job is already running, attach to it instead of starting new.
+func (db *DB) GetActiveRunByBranch(featureBranch, repoPath string) (*Run, error) {
+	query := `
+		SELECT id, feature_branch, repo_path, target_branch, tasks_dir,
+		       parallelism, status, daemon_version, started_at, completed_at,
+		       error, config_json
+		FROM runs
+		WHERE feature_branch = ? AND repo_path = ? AND status = ?
+	`
+
+	run := &Run{}
+	err := db.conn.QueryRow(query, featureBranch, repoPath, RunStatusRunning).Scan(
+		&run.ID,
+		&run.FeatureBranch,
+		&run.RepoPath,
+		&run.TargetBranch,
+		&run.TasksDir,
+		&run.Parallelism,
+		&run.Status,
+		&run.DaemonVersion,
+		&run.StartedAt,
+		&run.CompletedAt,
+		&run.Error,
+		&run.ConfigJSON,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active run by branch: %w", err)
+	}
+
+	return run, nil
+}
+
 // UpdateRunStatus updates the status of a run.
 // Sets started_at when transitioning to Running.
 // Sets completed_at when transitioning to Completed/Failed/Cancelled.
@@ -280,4 +318,28 @@ func (db *DB) DeleteRun(id string) error {
 	}
 
 	return nil
+}
+
+// DeleteNonActiveRunByBranch deletes any completed/failed/cancelled run for the given branch and repo.
+// This is called before creating a new run to avoid UNIQUE constraint violations.
+// Only deletes runs that are NOT in "running" or "pending" status.
+// Returns the number of deleted runs.
+func (db *DB) DeleteNonActiveRunByBranch(featureBranch, repoPath string) (int, error) {
+	query := `
+		DELETE FROM runs
+		WHERE feature_branch = ? AND repo_path = ?
+		AND status NOT IN (?, ?)
+	`
+
+	result, err := db.conn.Exec(query, featureBranch, repoPath, RunStatusRunning, RunStatusPending)
+	if err != nil {
+		return 0, fmt.Errorf("failed to delete non-active run: %w", err)
+	}
+
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return int(deleted), nil
 }

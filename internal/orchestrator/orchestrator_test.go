@@ -1023,6 +1023,216 @@ func TestResolveProviderForUnit_CommandOverride(t *testing.T) {
 	}
 }
 
+func TestBuildGraphData_TransitiveReduction(t *testing.T) {
+	tests := []struct {
+		name          string
+		units         []*discovery.Unit
+		expectedEdges map[string][]string // from -> [to, to, ...]
+	}{
+		{
+			name: "no transitive edges - simple chain",
+			units: []*discovery.Unit{
+				{ID: "A", DependsOn: []string{}},
+				{ID: "B", DependsOn: []string{"A"}},
+				{ID: "C", DependsOn: []string{"B"}},
+			},
+			// C depends on B, B depends on A
+			// No transitive edges to remove
+			expectedEdges: map[string][]string{
+				"B": {"A"},
+				"C": {"B"},
+			},
+		},
+		{
+			name: "transitive edge removed - diamond pattern",
+			units: []*discovery.Unit{
+				{ID: "A", DependsOn: []string{}},
+				{ID: "B", DependsOn: []string{"A"}},
+				{ID: "C", DependsOn: []string{"A", "B"}}, // A is transitive via B
+			},
+			// C -> A is transitive because C -> B -> A exists
+			// Should only have C -> B edge
+			expectedEdges: map[string][]string{
+				"B": {"A"},
+				"C": {"B"},
+			},
+		},
+		{
+			name: "multiple transitive edges removed",
+			units: []*discovery.Unit{
+				{ID: "A", DependsOn: []string{}},
+				{ID: "B", DependsOn: []string{"A"}},
+				{ID: "C", DependsOn: []string{"B"}},
+				{ID: "D", DependsOn: []string{"A", "B", "C"}}, // A and B are transitive via C
+			},
+			// D -> A transitive: D -> C -> B -> A
+			// D -> B transitive: D -> C -> B
+			// Should only have D -> C
+			expectedEdges: map[string][]string{
+				"B": {"A"},
+				"C": {"B"},
+				"D": {"C"},
+			},
+		},
+		{
+			name: "parallel branches - no transitive edges",
+			units: []*discovery.Unit{
+				{ID: "A", DependsOn: []string{}},
+				{ID: "B", DependsOn: []string{}},
+				{ID: "C", DependsOn: []string{"A", "B"}},
+			},
+			// C depends on both A and B, which are independent
+			// No transitive edges
+			expectedEdges: map[string][]string{
+				"C": {"A", "B"},
+			},
+		},
+		{
+			name: "complex graph with some transitive",
+			units: []*discovery.Unit{
+				{ID: "A", DependsOn: []string{}},
+				{ID: "B", DependsOn: []string{}},
+				{ID: "C", DependsOn: []string{"A"}},
+				{ID: "D", DependsOn: []string{"B"}},
+				{ID: "E", DependsOn: []string{"A", "B", "C", "D"}}, // A transitive via C, B transitive via D
+			},
+			expectedEdges: map[string][]string{
+				"C": {"A"},
+				"D": {"B"},
+				"E": {"C", "D"},
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Build levels for the units
+			levels := computeLevels(tc.units)
+
+			graphData := buildGraphData(tc.units, levels)
+			edges := graphData["edges"].([]map[string]any)
+
+			// Convert edges to map for easier comparison
+			actualEdges := make(map[string][]string)
+			for _, edge := range edges {
+				from := edge["from"].(string)
+				to := edge["to"].(string)
+				actualEdges[from] = append(actualEdges[from], to)
+			}
+
+			// Compare
+			for from, expectedTos := range tc.expectedEdges {
+				actualTos, ok := actualEdges[from]
+				if !ok {
+					t.Errorf("expected edges from %s, but none found", from)
+					continue
+				}
+
+				if len(actualTos) != len(expectedTos) {
+					t.Errorf("from %s: expected %d edges %v, got %d edges %v",
+						from, len(expectedTos), expectedTos, len(actualTos), actualTos)
+					continue
+				}
+
+				// Check each expected target is present
+				for _, expectedTo := range expectedTos {
+					found := false
+					for _, actualTo := range actualTos {
+						if actualTo == expectedTo {
+							found = true
+							break
+						}
+					}
+					if !found {
+						t.Errorf("from %s: expected edge to %s not found in %v", from, expectedTo, actualTos)
+					}
+				}
+			}
+
+			// Check no extra edges
+			for from, actualTos := range actualEdges {
+				expectedTos, ok := tc.expectedEdges[from]
+				if !ok {
+					t.Errorf("unexpected edges from %s: %v", from, actualTos)
+				} else if len(actualTos) != len(expectedTos) {
+					t.Errorf("from %s: expected %d edges, got %d", from, len(expectedTos), len(actualTos))
+				}
+			}
+		})
+	}
+}
+
+func TestIsReachable(t *testing.T) {
+	depMap := map[string][]string{
+		"A": {},
+		"B": {"A"},
+		"C": {"B"},
+		"D": {"A", "C"},
+	}
+
+	tests := []struct {
+		start    string
+		target   string
+		expected bool
+	}{
+		{"B", "A", true},   // Direct dependency
+		{"C", "A", true},   // Transitive: C -> B -> A
+		{"D", "A", true},   // Direct or transitive
+		{"D", "B", true},   // Transitive: D -> C -> B
+		{"A", "B", false},  // Wrong direction
+		{"A", "C", false},  // Wrong direction
+		{"B", "C", false},  // Wrong direction
+		{"A", "A", false},  // Same node (not reachable by traversal)
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.start+"->"+tc.target, func(t *testing.T) {
+			result := isReachable(tc.start, tc.target, depMap)
+			if result != tc.expected {
+				t.Errorf("isReachable(%s, %s) = %v, want %v",
+					tc.start, tc.target, result, tc.expected)
+			}
+		})
+	}
+}
+
+// Helper to compute levels from units (mirrors scheduler logic)
+func computeLevels(units []*discovery.Unit) [][]string {
+	// Build dependency map
+	deps := make(map[string][]string)
+	for _, u := range units {
+		deps[u.ID] = u.DependsOn
+	}
+
+	visited := make(map[string]bool)
+	var levels [][]string
+
+	for len(visited) < len(units) {
+		var level []string
+		for _, u := range units {
+			if visited[u.ID] {
+				continue
+			}
+			allDepsVisited := true
+			for _, dep := range deps[u.ID] {
+				if !visited[dep] {
+					allDepsVisited = false
+					break
+				}
+			}
+			if allDepsVisited {
+				level = append(level, u.ID)
+			}
+		}
+		for _, id := range level {
+			visited[id] = true
+		}
+		levels = append(levels, level)
+	}
+
+	return levels
+}
+
 func TestResolveReviewer_Disabled(t *testing.T) {
 	orch := &Orchestrator{
 		cfg: Config{
