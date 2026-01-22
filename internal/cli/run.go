@@ -37,6 +37,7 @@ type RunOptions struct {
 	NoTUI        bool   // Disable TUI even when stdout is a TTY
 	Feature      string // PRD ID to work on in feature mode
 	UseDaemon    bool   // Use daemon mode
+	Force        bool   // Force run even with uncommitted changes
 
 	// Provider is the default provider for task execution
 	// Units without frontmatter override use this provider
@@ -152,11 +153,33 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 			// Create context
 			ctx := context.Background()
 
-			// If --target wasn't explicitly set, use current branch
+			// Get working directory
 			wd, err := os.Getwd()
 			if err != nil {
 				return fmt.Errorf("failed to get working directory: %w", err)
 			}
+
+			// Check for uncommitted changes (skip for dry-run)
+			if !opts.DryRun && !opts.Force {
+				status, err := git.GetWorkingDirStatus(ctx, wd, "specs/")
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Warning: could not check for uncommitted changes: %v\n", err)
+				} else if status.HasChanges {
+					fmt.Fprintf(cmd.ErrOrStderr(), "Error: working directory has uncommitted changes\n")
+					if status.PathChanges["specs/"] {
+						fmt.Fprintf(cmd.ErrOrStderr(), "  Changes in specs/ must be committed before running,\n")
+						fmt.Fprintf(cmd.ErrOrStderr(), "  as they need to propagate to worktrees.\n")
+					}
+					fmt.Fprintf(cmd.ErrOrStderr(), "\nChanged files:\n")
+					for _, f := range status.ChangedFiles {
+						fmt.Fprintf(cmd.ErrOrStderr(), "  %s\n", f)
+					}
+					fmt.Fprintf(cmd.ErrOrStderr(), "\nCommit your changes or use --force to bypass this check.\n")
+					return fmt.Errorf("uncommitted changes in working directory")
+				}
+			}
+
+			// If --target wasn't explicitly set, use current branch
 			if !cmd.Flags().Changed("target") {
 				currentBranch, err := git.GetCurrentBranch(ctx, wd)
 				if err != nil {
@@ -208,6 +231,9 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 	// Provider flags
 	cmd.Flags().StringVar(&opts.Provider, "provider", "", "Default provider for task execution (claude, codex). Units without frontmatter override use this.")
 	cmd.Flags().StringVar(&opts.ForceTaskProvider, "force-task-provider", "", "Force provider for ALL task execution, ignoring per-unit frontmatter (claude, codex)")
+
+	// Safety flags
+	cmd.Flags().BoolVar(&opts.Force, "force", false, "Force run even with uncommitted changes in working directory")
 
 	return cmd
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,20 +28,25 @@ type Worker struct {
 	config       WorkerConfig
 	events       *events.Bus
 	git          *git.WorktreeManager
-	gitRunner    git.Runner
+
+	// Phase 1: GitOps added alongside gitRunner
+	// Phase 3: gitRunner removed, only gitOps remains
+	gitOps    git.GitOps // Safe git operations interface
+	gitRunner git.Runner // Deprecated: raw runner for unmigrated code
+
 	github       *github.PRClient
 	provider     provider.Provider
 	escalator    escalate.Escalator
 	mergeMu      *sync.Mutex // Shared mutex for serializing merge operations
+
+	// Keep raw path for provider invocation (providers need filesystem path)
 	worktreePath string
 	branch       string
 	currentTask  *discovery.Task
 
-	reviewer     provider.Reviewer      // For code review (may be nil if disabled)
+	reviewer     provider.Reviewer        // For code review (may be nil if disabled)
 	reviewConfig *config.CodeReviewConfig // Review configuration
-
-	// prNumber is the PR number after creation
-	//nolint:unused // WIP: used by forcePushAndMerge when conflict resolution is fully integrated
+	//nolint:unused // WIP: used by merge flow when PR creation is wired up.
 	prNumber int
 
 	// invokeClaudeWithOutput is the function that invokes Claude and captures output
@@ -60,8 +66,9 @@ type WorkerConfig struct {
 	BackpressureTimeout time.Duration
 	BaselineTimeout     time.Duration
 	NoPR                bool
-	SuppressOutput      bool   // When true, don't tee Claude output to stdout (TUI mode)
-	ClaudeCommand       string // Claude CLI command for non-task operations (conflict resolution, etc.)
+	SuppressOutput      bool            // When true, don't tee Claude output to stdout (TUI mode)
+	ClaudeCommand       string          // Claude CLI command for non-task operations (conflict resolution, etc.)
+	AuditLogger         git.AuditLogger // Optional: log all git operations
 }
 
 // BaselineCheck represents a single baseline validation command
@@ -73,14 +80,19 @@ type BaselineCheck struct {
 
 // WorkerDeps bundles worker dependencies for injection
 type WorkerDeps struct {
-	Events       *events.Bus
-	Git          *git.WorktreeManager
-	GitRunner    git.Runner
+	Events *events.Bus
+	Git    *git.WorktreeManager
+
+	// Phase 1: Both GitOps and GitRunner supported
+	// Phase 3: Only GitOps required
+	GitOps    git.GitOps // Preferred: safe git interface
+	GitRunner git.Runner // Deprecated: raw runner
+
 	GitHub       *github.PRClient
 	Provider     provider.Provider
 	Escalator    escalate.Escalator
-	MergeMu      *sync.Mutex // Shared mutex for serializing merge operations
-	Reviewer     provider.Reviewer      // Optional: for code review
+	MergeMu      *sync.Mutex              // Shared mutex for serializing merge operations
+	Reviewer     provider.Reviewer        // Optional: for code review
 	ReviewConfig *config.CodeReviewConfig // Optional: review settings
 }
 
@@ -89,17 +101,44 @@ type WorkerDeps struct {
 // Deprecated: Use Provider field in WorkerDeps instead
 type ClaudeClient any
 
-// NewWorker creates a worker for executing a unit
-func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker {
+// NewWorker creates a worker for executing a unit.
+// Uses convenience constructors for appropriate safety defaults.
+func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) (*Worker, error) {
+	// Use provided GitOps or create from WorktreeBase
+	gitOps := deps.GitOps
+	if gitOps == nil && cfg.WorktreeBase != "" && unit != nil {
+		worktreePath := filepath.Join(cfg.WorktreeBase, unit.ID)
+
+		// Use convenience constructor with safety options
+		// NewWorktreeGitOps sets AllowDestructive=true because:
+		// - Worktrees are isolated from main repository
+		// - cleanupWorktree() needs Reset, Clean, CheckoutFiles
+		// - Worktrees are disposable and meant to be reset
+		var err error
+		gitOps, err = git.NewWorktreeGitOps(worktreePath, cfg.WorktreeBase)
+		if err != nil {
+			// During Phase 1-2, path may not exist yet (created later)
+			// Only fail on validation errors, not path-not-found
+			if !errors.Is(err, git.ErrPathNotFound) && !errors.Is(err, git.ErrNotGitRepo) {
+				return nil, fmt.Errorf("invalid worktree path %q: %w", worktreePath, err)
+			}
+			// Path doesn't exist yet - that's OK, gitOps will be nil
+			gitOps = nil
+		}
+	}
+
+	// Fall back to raw runner for backward compatibility
 	gitRunner := deps.GitRunner
 	if gitRunner == nil {
 		gitRunner = git.DefaultRunner()
 	}
+
 	return &Worker{
 		unit:         unit,
 		config:       cfg,
 		events:       deps.Events,
 		git:          deps.Git,
+		gitOps:       gitOps,
 		gitRunner:    gitRunner,
 		github:       deps.GitHub,
 		provider:     deps.Provider,
@@ -107,7 +146,27 @@ func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker 
 		mergeMu:      deps.MergeMu,
 		reviewer:     deps.Reviewer,
 		reviewConfig: deps.ReviewConfig,
+	}, nil
+}
+
+// InitGitOps initializes GitOps after worktree is created.
+// Call this after setupWorktree() to enable safe git operations.
+func (w *Worker) InitGitOps() error {
+	if w.gitOps != nil {
+		return nil // Already initialized
 	}
+
+	if w.worktreePath == "" {
+		return fmt.Errorf("worktree path not set")
+	}
+
+	var err error
+	w.gitOps, err = git.NewWorktreeGitOps(w.worktreePath, w.config.WorktreeBase)
+	if err != nil {
+		return fmt.Errorf("initializing gitops: %w", err)
+	}
+
+	return nil
 }
 
 // Run executes the unit through all phases: setup, task loop, baseline, PR

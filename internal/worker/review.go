@@ -2,12 +2,14 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/provider"
 )
 
@@ -163,23 +165,57 @@ func (w *Worker) invokeProviderForFix(ctx context.Context, fixPrompt string) err
 // commitReviewFixes commits any changes made during the fix attempt.
 // Returns (true, nil) if changes were committed, (false, nil) if no changes.
 func (w *Worker) commitReviewFixes(ctx context.Context) (bool, error) {
-	// 1. Check for staged/unstaged changes using git status
-	hasChanges, err := w.hasUncommittedChanges(ctx)
+	// Phase 1-2: Check if GitOps is available
+	if w.gitOps == nil {
+		return w.commitReviewFixesLegacy(ctx)
+	}
+
+	// 1. Check for staged/unstaged changes via Status
+	status, err := w.gitOps.Status(ctx)
 	if err != nil {
 		return false, fmt.Errorf("checking for changes: %w", err)
 	}
-	if !hasChanges {
-		return false, nil // No changes to commit
+	if status.Clean {
+		return false, nil
 	}
 
 	// 2. Stage all changes
-	if _, err := w.runner().Exec(ctx, w.worktreePath, "add", "-A"); err != nil {
+	if err := w.gitOps.AddAll(ctx); err != nil {
 		return false, fmt.Errorf("staging changes: %w", err)
 	}
 
-	// 3. Commit with standardized message (--no-verify to skip hooks)
+	// 3. Commit with standardized message
 	commitMsg := "fix: address code review feedback"
-	if _, err := w.runner().Exec(ctx, w.worktreePath, "commit", "-m", commitMsg, "--no-verify"); err != nil {
+	if err := w.gitOps.Commit(ctx, commitMsg, git.CommitOpts{NoVerify: true}); err != nil {
+		// Handle branch guard errors
+		if errors.Is(err, git.ErrProtectedBranch) {
+			return false, fmt.Errorf("cannot commit to protected branch: %w", err)
+		}
+		return false, fmt.Errorf("committing changes: %w", err)
+	}
+
+	return true, nil
+}
+
+// commitReviewFixesLegacy is the old implementation using raw Runner.
+// Retained for Phase 1-2 backward compatibility.
+func (w *Worker) commitReviewFixesLegacy(ctx context.Context) (bool, error) {
+	if w.worktreePath == "" {
+		return false, nil
+	}
+
+	// Check for changes
+	out, _ := w.runner().Exec(ctx, w.worktreePath, "status", "--porcelain")
+	if strings.TrimSpace(out) == "" {
+		return false, nil
+	}
+
+	// Stage and commit
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "add", "-A"); err != nil {
+		return false, fmt.Errorf("staging changes: %w", err)
+	}
+	_, err := w.runner().Exec(ctx, w.worktreePath, "commit", "-m", "fix: address code review feedback", "--no-verify")
+	if err != nil {
 		return false, fmt.Errorf("committing changes: %w", err)
 	}
 
@@ -188,40 +224,89 @@ func (w *Worker) commitReviewFixes(ctx context.Context) (bool, error) {
 
 // hasUncommittedChanges returns true if there are staged or unstaged changes.
 func (w *Worker) hasUncommittedChanges(ctx context.Context) (bool, error) {
-	// git status --porcelain returns empty string if clean
-	output, err := w.runner().Exec(ctx, w.worktreePath, "status", "--porcelain")
+	// Phase 1-2: Check if GitOps is available
+	if w.gitOps == nil {
+		return w.hasUncommittedChangesLegacy(ctx)
+	}
+
+	status, err := w.gitOps.Status(ctx)
 	if err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(output) != "", nil
+	return !status.Clean, nil
+}
+
+// hasUncommittedChangesLegacy is the old implementation using raw Runner.
+func (w *Worker) hasUncommittedChangesLegacy(ctx context.Context) (bool, error) {
+	if w.worktreePath == "" {
+		return false, nil
+	}
+
+	out, err := w.runner().Exec(ctx, w.worktreePath, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
 }
 
 // cleanupWorktree resets any uncommitted changes left by failed fix attempts.
-// This ensures the worktree is clean before proceeding to merge.
-// Errors are logged but not returned - cleanup is best-effort.
+// Uses GitOps for safe operations with path validation.
 func (w *Worker) cleanupWorktree(ctx context.Context) {
-	// Guard: skip if no worktree path configured (prevents accidental cleanup of cwd)
+	// Phase 1-2: Check if GitOps is available
+	if w.gitOps == nil {
+		// Fall back to old behavior during migration
+		w.cleanupWorktreeLegacy(ctx)
+		return
+	}
+
+	// 1. Reset staged changes
+	if err := w.gitOps.Reset(ctx); err != nil {
+		// Log but continue - cleanup is best-effort
+		if w.reviewConfig != nil && w.reviewConfig.Verbose {
+			fmt.Fprintf(os.Stderr, "Warning: git reset failed: %v\n", err)
+		}
+	}
+
+	// 2. Clean untracked files
+	if err := w.gitOps.Clean(ctx, git.CleanOpts{Force: true, Directories: true}); err != nil {
+		// Handle specific safety errors
+		if errors.Is(err, git.ErrDestructiveNotAllowed) {
+			// This shouldn't happen with NewWorktreeGitOps, but log it
+			fmt.Fprintf(os.Stderr, "BUG: destructive operations not allowed on worktree\n")
+		}
+		if w.reviewConfig != nil && w.reviewConfig.Verbose {
+			fmt.Fprintf(os.Stderr, "Warning: git clean failed: %v\n", err)
+		}
+	}
+
+	// 3. Restore modified files
+	if err := w.gitOps.CheckoutFiles(ctx, "."); err != nil {
+		if errors.Is(err, git.ErrDestructiveNotAllowed) {
+			fmt.Fprintf(os.Stderr, "BUG: destructive operations not allowed on worktree\n")
+		}
+		if w.reviewConfig != nil && w.reviewConfig.Verbose {
+			fmt.Fprintf(os.Stderr, "Warning: git checkout failed: %v\n", err)
+		}
+	}
+}
+
+// cleanupWorktreeLegacy is the old implementation using raw Runner.
+// Retained for Phase 1-2 backward compatibility.
+func (w *Worker) cleanupWorktreeLegacy(ctx context.Context) {
 	if w.worktreePath == "" {
 		return
 	}
 
-	// 1. Reset staged changes (git reset)
 	if _, err := w.runner().Exec(ctx, w.worktreePath, "reset", "HEAD"); err != nil {
 		if w.reviewConfig != nil && w.reviewConfig.Verbose {
 			fmt.Fprintf(os.Stderr, "Warning: git reset failed: %v\n", err)
 		}
-		// Continue with cleanup
 	}
-
-	// 2. Clean untracked files (git clean -fd)
 	if _, err := w.runner().Exec(ctx, w.worktreePath, "clean", "-fd"); err != nil {
 		if w.reviewConfig != nil && w.reviewConfig.Verbose {
 			fmt.Fprintf(os.Stderr, "Warning: git clean failed: %v\n", err)
 		}
-		// Continue with cleanup
 	}
-
-	// 3. Restore modified files (git checkout .)
 	if _, err := w.runner().Exec(ctx, w.worktreePath, "checkout", "."); err != nil {
 		if w.reviewConfig != nil && w.reviewConfig.Verbose {
 			fmt.Fprintf(os.Stderr, "Warning: git checkout failed: %v\n", err)

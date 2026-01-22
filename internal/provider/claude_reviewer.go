@@ -13,6 +13,7 @@ import (
 // and parses the structured response into ReviewIssue types.
 type ClaudeReviewer struct {
 	command string // Path to claude CLI executable
+	diffFn  func(context.Context, string, string) (string, error)
 }
 
 // NewClaudeReviewer creates a ClaudeReviewer with optional command override.
@@ -21,7 +22,10 @@ func NewClaudeReviewer(command string) *ClaudeReviewer {
 	if command == "" {
 		command = "claude"
 	}
-	return &ClaudeReviewer{command: command}
+	return &ClaudeReviewer{
+		command: command,
+		diffFn:  defaultGetDiff,
+	}
 }
 
 // Name returns ProviderClaude to identify this reviewer.
@@ -33,7 +37,7 @@ func (r *ClaudeReviewer) Name() ProviderType {
 // and parsing the structured JSON response.
 func (r *ClaudeReviewer) Review(ctx context.Context, workdir, baseBranch string) (*ReviewResult, error) {
 	// Get diff for review
-	diff, err := r.getDiff(ctx, workdir, baseBranch)
+	diff, err := r.diffFn(ctx, workdir, baseBranch)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get diff: %w", err)
 	}
@@ -67,8 +71,8 @@ func (r *ClaudeReviewer) Review(ctx context.Context, workdir, baseBranch string)
 	return r.parseOutput(string(output))
 }
 
-// getDiff retrieves the git diff between baseBranch and HEAD.
-func (r *ClaudeReviewer) getDiff(ctx context.Context, workdir, baseBranch string) (string, error) {
+// defaultGetDiff retrieves the git diff between baseBranch and HEAD.
+func defaultGetDiff(ctx context.Context, workdir, baseBranch string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", "diff", baseBranch+"...HEAD")
 	cmd.Dir = workdir
 	output, err := cmd.Output()

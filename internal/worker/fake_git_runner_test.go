@@ -10,6 +10,7 @@ import (
 type fakeGitRunner struct {
 	mu        sync.Mutex
 	responses map[string][]fakeGitResponse
+	calls     []string
 }
 
 type fakeGitResponse struct {
@@ -32,6 +33,7 @@ func (f *fakeGitRunner) stub(args string, out string, err error) {
 func (f *fakeGitRunner) Exec(ctx context.Context, dir string, args ...string) (string, error) {
 	key := strings.Join(args, " ")
 	f.mu.Lock()
+	f.calls = append(f.calls, key)
 	queue := f.responses[key]
 	if len(queue) == 0 {
 		f.mu.Unlock()
@@ -45,4 +47,17 @@ func (f *fakeGitRunner) Exec(ctx context.Context, dir string, args ...string) (s
 
 func (f *fakeGitRunner) ExecWithStdin(ctx context.Context, dir string, stdin string, args ...string) (string, error) {
 	return f.Exec(ctx, dir, args...)
+}
+
+func (f *fakeGitRunner) callsFor(args ...string) int {
+	key := strings.Join(args, " ")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	count := 0
+	for _, call := range f.calls {
+		if call == key {
+			count++
+		}
+	}
+	return count
 }

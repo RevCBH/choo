@@ -3,10 +3,11 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/RevCBH/choo/internal/config"
@@ -187,18 +188,18 @@ func TestReviewFixLoop_Success(t *testing.T) {
 	collected := collectEvents(eventBus)
 
 	prov := &mockProvider{} // Succeeds
-	worktreePath := setupTestRepo(t)
-
-	// Create a file so commitReviewFixes has something to commit
-	testFile := filepath.Join(worktreePath, "test.go")
-	os.WriteFile(testFile, []byte("package test"), 0644)
+	worktreePath := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("status --porcelain", "M test.go\n", nil)
+	runner.stub("add -A", "", nil)
+	runner.stub("commit -m fix: address code review feedback --no-verify", "", nil)
 
 	w := &Worker{
 		unit:         &discovery.Unit{ID: "test-unit"},
 		provider:     prov,
 		events:       eventBus,
 		worktreePath: worktreePath,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 		reviewConfig: &config.CodeReviewConfig{
 			Enabled:          true,
 			MaxFixIterations: 1,
@@ -236,16 +237,17 @@ func TestReviewFixLoop_Success(t *testing.T) {
 func TestReviewFixLoop_ProviderError(t *testing.T) {
 	prov := &mockProvider{invokeError: errors.New("provider failed")}
 	worktreePath := t.TempDir()
-
-	// Initialize git repo for cleanup operations
-	exec.Command("git", "init", worktreePath).Run()
+	runner := newFakeGitRunner()
+	runner.stub("reset HEAD", "", nil)
+	runner.stub("clean -fd", "", nil)
+	runner.stub("checkout .", "", nil)
 
 	w := &Worker{
 		unit:         &discovery.Unit{ID: "test-unit"},
 		provider:     prov,
 		events:       events.NewBus(100),
 		worktreePath: worktreePath,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 		reviewConfig: &config.CodeReviewConfig{
 			Enabled:          true,
 			MaxFixIterations: 2,
@@ -267,24 +269,18 @@ func TestReviewFixLoop_ProviderError(t *testing.T) {
 func TestReviewFixLoop_CommitError(t *testing.T) {
 	prov := &mockProvider{} // Succeeds
 	worktreePath := t.TempDir()
-
-	// Initialize git repo
-	exec.Command("git", "init", worktreePath).Run()
-	exec.Command("git", "-C", worktreePath, "config", "user.email", "test@test.com").Run()
-	exec.Command("git", "-C", worktreePath, "config", "user.name", "Test").Run()
-
-	// Create initial commit so git works properly
-	testFile := filepath.Join(worktreePath, "initial.txt")
-	os.WriteFile(testFile, []byte("initial"), 0644)
-	exec.Command("git", "-C", worktreePath, "add", ".").Run()
-	exec.Command("git", "-C", worktreePath, "commit", "-m", "initial").Run()
+	runner := newFakeGitRunner()
+	runner.stub("status --porcelain", "", nil)
+	runner.stub("reset HEAD", "", nil)
+	runner.stub("clean -fd", "", nil)
+	runner.stub("checkout .", "", nil)
 
 	w := &Worker{
 		unit:         &discovery.Unit{ID: "test-unit"},
 		provider:     prov,
 		events:       events.NewBus(100),
 		worktreePath: worktreePath,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 		reviewConfig: &config.CodeReviewConfig{
 			Enabled:          true,
 			MaxFixIterations: 1,
@@ -306,16 +302,18 @@ func TestReviewFixLoop_CommitError(t *testing.T) {
 func TestReviewFixLoop_NoChanges(t *testing.T) {
 	prov := &mockProvider{} // Succeeds but makes no changes
 	worktreePath := t.TempDir()
-
-	// Initialize git repo
-	exec.Command("git", "init", worktreePath).Run()
+	runner := newFakeGitRunner()
+	runner.stub("status --porcelain", "", nil)
+	runner.stub("reset HEAD", "", nil)
+	runner.stub("clean -fd", "", nil)
+	runner.stub("checkout .", "", nil)
 
 	w := &Worker{
 		unit:         &discovery.Unit{ID: "test-unit"},
 		provider:     prov,
 		events:       events.NewBus(100),
 		worktreePath: worktreePath,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 		reviewConfig: &config.CodeReviewConfig{
 			Enabled:          true,
 			MaxFixIterations: 1,
@@ -337,16 +335,18 @@ func TestReviewFixLoop_NoChanges(t *testing.T) {
 func TestReviewFixLoop_MaxIterations(t *testing.T) {
 	prov := &mockProvider{} // Succeeds but makes no changes
 	worktreePath := t.TempDir()
-
-	// Initialize git repo
-	exec.Command("git", "init", worktreePath).Run()
+	runner := newFakeGitRunner()
+	runner.stub("status --porcelain", "", nil)
+	runner.stub("reset HEAD", "", nil)
+	runner.stub("clean -fd", "", nil)
+	runner.stub("checkout .", "", nil)
 
 	w := &Worker{
 		unit:         &discovery.Unit{ID: "test-unit"},
 		provider:     prov,
 		events:       events.NewBus(100),
 		worktreePath: worktreePath,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 		reviewConfig: &config.CodeReviewConfig{
 			Enabled:          true,
 			MaxFixIterations: 3,
@@ -376,22 +376,17 @@ func TestReviewFixLoop_CleanupOnExit(t *testing.T) {
 		invokeError: errors.New("provider failed after making changes"),
 	}
 	worktreePath := t.TempDir()
-
-	// Initialize git repo with initial commit
-	exec.Command("git", "init", worktreePath).Run()
-	exec.Command("git", "-C", worktreePath, "config", "user.email", "test@test.com").Run()
-	exec.Command("git", "-C", worktreePath, "config", "user.name", "Test").Run()
-	testFile := filepath.Join(worktreePath, "initial.txt")
-	os.WriteFile(testFile, []byte("initial"), 0644)
-	exec.Command("git", "-C", worktreePath, "add", ".").Run()
-	exec.Command("git", "-C", worktreePath, "commit", "-m", "initial").Run()
+	runner := newFakeGitRunner()
+	runner.stub("reset HEAD", "", nil)
+	runner.stub("clean -fd", "", nil)
+	runner.stub("checkout .", "", nil)
 
 	w := &Worker{
 		unit:         &discovery.Unit{ID: "test-unit"},
 		provider:     prov,
 		events:       events.NewBus(100),
 		worktreePath: worktreePath,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 		reviewConfig: &config.CodeReviewConfig{
 			Enabled:          true,
 			MaxFixIterations: 1,
@@ -406,10 +401,9 @@ func TestReviewFixLoop_CleanupOnExit(t *testing.T) {
 	ctx := context.Background()
 	w.runReviewFixLoop(ctx, issues)
 
-	// Verify the dirty file was cleaned up after provider failure
-	dirtyFile := filepath.Join(worktreePath, "dirty.txt")
-	_, err := os.Stat(dirtyFile)
-	assert.True(t, os.IsNotExist(err), "expected dirty file to be cleaned up")
+	assert.Equal(t, 2, runner.callsFor("reset", "HEAD"))
+	assert.Equal(t, 2, runner.callsFor("clean", "-fd"))
+	assert.Equal(t, 2, runner.callsFor("checkout", "."))
 }
 
 func TestInvokeProviderForFix_NilProvider(t *testing.T) {
@@ -522,16 +516,15 @@ func (m *mockProvider) Name() provider.ProviderType {
 }
 
 func TestCommitReviewFixes_WithChanges(t *testing.T) {
-	// Setup real git repo for this test
-	repoDir := setupTestRepo(t)
-
-	// Create a modified file
-	testFile := filepath.Join(repoDir, "test.txt")
-	require.NoError(t, os.WriteFile(testFile, []byte("modified"), 0644))
+	repoDir := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("status --porcelain", "M test.txt\n", nil)
+	runner.stub("add -A", "", nil)
+	runner.stub("commit -m fix: address code review feedback --no-verify", "", nil)
 
 	w := &Worker{
 		worktreePath: repoDir,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 	}
 
 	ctx := context.Background()
@@ -539,19 +532,16 @@ func TestCommitReviewFixes_WithChanges(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.True(t, committed)
-
-	// Verify commit was created
-	output, err := w.runner().Exec(ctx, repoDir, "log", "-1", "--pretty=format:%s")
-	require.NoError(t, err)
-	assert.Equal(t, "fix: address code review feedback", output)
 }
 
 func TestCommitReviewFixes_NoChanges(t *testing.T) {
-	repoDir := setupTestRepo(t) // Clean repo
+	repoDir := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("status --porcelain", "", nil)
 
 	w := &Worker{
 		worktreePath: repoDir,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 	}
 
 	ctx := context.Background()
@@ -601,15 +591,15 @@ func TestCommitReviewFixes_CommitError(t *testing.T) {
 }
 
 func TestCommitReviewFixes_CommitMessage(t *testing.T) {
-	repoDir := setupTestRepo(t)
-
-	// Create a modified file
-	testFile := filepath.Join(repoDir, "test.txt")
-	require.NoError(t, os.WriteFile(testFile, []byte("modified"), 0644))
+	repoDir := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("status --porcelain", "M test.txt\n", nil)
+	runner.stub("add -A", "", nil)
+	runner.stub("commit -m fix: address code review feedback --no-verify", "", nil)
 
 	w := &Worker{
 		worktreePath: repoDir,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 	}
 
 	ctx := context.Background()
@@ -617,19 +607,16 @@ func TestCommitReviewFixes_CommitMessage(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, committed)
-
-	// Verify standardized commit message
-	output, err := w.runner().Exec(ctx, repoDir, "log", "-1", "--pretty=format:%s")
-	require.NoError(t, err)
-	assert.Equal(t, "fix: address code review feedback", output)
 }
 
 func TestHasUncommittedChanges_Clean(t *testing.T) {
-	repoDir := setupTestRepo(t)
+	repoDir := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("status --porcelain", "", nil)
 
 	w := &Worker{
 		worktreePath: repoDir,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 	}
 
 	ctx := context.Background()
@@ -640,15 +627,13 @@ func TestHasUncommittedChanges_Clean(t *testing.T) {
 }
 
 func TestHasUncommittedChanges_Modified(t *testing.T) {
-	repoDir := setupTestRepo(t)
-
-	// Modify existing file
-	testFile := filepath.Join(repoDir, "README.md")
-	require.NoError(t, os.WriteFile(testFile, []byte("modified"), 0644))
+	repoDir := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("status --porcelain", " M README.md\n", nil)
 
 	w := &Worker{
 		worktreePath: repoDir,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 	}
 
 	ctx := context.Background()
@@ -659,15 +644,13 @@ func TestHasUncommittedChanges_Modified(t *testing.T) {
 }
 
 func TestHasUncommittedChanges_Untracked(t *testing.T) {
-	repoDir := setupTestRepo(t)
-
-	// Create an untracked file
-	untrackedFile := filepath.Join(repoDir, "untracked.txt")
-	require.NoError(t, os.WriteFile(untrackedFile, []byte("new file"), 0644))
+	repoDir := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("status --porcelain", "?? untracked.txt\n", nil)
 
 	w := &Worker{
 		worktreePath: repoDir,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 	}
 
 	ctx := context.Background()
@@ -678,16 +661,11 @@ func TestHasUncommittedChanges_Untracked(t *testing.T) {
 }
 
 func TestCleanupWorktree_ResetsStaged(t *testing.T) {
-	repoDir := setupTestRepo(t)
-
-	// Create and stage a file
-	testFile := filepath.Join(repoDir, "staged.txt")
-	require.NoError(t, os.WriteFile(testFile, []byte("staged"), 0644))
-
-	runner := git.DefaultRunner()
-	ctx := context.Background()
-	_, err := runner.Exec(ctx, repoDir, "add", "staged.txt")
-	require.NoError(t, err)
+	repoDir := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("reset HEAD", "", nil)
+	runner.stub("clean -fd", "", nil)
+	runner.stub("checkout .", "", nil)
 
 	w := &Worker{
 		worktreePath: repoDir,
@@ -696,77 +674,73 @@ func TestCleanupWorktree_ResetsStaged(t *testing.T) {
 	}
 
 	// Cleanup should reset staged changes
+	ctx := context.Background()
 	w.cleanupWorktree(ctx)
-
-	// Verify no staged changes
-	output, err := runner.Exec(ctx, repoDir, "diff", "--cached", "--name-only")
-	require.NoError(t, err)
-	assert.Empty(t, output)
+	assert.Equal(t, 1, runner.callsFor("reset", "HEAD"))
+	assert.Equal(t, 1, runner.callsFor("clean", "-fd"))
+	assert.Equal(t, 1, runner.callsFor("checkout", "."))
 }
 
 func TestCleanupWorktree_CleansUntracked(t *testing.T) {
-	repoDir := setupTestRepo(t)
-
-	// Create untracked file
-	untrackedFile := filepath.Join(repoDir, "untracked.txt")
-	require.NoError(t, os.WriteFile(untrackedFile, []byte("untracked"), 0644))
+	repoDir := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("reset HEAD", "", nil)
+	runner.stub("clean -fd", "", nil)
+	runner.stub("checkout .", "", nil)
 
 	w := &Worker{
 		worktreePath: repoDir,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 		reviewConfig: &config.CodeReviewConfig{Verbose: true},
 	}
 
 	ctx := context.Background()
 	w.cleanupWorktree(ctx)
 
-	// Verify untracked file was removed
-	_, err := os.Stat(untrackedFile)
-	assert.True(t, os.IsNotExist(err))
+	assert.Equal(t, 1, runner.callsFor("reset", "HEAD"))
+	assert.Equal(t, 1, runner.callsFor("clean", "-fd"))
+	assert.Equal(t, 1, runner.callsFor("checkout", "."))
 }
 
 func TestCleanupWorktree_RestoresModified(t *testing.T) {
-	repoDir := setupTestRepo(t)
-
-	// Modify existing file
-	readmePath := filepath.Join(repoDir, "README.md")
-	require.NoError(t, os.WriteFile(readmePath, []byte("modified content"), 0644))
+	repoDir := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("reset HEAD", "", nil)
+	runner.stub("clean -fd", "", nil)
+	runner.stub("checkout .", "", nil)
 
 	w := &Worker{
 		worktreePath: repoDir,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 		reviewConfig: &config.CodeReviewConfig{Verbose: true},
 	}
 
 	ctx := context.Background()
 	w.cleanupWorktree(ctx)
-
-	// Verify file was restored to original state
-	content, err := os.ReadFile(readmePath)
-	require.NoError(t, err)
-	assert.Equal(t, "# Test", string(content))
+	assert.Equal(t, 1, runner.callsFor("reset", "HEAD"))
+	assert.Equal(t, 1, runner.callsFor("clean", "-fd"))
+	assert.Equal(t, 1, runner.callsFor("checkout", "."))
 }
 
 func TestCleanupWorktree_FullCleanup(t *testing.T) {
-	repoDir := setupTestRepo(t)
-
-	// Create dirty state: modified file + untracked file + staged file
-	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "modified.txt"), []byte("mod"), 0644))
-	require.NoError(t, os.WriteFile(filepath.Join(repoDir, "untracked.txt"), []byte("new"), 0644))
+	repoDir := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("reset HEAD", "", nil)
+	runner.stub("clean -fd", "", nil)
+	runner.stub("checkout .", "", nil)
 
 	w := &Worker{
 		worktreePath: repoDir,
-		gitRunner:    git.DefaultRunner(),
+		gitRunner:    runner,
 		reviewConfig: &config.CodeReviewConfig{Verbose: true},
 	}
 
 	ctx := context.Background()
 	w.cleanupWorktree(ctx)
 
-	// Verify worktree is clean
-	output, err := w.runner().Exec(ctx, repoDir, "status", "--porcelain")
-	require.NoError(t, err)
-	assert.Empty(t, output, "worktree should be clean after cleanup")
+	assert.Equal(t, 1, runner.callsFor("reset", "HEAD"))
+	assert.Equal(t, 1, runner.callsFor("clean", "-fd"))
+	assert.Equal(t, 1, runner.callsFor("checkout", "."))
 }
 
 func TestCleanupWorktree_ContinuesOnError(t *testing.T) {
@@ -790,32 +764,305 @@ func TestCleanupWorktree_ContinuesOnError(t *testing.T) {
 	// (verified by not having an "unexpected git call" error)
 }
 
-// setupTestRepo creates a git repo for testing
-func setupTestRepo(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
+// === GitOps-based cleanupWorktree tests ===
 
-	runner := git.DefaultRunner()
-	ctx := context.Background()
+func TestCleanupWorktree_UsesGitOps(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	w := &Worker{
+		gitOps:       mockOps,
+		reviewConfig: &config.CodeReviewConfig{Verbose: true},
+	}
 
-	_, err := runner.Exec(ctx, dir, "init")
+	w.cleanupWorktree(context.Background())
+
+	mockOps.AssertCalled(t, "Reset")
+	mockOps.AssertCalled(t, "Clean")
+	mockOps.AssertCalled(t, "CheckoutFiles")
+
+	// Verify Clean was called with correct options
+	cleanCalls := mockOps.GetCallsFor("Clean")
+	if len(cleanCalls) != 1 {
+		t.Fatalf("expected 1 Clean call, got %d", len(cleanCalls))
+	}
+	opts := cleanCalls[0].Args[0].(git.CleanOpts)
+	if !opts.Force {
+		t.Error("expected Force=true for Clean")
+	}
+	if !opts.Directories {
+		t.Error("expected Directories=true for Clean")
+	}
+}
+
+func TestCleanupWorktree_NilGitOps_NoOp(t *testing.T) {
+	w := &Worker{
+		gitOps:       nil,
+		worktreePath: "", // Prevents legacy fallback from doing anything
+	}
+
+	// Should not panic
+	w.cleanupWorktree(context.Background())
+}
+
+func TestCleanupWorktree_ResetError_Continues(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.ResetErr = errors.New("reset failed")
+	w := &Worker{
+		gitOps:       mockOps,
+		reviewConfig: &config.CodeReviewConfig{Verbose: false},
+	}
+
+	w.cleanupWorktree(context.Background())
+
+	// Should still call Clean and CheckoutFiles despite Reset error
+	mockOps.AssertCalled(t, "Clean")
+	mockOps.AssertCalled(t, "CheckoutFiles")
+}
+
+func TestCleanupWorktree_CleanError_Continues(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.CleanErr = errors.New("clean failed")
+	w := &Worker{
+		gitOps:       mockOps,
+		reviewConfig: &config.CodeReviewConfig{Verbose: false},
+	}
+
+	w.cleanupWorktree(context.Background())
+
+	// Should still call CheckoutFiles despite Clean error
+	mockOps.AssertCalled(t, "CheckoutFiles")
+}
+
+func TestCleanupWorktree_CleanOpts(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	w := &Worker{gitOps: mockOps}
+
+	w.cleanupWorktree(context.Background())
+
+	cleanCalls := mockOps.GetCallsFor("Clean")
+	if len(cleanCalls) != 1 {
+		t.Fatalf("expected 1 Clean call, got %d", len(cleanCalls))
+	}
+	opts := cleanCalls[0].Args[0].(git.CleanOpts)
+	if !opts.Force {
+		t.Error("expected Force=true for Clean")
+	}
+	if !opts.Directories {
+		t.Error("expected Directories=true for Clean")
+	}
+}
+
+func TestCleanupWorktree_CheckoutFiles_Dot(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	w := &Worker{gitOps: mockOps}
+
+	w.cleanupWorktree(context.Background())
+
+	checkoutCalls := mockOps.GetCallsFor("CheckoutFiles")
+	if len(checkoutCalls) != 1 {
+		t.Fatalf("expected 1 CheckoutFiles call, got %d", len(checkoutCalls))
+	}
+	paths := checkoutCalls[0].Args[0].([]string)
+	if len(paths) != 1 || paths[0] != "." {
+		t.Errorf("expected CheckoutFiles to be called with [\".\"], got %v", paths)
+	}
+}
+
+// === GitOps-based commitReviewFixes tests ===
+
+func TestCommitReviewFixes_GitOps_NoChanges(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: true}
+
+	w := &Worker{gitOps: mockOps}
+
+	committed, err := w.commitReviewFixes(context.Background())
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if committed {
+		t.Error("expected committed=false when no changes")
+	}
+	mockOps.AssertCalled(t, "Status")
+	mockOps.AssertNotCalled(t, "AddAll")
+	mockOps.AssertNotCalled(t, "Commit")
+}
+
+func TestCommitReviewFixes_GitOps_WithChanges(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+
+	w := &Worker{gitOps: mockOps}
+
+	committed, err := w.commitReviewFixes(context.Background())
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !committed {
+		t.Error("expected committed=true when changes exist")
+	}
+	mockOps.AssertCalled(t, "AddAll")
+	mockOps.AssertCalled(t, "Commit")
+}
+
+func TestCommitReviewFixes_GitOps_ProtectedBranch(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+	mockOps.CommitErr = fmt.Errorf("%w: main", git.ErrProtectedBranch)
+
+	w := &Worker{gitOps: mockOps}
+
+	_, err := w.commitReviewFixes(context.Background())
+
+	if err == nil {
+		t.Error("expected error for protected branch")
+	}
+	if !errors.Is(err, git.ErrProtectedBranch) {
+		t.Errorf("expected error to wrap ErrProtectedBranch, got %v", err)
+	}
+}
+
+func TestCommitReviewFixes_GitOps_StatusError(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusErr = errors.New("status failed")
+
+	w := &Worker{gitOps: mockOps}
+
+	_, err := w.commitReviewFixes(context.Background())
+
+	if err == nil {
+		t.Error("expected error from Status")
+	}
+	if !strings.Contains(err.Error(), "checking for changes") {
+		t.Errorf("expected error to contain 'checking for changes', got %v", err)
+	}
+}
+
+func TestCommitReviewFixes_GitOps_AddAllError(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+	mockOps.AddAllErr = errors.New("add failed")
+
+	w := &Worker{gitOps: mockOps}
+
+	_, err := w.commitReviewFixes(context.Background())
+
+	if err == nil {
+		t.Error("expected error from AddAll")
+	}
+	if !strings.Contains(err.Error(), "staging changes") {
+		t.Errorf("expected error to contain 'staging changes', got %v", err)
+	}
+}
+
+func TestCommitReviewFixes_GitOps_CommitMessage(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+
+	w := &Worker{gitOps: mockOps}
+	w.commitReviewFixes(context.Background())
+
+	commitCalls := mockOps.GetCallsFor("Commit")
+	if len(commitCalls) != 1 {
+		t.Fatalf("expected 1 Commit call, got %d", len(commitCalls))
+	}
+	msg := commitCalls[0].Args[0].(string)
+	if msg != "fix: address code review feedback" {
+		t.Errorf("expected message 'fix: address code review feedback', got %s", msg)
+	}
+}
+
+func TestCommitReviewFixes_GitOps_NoVerify(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+
+	w := &Worker{gitOps: mockOps}
+	w.commitReviewFixes(context.Background())
+
+	commitCalls := mockOps.GetCallsFor("Commit")
+	if len(commitCalls) != 1 {
+		t.Fatalf("expected 1 Commit call, got %d", len(commitCalls))
+	}
+	opts := commitCalls[0].Args[1].(git.CommitOpts)
+	if !opts.NoVerify {
+		t.Error("expected NoVerify=true")
+	}
+}
+
+// === GitOps-based hasUncommittedChanges tests ===
+
+func TestHasUncommittedChanges_GitOps_Clean(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: true}
+
+	w := &Worker{gitOps: mockOps}
+
+	hasChanges, err := w.hasUncommittedChanges(context.Background())
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if hasChanges {
+		t.Error("expected hasChanges=false when Clean=true")
+	}
+}
+
+func TestHasUncommittedChanges_GitOps_Modified(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+
+	w := &Worker{gitOps: mockOps}
+
+	hasChanges, err := w.hasUncommittedChanges(context.Background())
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !hasChanges {
+		t.Error("expected hasChanges=true when files modified")
+	}
+}
+
+func TestHasUncommittedChanges_GitOps_NilGitOps(t *testing.T) {
+	// Test that nil gitOps falls back to legacy behavior
+	repoDir := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("status --porcelain", "", nil)
+
+	w := &Worker{
+		gitOps:       nil, // No GitOps
+		worktreePath: repoDir,
+		gitRunner:    runner,
+	}
+
+	// Clean repo should return false
+	hasChanges, err := w.hasUncommittedChanges(context.Background())
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if hasChanges {
+		t.Error("expected hasChanges=false for clean repo")
+	}
+}
+
+func TestCommitReviewFixes_GitOps_NilGitOps(t *testing.T) {
+	// Test that nil gitOps falls back to legacy behavior
+	repoDir := t.TempDir()
+	runner := newFakeGitRunner()
+	runner.stub("status --porcelain", "M test.txt\n", nil)
+	runner.stub("add -A", "", nil)
+	runner.stub("commit -m fix: address code review feedback --no-verify", "", nil)
+
+	w := &Worker{
+		gitOps:       nil, // No GitOps
+		worktreePath: repoDir,
+		gitRunner:    runner,
+	}
+
+	committed, err := w.commitReviewFixes(context.Background())
+
 	require.NoError(t, err)
-
-	_, err = runner.Exec(ctx, dir, "config", "user.email", "test@test.com")
-	require.NoError(t, err)
-
-	_, err = runner.Exec(ctx, dir, "config", "user.name", "Test")
-	require.NoError(t, err)
-
-	// Create initial commit
-	readmePath := filepath.Join(dir, "README.md")
-	require.NoError(t, os.WriteFile(readmePath, []byte("# Test"), 0644))
-
-	_, err = runner.Exec(ctx, dir, "add", ".")
-	require.NoError(t, err)
-
-	_, err = runner.Exec(ctx, dir, "commit", "-m", "Initial commit")
-	require.NoError(t, err)
-
-	return dir
+	assert.True(t, committed)
 }

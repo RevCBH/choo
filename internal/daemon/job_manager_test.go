@@ -3,7 +3,6 @@ package daemon
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -12,55 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// setupTestRepoForManager creates a temporary git repository for testing.
-// Returns the repo path. The directory is automatically cleaned up when the test ends.
-func setupTestRepoForManager(t *testing.T) string {
-	t.Helper()
-
-	tmpDir, err := os.MkdirTemp("", "job_manager_test_repo_*")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		os.RemoveAll(tmpDir)
-	})
-
-	// Initialize git repo
-	cmd := exec.Command("git", "init")
-	cmd.Dir = tmpDir
-	require.NoError(t, cmd.Run())
-
-	// Configure git user for commits
-	cmd = exec.Command("git", "config", "user.email", "test@example.com")
-	cmd.Dir = tmpDir
-	require.NoError(t, cmd.Run())
-
-	cmd = exec.Command("git", "config", "user.name", "Test User")
-	cmd.Dir = tmpDir
-	require.NoError(t, cmd.Run())
-
-	// Add a remote (doesn't need to be real, just parseable)
-	cmd = exec.Command("git", "remote", "add", "origin", "https://github.com/test-owner/test-repo.git")
-	cmd.Dir = tmpDir
-	require.NoError(t, cmd.Run())
-
-	// Create an initial commit so we have a valid branch
-	readmePath := filepath.Join(tmpDir, "README.md")
-	require.NoError(t, os.WriteFile(readmePath, []byte("# Test Repo"), 0644))
-
-	cmd = exec.Command("git", "add", ".")
-	cmd.Dir = tmpDir
-	require.NoError(t, cmd.Run())
-
-	cmd = exec.Command("git", "commit", "-m", "Initial commit")
-	cmd.Dir = tmpDir
-	require.NoError(t, cmd.Run())
-
-	// Create a tasks directory
-	tasksDir := filepath.Join(tmpDir, "specs", "tasks")
-	require.NoError(t, os.MkdirAll(tasksDir, 0755))
-
-	return tmpDir
-}
 
 // setupTestDB creates an in-memory SQLite database for testing
 func setupTestDB(t *testing.T) *db.DB {
@@ -86,7 +36,7 @@ func setupTestDB(t *testing.T) *db.DB {
 func TestJobManager_Start(t *testing.T) {
 	database := setupTestDB(t)
 	jm := NewJobManager(database, 10)
-	repoPath := setupTestRepoForManager(t)
+	repoPath := setupTestRepo(t)
 
 	cfg := JobConfig{
 		RepoPath:     repoPath,
@@ -111,9 +61,9 @@ func TestJobManager_Start(t *testing.T) {
 func TestJobManager_Start_MaxJobs(t *testing.T) {
 	database := setupTestDB(t)
 	jm := NewJobManager(database, 2) // Only allow 2 jobs
-	repoPath1 := setupTestRepoForManager(t)
-	repoPath2 := setupTestRepoForManager(t)
-	repoPath3 := setupTestRepoForManager(t)
+	repoPath1 := setupTestRepo(t)
+	repoPath2 := setupTestRepo(t)
+	repoPath3 := setupTestRepo(t)
 
 	cfg1 := JobConfig{
 		RepoPath:     repoPath1,
@@ -155,7 +105,7 @@ func TestJobManager_Start_MaxJobs(t *testing.T) {
 func TestJobManager_Stop(t *testing.T) {
 	database := setupTestDB(t)
 	jm := NewJobManager(database, 10)
-	repoPath := setupTestRepoForManager(t)
+	repoPath := setupTestRepo(t)
 
 	cfg := JobConfig{
 		RepoPath:     repoPath,
@@ -191,7 +141,7 @@ func TestJobManager_Stop_NotFound(t *testing.T) {
 func TestJobManager_Get(t *testing.T) {
 	database := setupTestDB(t)
 	jm := NewJobManager(database, 10)
-	repoPath := setupTestRepoForManager(t)
+	repoPath := setupTestRepo(t)
 
 	cfg := JobConfig{
 		RepoPath:     repoPath,
@@ -223,8 +173,8 @@ func TestJobManager_Get_NotFound(t *testing.T) {
 func TestJobManager_StopAll(t *testing.T) {
 	database := setupTestDB(t)
 	jm := NewJobManager(database, 10)
-	repoPath1 := setupTestRepoForManager(t)
-	repoPath2 := setupTestRepoForManager(t)
+	repoPath1 := setupTestRepo(t)
+	repoPath2 := setupTestRepo(t)
 
 	cfg1 := JobConfig{
 		RepoPath:     repoPath1,
@@ -265,7 +215,7 @@ func TestJobManager_StopAll(t *testing.T) {
 func TestJobManager_Cleanup(t *testing.T) {
 	database := setupTestDB(t)
 	jm := NewJobManager(database, 10)
-	repoPath := setupTestRepoForManager(t)
+	repoPath := setupTestRepo(t)
 
 	cfg := JobConfig{
 		RepoPath:     repoPath,
@@ -282,11 +232,11 @@ func TestJobManager_Cleanup(t *testing.T) {
 	jobs := jm.List()
 	assert.Contains(t, jobs, jobID)
 
-	// Wait for the job to complete (should complete quickly with empty tasks dir)
-	// The cleanup should happen automatically
-	time.Sleep(500 * time.Millisecond)
+	// Cancel the job so cleanup can run
+	cancel()
+	time.Sleep(100 * time.Millisecond)
 
-	// Job should be removed from tracking after completion
+	// Job should be removed from tracking after cancellation
 	jobs = jm.List()
 	assert.NotContains(t, jobs, jobID)
 }

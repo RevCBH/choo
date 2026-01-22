@@ -3,15 +3,142 @@ package worker
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/RevCBH/choo/internal/config"
 	"github.com/RevCBH/choo/internal/discovery"
 	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/provider"
+	"github.com/RevCBH/choo/internal/testutil"
 	"github.com/stretchr/testify/assert"
 )
+
+func TestNewWorker_WithGitOps(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	unit := &discovery.Unit{ID: "test-unit"}
+	cfg := WorkerConfig{WorktreeBase: "/tmp/worktrees"}
+	deps := WorkerDeps{
+		GitOps: mockOps,
+	}
+
+	w, err := NewWorker(unit, cfg, deps)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if w.gitOps != mockOps {
+		t.Error("expected provided GitOps to be used")
+	}
+}
+
+func TestNewWorker_CreatesGitOps(t *testing.T) {
+	baseDir := t.TempDir()
+	worktreeBase := filepath.Join(baseDir, "worktrees")
+	unitID := "test-unit"
+	worktreePath := filepath.Join(worktreeBase, unitID)
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("failed to create worktree path: %v", err)
+	}
+
+	runner := testutil.NewStubRunner()
+	canonicalWorktreePath := worktreePath
+	if resolved, err := filepath.EvalSymlinks(worktreePath); err == nil {
+		canonicalWorktreePath = filepath.Clean(resolved)
+	}
+	runner.StubDefault("rev-parse --show-toplevel", canonicalWorktreePath, nil)
+	runner.StubDefault("rev-parse --absolute-git-dir", filepath.Join(baseDir, ".git", "worktrees", unitID), nil)
+	prevRunner := git.DefaultRunner()
+	git.SetDefaultRunner(runner)
+	t.Cleanup(func() {
+		git.SetDefaultRunner(prevRunner)
+	})
+
+	unit := &discovery.Unit{ID: unitID}
+	cfg := WorkerConfig{WorktreeBase: worktreeBase}
+	deps := WorkerDeps{}
+
+	w, err := NewWorker(unit, cfg, deps)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if w.gitOps == nil {
+		t.Error("expected GitOps to be created from WorktreeBase")
+	}
+}
+
+func TestNewWorker_NoGitOps_PathNotFound(t *testing.T) {
+	unit := &discovery.Unit{ID: "test-unit"}
+	cfg := WorkerConfig{WorktreeBase: "/tmp/nonexistent-base"}
+	deps := WorkerDeps{}
+
+	w, err := NewWorker(unit, cfg, deps)
+
+	// Should succeed - path will be created later
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if w.gitOps != nil {
+		t.Error("expected gitOps to be nil when path doesn't exist")
+	}
+}
+
+func TestNewWorker_RejectsRelativePath(t *testing.T) {
+	unit := &discovery.Unit{ID: "test-unit"}
+	cfg := WorkerConfig{WorktreeBase: "./relative/path"}
+	deps := WorkerDeps{}
+
+	_, err := NewWorker(unit, cfg, deps)
+
+	// Relative path should be rejected
+	if err == nil {
+		t.Error("expected error for relative WorktreeBase")
+	}
+	if !errors.Is(err, git.ErrRelativePath) {
+		t.Errorf("expected ErrRelativePath, got %v", err)
+	}
+}
+
+func TestInitGitOps(t *testing.T) {
+	baseDir := t.TempDir()
+	worktreeBase := filepath.Join(baseDir, "worktrees")
+	worktreePath := filepath.Join(worktreeBase, "test-wt")
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("failed to create worktree path: %v", err)
+	}
+
+	runner := testutil.NewStubRunner()
+	canonicalWorktreePath := worktreePath
+	if resolved, err := filepath.EvalSymlinks(worktreePath); err == nil {
+		canonicalWorktreePath = filepath.Clean(resolved)
+	}
+	runner.StubDefault("rev-parse --show-toplevel", canonicalWorktreePath, nil)
+	runner.StubDefault("rev-parse --absolute-git-dir", filepath.Join(baseDir, ".git", "worktrees", "test-wt"), nil)
+	prevRunner := git.DefaultRunner()
+	git.SetDefaultRunner(runner)
+	t.Cleanup(func() {
+		git.SetDefaultRunner(prevRunner)
+	})
+
+	// Create worker with no initial gitOps
+	w := &Worker{
+		worktreePath: worktreePath,
+		config:       WorkerConfig{WorktreeBase: worktreeBase},
+	}
+
+	err := w.InitGitOps()
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if w.gitOps == nil {
+		t.Error("expected gitOps to be initialized")
+	}
+}
 
 func TestWorker_Run_HappyPath(t *testing.T) {
 	t.Skip("Integration test requires full mock setup - skipped for now")
@@ -231,4 +358,127 @@ func collectEventsForWorkerTest(bus *events.Bus) *events.EventCollector {
 // waitForEventsInWorkerTest waits for the event bus to process all pending events
 func waitForEventsInWorkerTest(bus *events.Bus) {
 	bus.Wait()
+}
+
+// newTestWorker creates a Worker configured for testing with MockGitOps.
+func newTestWorker(t *testing.T) *Worker {
+	t.Helper()
+	mockOps := git.NewMockGitOps("/test/worktree")
+	return &Worker{
+		gitOps:       mockOps,
+		worktreePath: "/test/worktree",
+		reviewConfig: &config.CodeReviewConfig{Verbose: false},
+	}
+}
+
+// newTestWorkerWithConfig creates a Worker with custom configuration.
+func newTestWorkerWithConfig(t *testing.T, cfg func(*Worker, *git.MockGitOps)) *Worker {
+	t.Helper()
+	mockOps := git.NewMockGitOps("/test/worktree")
+	w := &Worker{
+		gitOps:       mockOps,
+		worktreePath: "/test/worktree",
+		reviewConfig: &config.CodeReviewConfig{Verbose: false},
+	}
+	if cfg != nil {
+		cfg(w, mockOps)
+	}
+	return w
+}
+
+// getMockGitOps extracts the MockGitOps from a Worker for assertions.
+func getMockGitOps(t *testing.T, w *Worker) *git.MockGitOps {
+	t.Helper()
+	mock, ok := w.gitOps.(*git.MockGitOps)
+	if !ok {
+		t.Fatal("expected Worker to have MockGitOps")
+	}
+	return mock
+}
+
+func TestWorker_SafetyInvariants(t *testing.T) {
+	t.Run("gitOps path matches worktreePath", func(t *testing.T) {
+		w := newTestWorker(t)
+		mock := getMockGitOps(t, w)
+
+		if mock.Path() != w.worktreePath {
+			t.Errorf("gitOps path %s doesn't match worktreePath %s",
+				mock.Path(), w.worktreePath)
+		}
+	})
+
+	t.Run("cleanupWorktree uses gitOps not runner", func(t *testing.T) {
+		// Use a tracking runner that records if it was called
+		trackingRunner := &trackingGitRunner{}
+
+		mockOps := git.NewMockGitOps("/test/worktree")
+		w := &Worker{
+			gitOps:       mockOps,
+			gitRunner:    trackingRunner,
+			worktreePath: "/test/worktree",
+		}
+
+		w.cleanupWorktree(context.Background())
+
+		if trackingRunner.called {
+			t.Error("cleanupWorktree should use gitOps, not runner")
+		}
+		mockOps.AssertCalled(t, "Reset")
+	})
+
+	t.Run("commitReviewFixes uses gitOps not runner", func(t *testing.T) {
+		trackingRunner := &trackingGitRunner{}
+
+		mockOps := git.NewMockGitOps("/test/worktree")
+		mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+		w := &Worker{
+			gitOps:       mockOps,
+			gitRunner:    trackingRunner,
+			worktreePath: "/test/worktree",
+		}
+
+		w.commitReviewFixes(context.Background())
+
+		if trackingRunner.called {
+			t.Error("commitReviewFixes should use gitOps, not runner")
+		}
+		mockOps.AssertCalled(t, "Commit")
+	})
+}
+
+// trackingGitRunner is a test helper that tracks whether any method was called.
+type trackingGitRunner struct {
+	called bool
+}
+
+func (t *trackingGitRunner) Exec(ctx context.Context, dir string, args ...string) (string, error) {
+	t.called = true
+	return "", errors.New("unexpected call to runner")
+}
+
+func (t *trackingGitRunner) ExecWithStdin(ctx context.Context, dir string, stdin string, args ...string) (string, error) {
+	t.called = true
+	return "", errors.New("unexpected call to runner")
+}
+
+func TestWorker_ReviewLoopWithGitOps(t *testing.T) {
+	t.Run("full fix loop uses correct git operations", func(t *testing.T) {
+		w := newTestWorkerWithConfig(t, func(w *Worker, mock *git.MockGitOps) {
+			mock.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+		})
+
+		// Simulate fix loop
+		w.cleanupWorktree(context.Background())
+		// ... provider makes fixes ...
+		mock := getMockGitOps(t, w)
+		mock.StatusResult = git.StatusResult{Clean: false, Modified: []string{"fixed.go"}}
+		committed, _ := w.commitReviewFixes(context.Background())
+
+		if !committed {
+			t.Error("expected changes to be committed")
+		}
+
+		// Verify call order
+		mock.AssertCallOrder(t, "Reset", "Clean", "CheckoutFiles", "Status", "AddAll", "Commit")
+	})
 }

@@ -2,7 +2,14 @@
 # Pre-push hook to ensure CI checks will pass
 # Install with: make install-hooks
 
-set -e
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Git runs hooks with GIT_* vars set; they break nested git usage in tests.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR GIT_PREFIX
+unset GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES GIT_CEILING_DIRECTORIES
 
 echo "Running pre-push checks..."
 
@@ -21,32 +28,20 @@ check_passed() {
     echo -e "${GREEN}✓ $1${NC}"
 }
 
-# 1. Build
-echo "Building..."
-if ! go build ./... 2>&1; then
-    check_failed "build"
-fi
-check_passed "Build"
+run_check() {
+    local label="$1"
+    shift
 
-# 2. Vet
-echo "Running go vet..."
-if ! go vet ./... 2>&1; then
-    check_failed "go vet"
-fi
-check_passed "Vet"
+    echo "Running ${label}..."
+    if ! "$@" 2>&1; then
+        check_failed "${label}"
+    fi
+    check_passed "${label}"
+}
 
-# 3. Lint
-echo "Running golangci-lint..."
-if ! golangci-lint run ./... 2>&1; then
-    check_failed "golangci-lint"
-fi
-check_passed "Lint"
-
-# 4. Tests with race detector
-echo "Running tests with race detector..."
-if ! go test -race ./... 2>&1; then
-    check_failed "tests"
-fi
-check_passed "Tests"
+run_check "Build" make build
+run_check "Vet" make vet
+run_check "Lint" make lint
+run_check "Tests" make test
 
 echo -e "${GREEN}All pre-push checks passed!${NC}"

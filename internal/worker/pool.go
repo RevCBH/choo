@@ -97,7 +97,7 @@ func (p *Pool) Submit(unit *discovery.Unit) error {
 	}
 
 	// Create worker with resolved provider
-	worker := NewWorker(unit, p.config, WorkerDeps{
+	worker, err := NewWorker(unit, p.config, WorkerDeps{
 		Events:   p.events,
 		Git:      p.git,
 		GitHub:   p.github,
@@ -105,6 +105,10 @@ func (p *Pool) Submit(unit *discovery.Unit) error {
 		MergeMu:  &p.mergeMu,
 		Reviewer: p.reviewer, // Pass reviewer to worker
 	})
+	if err != nil {
+		p.mu.Unlock()
+		return fmt.Errorf("failed to create worker for unit %s: %w", unit.ID, err)
+	}
 
 	// Add to workers map
 	p.workers[unit.ID] = worker

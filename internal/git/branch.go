@@ -8,6 +8,68 @@ import (
 	"strings"
 )
 
+// WorkingDirStatus represents the result of checking for uncommitted changes.
+type WorkingDirStatus struct {
+	// HasChanges is true if there are any uncommitted changes
+	HasChanges bool
+
+	// ChangedFiles is a list of files with uncommitted changes
+	ChangedFiles []string
+
+	// PathChanges maps specific paths to whether they have changes
+	PathChanges map[string]bool
+}
+
+// GetWorkingDirStatus checks if the working directory has uncommitted changes.
+// If watchPaths are provided, it also reports which of those specific paths have changes.
+// Uses "git status --porcelain" which outputs nothing for a clean working directory.
+func GetWorkingDirStatus(ctx context.Context, repoDir string, watchPaths ...string) (*WorkingDirStatus, error) {
+	output, err := gitExec(ctx, repoDir, "status", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("failed to check git status: %w", err)
+	}
+
+	result := &WorkingDirStatus{
+		ChangedFiles: []string{},
+		PathChanges:  make(map[string]bool),
+	}
+
+	// Initialize watched paths as having no changes
+	for _, path := range watchPaths {
+		result.PathChanges[path] = false
+	}
+
+	// Parse porcelain output - each line is a changed file
+	// Format: XY filename (where XY is the 2-char status code, then a space, then the filename)
+	// Note: Don't use TrimSpace on the output as the first char of each line is part of the status
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		result.HasChanges = true
+
+		// Extract filename (starts at position 3 after "XY ")
+		if len(line) >= 3 {
+			filename := line[3:]
+			// Handle renamed files: "R  old -> new"
+			if idx := strings.Index(filename, " -> "); idx != -1 {
+				filename = filename[idx+4:]
+			}
+			result.ChangedFiles = append(result.ChangedFiles, filename)
+
+			// Check if this file is under any watched path
+			for _, path := range watchPaths {
+				if strings.HasPrefix(filename, path) {
+					result.PathChanges[path] = true
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
 // GetCurrentBranch returns the name of the currently checked out branch.
 // Returns an error if in detached HEAD state or if the command fails.
 func GetCurrentBranch(ctx context.Context, repoDir string) (string, error) {
