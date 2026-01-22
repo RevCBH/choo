@@ -24,8 +24,13 @@ lint-install:
 test:
 	go test -race ./...
 
+.PHONY: skills
+skills:
+	@mkdir -p internal/skills/skills
+	@cp .claude/skills/spec.md .claude/skills/spec-validate.md .claude/skills/ralph-prep.md internal/skills/skills/
+
 .PHONY: build
-build:
+build: skills
 	go build ./...
 
 .PHONY: vet

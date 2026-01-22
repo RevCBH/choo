@@ -19,6 +19,7 @@ type App struct {
 
 	// Runtime state
 	verbose  bool
+	debug    bool
 	shutdown chan struct{}
 
 	// Version information
@@ -70,6 +71,7 @@ managing git worktrees and the full PR lifecycle.`,
 	// Add persistent flags
 	a.rootCmd.PersistentFlags().BoolVarP(&a.verbose, "verbose", "v", false,
 		"Verbose output")
+	a.rootCmd.PersistentFlags().BoolVar(&a.debug, "debug", false, "Debug output (includes assistant text in streaming mode)")
 
 	// Add subcommands
 	a.rootCmd.AddCommand(
