@@ -200,6 +200,11 @@ func (w *Worker) hasUncommittedChanges(ctx context.Context) (bool, error) {
 // This ensures the worktree is clean before proceeding to merge.
 // Errors are logged but not returned - cleanup is best-effort.
 func (w *Worker) cleanupWorktree(ctx context.Context) {
+	// Guard: skip if no worktree path configured (prevents accidental cleanup of cwd)
+	if w.worktreePath == "" {
+		return
+	}
+
 	// 1. Reset staged changes (git reset)
 	if _, err := w.runner().Exec(ctx, w.worktreePath, "reset", "HEAD"); err != nil {
 		if w.reviewConfig != nil && w.reviewConfig.Verbose {

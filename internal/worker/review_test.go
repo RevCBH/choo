@@ -7,9 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sync"
 	"testing"
-	"time"
 
 	"github.com/RevCBH/choo/internal/config"
 	"github.com/RevCBH/choo/internal/discovery"
@@ -53,9 +51,10 @@ func TestRunCodeReview_ReviewerError(t *testing.T) {
 	waitForEvents(eventBus)
 
 	// Should emit started, then failed
-	require.Len(t, *collected, 2)
-	assert.Equal(t, events.CodeReviewStarted, (*collected)[0].Type)
-	assert.Equal(t, events.CodeReviewFailed, (*collected)[1].Type)
+	evts := collected.Get()
+	require.Len(t, evts, 2)
+	assert.Equal(t, events.CodeReviewStarted, evts[0].Type)
+	assert.Equal(t, events.CodeReviewFailed, evts[1].Type)
 }
 
 func TestRunCodeReview_Passed(t *testing.T) {
@@ -83,9 +82,10 @@ func TestRunCodeReview_Passed(t *testing.T) {
 	// Wait for events to be processed
 	waitForEvents(eventBus)
 
-	require.Len(t, *collected, 2)
-	assert.Equal(t, events.CodeReviewStarted, (*collected)[0].Type)
-	assert.Equal(t, events.CodeReviewPassed, (*collected)[1].Type)
+	evts := collected.Get()
+	require.Len(t, evts, 2)
+	assert.Equal(t, events.CodeReviewStarted, evts[0].Type)
+	assert.Equal(t, events.CodeReviewPassed, evts[1].Type)
 }
 
 func TestRunCodeReview_IssuesFound(t *testing.T) {
@@ -116,10 +116,11 @@ func TestRunCodeReview_IssuesFound(t *testing.T) {
 	waitForEvents(eventBus)
 
 	// Should emit: started, issues_found, fix_attempt (fails because no provider)
-	require.Len(t, *collected, 3)
-	assert.Equal(t, events.CodeReviewStarted, (*collected)[0].Type)
-	assert.Equal(t, events.CodeReviewIssuesFound, (*collected)[1].Type)
-	assert.Equal(t, events.CodeReviewFixAttempt, (*collected)[2].Type)
+	evts := collected.Get()
+	require.Len(t, evts, 3)
+	assert.Equal(t, events.CodeReviewStarted, evts[0].Type)
+	assert.Equal(t, events.CodeReviewIssuesFound, evts[1].Type)
+	assert.Equal(t, events.CodeReviewFixAttempt, evts[2].Type)
 }
 
 func TestRunCodeReview_IssuesFound_ZeroIterations(t *testing.T) {
@@ -149,29 +150,22 @@ func TestRunCodeReview_IssuesFound_ZeroIterations(t *testing.T) {
 	// Wait for events to be processed
 	waitForEvents(eventBus)
 
-	require.Len(t, *collected, 2)
-	assert.Equal(t, events.CodeReviewStarted, (*collected)[0].Type)
-	assert.Equal(t, events.CodeReviewIssuesFound, (*collected)[1].Type)
+	evts := collected.Get()
+	require.Len(t, evts, 2)
+	assert.Equal(t, events.CodeReviewStarted, evts[0].Type)
+	assert.Equal(t, events.CodeReviewIssuesFound, evts[1].Type)
 	// The logic ensures fix loop is not called when MaxFixIterations=0
 }
 
 // collectEvents subscribes to the event bus and collects events for testing.
-// Returns a pointer to a slice that will be populated with events as they occur.
-func collectEvents(bus *events.Bus) *[]events.Event {
-	collected := &[]events.Event{}
-	var mu sync.Mutex
-	bus.Subscribe(func(e events.Event) {
-		mu.Lock()
-		*collected = append(*collected, e)
-		mu.Unlock()
-	})
-	return collected
+// Returns an EventCollector with thread-safe access to events.
+func collectEvents(bus *events.Bus) *events.EventCollector {
+	return events.NewEventCollector(bus)
 }
 
 // waitForEvents waits for the event bus to process all pending events
 func waitForEvents(bus *events.Bus) {
-	// Wait a small amount of time for events to be processed by the goroutine
-	time.Sleep(10 * time.Millisecond)
+	bus.Wait()
 }
 
 // mockReviewer for testing
@@ -231,7 +225,7 @@ func TestReviewFixLoop_Success(t *testing.T) {
 
 	// Should emit fix_attempt and fix_applied
 	var hasAttempt, hasApplied bool
-	for _, e := range *collected {
+	for _, e := range collected.Get() {
 		if e.Type == events.CodeReviewFixAttempt {
 			hasAttempt = true
 		}

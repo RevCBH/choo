@@ -25,6 +25,9 @@ type Bus struct {
 
 	// mu protects handler registration and closed flag
 	mu sync.RWMutex
+
+	// wg tracks in-flight event processing for Wait()
+	wg sync.WaitGroup
 }
 
 // NewBus creates a new event bus with the specified buffer size
@@ -59,11 +62,13 @@ func (b *Bus) Subscribe(h Handler) {
 // Safe to call from multiple goroutines
 func (b *Bus) Emit(e Event) {
 	e.Time = time.Now()
+	b.wg.Add(1)
 	select {
 	case b.ch <- e:
 		// Delivered
 	default:
 		// Buffer full, drop event
+		b.wg.Done()
 		log.Printf("WARN: event buffer full, dropping %s", e.Type)
 	}
 }
@@ -110,6 +115,8 @@ func (b *Bus) loop() {
 
 // dispatch calls all handlers with the event (recovers from panics)
 func (b *Bus) dispatch(e Event) {
+	defer b.wg.Done()
+
 	b.mu.RLock()
 	// Copy handlers slice to avoid data race if Subscribe is called during dispatch
 	handlers := append([]Handler(nil), b.handlers...)
@@ -126,4 +133,43 @@ func (b *Bus) dispatch(e Event) {
 			h(e)
 		}()
 	}
+}
+
+// Wait blocks until all pending events have been fully processed
+// This is useful in tests to ensure all handlers have completed
+func (b *Bus) Wait() {
+	b.wg.Wait()
+}
+
+// EventCollector provides thread-safe event collection for testing
+type EventCollector struct {
+	events []Event
+	mu     sync.Mutex
+}
+
+// NewEventCollector creates an EventCollector and subscribes it to the bus
+func NewEventCollector(bus *Bus) *EventCollector {
+	c := &EventCollector{}
+	bus.Subscribe(func(e Event) {
+		c.mu.Lock()
+		c.events = append(c.events, e)
+		c.mu.Unlock()
+	})
+	return c
+}
+
+// Get returns a copy of collected events (thread-safe)
+func (c *EventCollector) Get() []Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	result := make([]Event, len(c.events))
+	copy(result, c.events)
+	return result
+}
+
+// Len returns the number of collected events (thread-safe)
+func (c *EventCollector) Len() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return len(c.events)
 }

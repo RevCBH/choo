@@ -146,7 +146,7 @@ func TestMergeToFeatureBranch_ReviewFailsButMergeProceeds(t *testing.T) {
 
 	// Should emit CodeReviewFailed but NOT block anything
 	var hasFailed bool
-	for _, e := range *collected {
+	for _, e := range collected.Get() {
 		if e.Type == events.CodeReviewFailed {
 			hasFailed = true
 		}
@@ -196,7 +196,7 @@ func TestMergeToFeatureBranch_ReviewIssuesButMergeProceeds(t *testing.T) {
 
 	// Should emit CodeReviewIssuesFound but NOT block anything
 	var hasIssuesFound bool
-	for _, e := range *collected {
+	for _, e := range collected.Get() {
 		if e.Type == events.CodeReviewIssuesFound {
 			hasIssuesFound = true
 		}
@@ -224,17 +224,11 @@ func (m *MockReviewer) Name() provider.ProviderType {
 }
 
 // collectEventsForWorkerTest subscribes to the event bus and collects events for testing
-func collectEventsForWorkerTest(bus *events.Bus) *[]events.Event {
-	collected := &[]events.Event{}
-	bus.Subscribe(func(e events.Event) {
-		*collected = append(*collected, e)
-	})
-	return collected
+func collectEventsForWorkerTest(bus *events.Bus) *events.EventCollector {
+	return events.NewEventCollector(bus)
 }
 
 // waitForEventsInWorkerTest waits for the event bus to process all pending events
 func waitForEventsInWorkerTest(bus *events.Bus) {
-	// Small delay to ensure events are processed
-	// Using the same approach as review_test.go
-	waitForEvents(bus)
+	bus.Wait()
 }
