@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.24-alpine AS builder
+FROM golang:1.23-alpine AS builder
 
 WORKDIR /app
 
@@ -19,16 +19,25 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /choo ./cmd/choo
 # Runtime stage
 FROM alpine:3.21
 
-# Add ca-certificates for HTTPS and git for runtime git operations
-RUN apk add --no-cache ca-certificates git
+# Add ca-certificates for HTTPS, git for runtime operations, and dependencies for CLI tools
+RUN apk add --no-cache ca-certificates git curl bash nodejs npm
 
-WORKDIR /app
+# Install GitHub CLI from Alpine community repository
+RUN apk add --no-cache --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community github-cli
+
+# Install Claude CLI via npm (official distribution method)
+RUN npm install -g @anthropic-ai/claude-code
+
+# Create non-root user and set up home directory
+RUN adduser -D -u 1000 choo
+
+# Use home directory as workdir (user has write permissions here)
+WORKDIR /home/choo
 
 # Copy the binary from builder
 COPY --from=builder /choo /usr/local/bin/choo
 
-# Run as non-root user
-RUN adduser -D -u 1000 choo
+# Switch to non-root user
 USER choo
 
 ENTRYPOINT ["choo"]
