@@ -14,9 +14,6 @@ func newTestGitOps(t *testing.T, runner *testutil.StubRunner, opts GitOpsOpts) G
 
 	dir := t.TempDir()
 	toplevel := dir
-	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
-		toplevel = filepath.Clean(resolved)
-	}
 	runner.StubDefault("rev-parse --show-toplevel", toplevel, nil)
 	if !opts.AllowRepoRoot {
 		runner.StubDefault("rev-parse --absolute-git-dir", filepath.Join(dir, ".git", "worktrees", "unit"), nil)
