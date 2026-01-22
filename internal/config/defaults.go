@@ -14,6 +14,12 @@ const (
 	DefaultPRDDir             = "docs/prd"
 	DefaultSpecsDir           = "specs"
 	DefaultBranchPrefix       = "feature/"
+
+	DefaultCodeReviewEnabled          = true
+	DefaultCodeReviewProvider         = ReviewProviderCodex
+	DefaultCodeReviewMaxFixIterations = 1
+	DefaultCodeReviewVerbose          = true
+	DefaultCodeReviewCommand          = ""
 )
 
 // DefaultProviderType is the default provider when none is specified
@@ -33,6 +39,18 @@ func DefaultFeatureConfig() FeatureConfig {
 		PRDDir:       DefaultPRDDir,
 		SpecsDir:     DefaultSpecsDir,
 		BranchPrefix: DefaultBranchPrefix,
+	}
+}
+
+// DefaultCodeReviewConfig returns sensible defaults for code review.
+// Defaults are: enabled, codex provider, 1 fix iteration, verbose output.
+func DefaultCodeReviewConfig() CodeReviewConfig {
+	return CodeReviewConfig{
+		Enabled:          DefaultCodeReviewEnabled,
+		Provider:         DefaultCodeReviewProvider,
+		MaxFixIterations: DefaultCodeReviewMaxFixIterations,
+		Verbose:          DefaultCodeReviewVerbose,
+		Command:          DefaultCodeReviewCommand,
 	}
 }
 
@@ -60,7 +78,8 @@ func DefaultConfig() *Config {
 			Timeout:      DefaultReviewTimeout,
 			PollInterval: DefaultReviewPollInterval,
 		},
-		Feature:  DefaultFeatureConfig(),
-		LogLevel: DefaultLogLevel,
+		Feature:    DefaultFeatureConfig(),
+		CodeReview: DefaultCodeReviewConfig(),
+		LogLevel:   DefaultLogLevel,
 	}
 }

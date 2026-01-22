@@ -17,6 +17,19 @@ const (
 	ProviderCodex  ProviderType = "codex"
 )
 
+// ReviewProviderType represents a code review provider.
+// Note: This is separate from ProviderType (task execution) to allow
+// independent provider selection for review vs task execution.
+type ReviewProviderType string
+
+const (
+	// ReviewProviderCodex uses OpenAI Codex for code review.
+	ReviewProviderCodex ReviewProviderType = "codex"
+
+	// ReviewProviderClaude uses Anthropic Claude for code review.
+	ReviewProviderClaude ReviewProviderType = "claude"
+)
+
 // ProviderConfig holds settings for provider selection and configuration.
 type ProviderConfig struct {
 	// Type is the default provider type: "claude" (default) or "codex"
@@ -34,6 +47,56 @@ type ProviderConfig struct {
 type ProviderSettings struct {
 	// Command is the CLI binary path or name for this provider
 	Command string `yaml:"command"`
+}
+
+// CodeReviewConfig controls the advisory code review system.
+type CodeReviewConfig struct {
+	// Enabled controls whether code review runs. Default: true.
+	// When enabled, review runs after each unit completes AND after
+	// all units merge to the feature branch (before final rebase/merge).
+	Enabled bool `yaml:"enabled"`
+
+	// Provider specifies which reviewer to use: "codex" or "claude".
+	// Default: "codex".
+	Provider ReviewProviderType `yaml:"provider"`
+
+	// MaxFixIterations limits how many times the system attempts fixes
+	// per review cycle. Default: 1 (single review-fix cycle).
+	// Set to 0 to disable fix attempts (review-only mode).
+	MaxFixIterations int `yaml:"max_fix_iterations"`
+
+	// Verbose controls output verbosity. Default: true (noisy).
+	// When true, review findings are printed to stderr even when passing.
+	// When false, only issues requiring attention are printed.
+	Verbose bool `yaml:"verbose"`
+
+	// Command overrides the CLI path for the reviewer.
+	// Default: "" (uses system PATH to find "codex" or "claude").
+	Command string `yaml:"command,omitempty"`
+}
+
+// IsReviewOnlyMode returns true if fixes are disabled (MaxFixIterations == 0).
+func (c *CodeReviewConfig) IsReviewOnlyMode() bool {
+	return c.MaxFixIterations == 0
+}
+
+// Validate checks that the CodeReviewConfig is valid.
+// Only validates provider when review is enabled.
+func (c *CodeReviewConfig) Validate() error {
+	if c.Enabled {
+		switch c.Provider {
+		case ReviewProviderCodex, ReviewProviderClaude:
+			// Valid
+		default:
+			return fmt.Errorf("invalid review provider: %q (must be 'codex' or 'claude')", c.Provider)
+		}
+	}
+
+	if c.MaxFixIterations < 0 {
+		return fmt.Errorf("max_fix_iterations cannot be negative: %d", c.MaxFixIterations)
+	}
+
+	return nil
 }
 
 // Config holds all configuration for the Ralph Orchestrator.
@@ -68,6 +131,9 @@ type Config struct {
 
 	// Feature contains PRD-driven feature workflow settings
 	Feature FeatureConfig `yaml:"feature"`
+
+	// CodeReview configures the advisory code review system
+	CodeReview CodeReviewConfig `yaml:"code_review"`
 
 	// LogLevel controls log verbosity (debug, info, warn, error)
 	LogLevel string `yaml:"log_level"`

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/RevCBH/choo/internal/config"
 	"github.com/RevCBH/choo/internal/discovery"
 	"github.com/RevCBH/choo/internal/escalate"
 	"github.com/RevCBH/choo/internal/events"
@@ -34,6 +35,9 @@ type Worker struct {
 	worktreePath string
 	branch       string
 	currentTask  *discovery.Task
+
+	reviewer     provider.Reviewer      // For code review (may be nil if disabled)
+	reviewConfig *config.CodeReviewConfig // Review configuration
 
 	// prNumber is the PR number after creation
 	//nolint:unused // WIP: used by forcePushAndMerge when conflict resolution is fully integrated
@@ -69,13 +73,15 @@ type BaselineCheck struct {
 
 // WorkerDeps bundles worker dependencies for injection
 type WorkerDeps struct {
-	Events    *events.Bus
-	Git       *git.WorktreeManager
-	GitRunner git.Runner
-	GitHub    *github.PRClient
-	Provider  provider.Provider
-	Escalator escalate.Escalator
-	MergeMu   *sync.Mutex // Shared mutex for serializing merge operations
+	Events       *events.Bus
+	Git          *git.WorktreeManager
+	GitRunner    git.Runner
+	GitHub       *github.PRClient
+	Provider     provider.Provider
+	Escalator    escalate.Escalator
+	MergeMu      *sync.Mutex // Shared mutex for serializing merge operations
+	Reviewer     provider.Reviewer      // Optional: for code review
+	ReviewConfig *config.CodeReviewConfig // Optional: review settings
 }
 
 // ClaudeClient is deprecated - use Provider instead
@@ -90,15 +96,17 @@ func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker 
 		gitRunner = git.DefaultRunner()
 	}
 	return &Worker{
-		unit:      unit,
-		config:    cfg,
-		events:    deps.Events,
-		git:       deps.Git,
-		gitRunner: gitRunner,
-		github:    deps.GitHub,
-		provider:  deps.Provider,
-		escalator: deps.Escalator,
-		mergeMu:   deps.MergeMu,
+		unit:         unit,
+		config:       cfg,
+		events:       deps.Events,
+		git:          deps.Git,
+		gitRunner:    gitRunner,
+		github:       deps.GitHub,
+		provider:     deps.Provider,
+		escalator:    deps.Escalator,
+		mergeMu:      deps.MergeMu,
+		reviewer:     deps.Reviewer,
+		reviewConfig: deps.ReviewConfig,
 	}
 }
 
@@ -332,8 +340,8 @@ func (w *Worker) mergeToFeatureBranch(ctx context.Context) error {
 	// Check if the remote tracking branch exists locally
 	targetRef, useRemote := w.getTargetRef(ctx)
 
-	// 2. Review placeholder (log what would be reviewed)
-	w.logReviewPlaceholder(ctx, targetRef)
+	// 2. Run code review (advisory - doesn't block merge)
+	w.runCodeReview(ctx)
 
 	// 3-6 are serialized via mergeMu to prevent concurrent merge conflicts
 	// Acquire merge lock - only one worker can merge at a time
@@ -563,19 +571,6 @@ func (w *Worker) getTargetRef(ctx context.Context) (ref string, useRemote bool) 
 
 	// Remote tracking branch doesn't exist, use local branch directly
 	return w.config.TargetBranch, false
-}
-
-// logReviewPlaceholder logs the diff that would be reviewed
-// Future: integrate codex review here
-func (w *Worker) logReviewPlaceholder(ctx context.Context, targetRef string) {
-	// Get the diff between target branch and current HEAD
-	diff, err := w.runner().Exec(ctx, w.worktreePath, "diff", fmt.Sprintf("%s...HEAD", targetRef), "--stat")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Review placeholder - could not get diff: %v\n", err)
-		return
-	}
-
-	fmt.Fprintf(os.Stderr, "Review placeholder - changes to review for unit %s:\n%s\n", w.unit.ID, diff)
 }
 
 // updateUnitStatus updates the unit frontmatter status in the IMPLEMENTATION_PLAN.md

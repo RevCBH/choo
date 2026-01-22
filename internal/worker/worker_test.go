@@ -1,10 +1,16 @@
 package worker
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/RevCBH/choo/internal/config"
 	"github.com/RevCBH/choo/internal/discovery"
+	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/provider"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestWorker_Run_HappyPath(t *testing.T) {
@@ -58,4 +64,171 @@ func TestSetupWorktree(t *testing.T) {
 
 func TestCleanup(t *testing.T) {
 	t.Skip("Integration test requires mock git manager - skipped for now")
+}
+
+// TestMergeToFeatureBranch_WithReview verifies that runCodeReview is called
+// and that merge proceeds regardless of review outcome
+func TestMergeToFeatureBranch_WithReview(t *testing.T) {
+	// Setup mock reviewer that passes
+	mockReviewer := &MockReviewer{
+		ReviewResult: &provider.ReviewResult{
+			Passed:  true,
+			Summary: "No issues found",
+		},
+	}
+
+	eventBus := events.NewBus(100)
+	worker := &Worker{
+		unit:     &discovery.Unit{ID: "test-unit"},
+		reviewer: mockReviewer,
+		config: WorkerConfig{
+			TargetBranch: "main",
+			NoPR:         true, // Skip actual merge for unit test
+		},
+		events:       eventBus,
+		reviewConfig: &config.CodeReviewConfig{Enabled: true},
+	}
+
+	ctx := context.Background()
+	worker.runCodeReview(ctx)
+
+	// Verify reviewer was called
+	assert.True(t, mockReviewer.ReviewCalled, "expected reviewer to be called")
+}
+
+// TestMergeToFeatureBranch_ReviewDisabled verifies merge proceeds when reviewer is nil
+func TestMergeToFeatureBranch_ReviewDisabled(t *testing.T) {
+	worker := &Worker{
+		unit:     &discovery.Unit{ID: "test-unit"},
+		reviewer: nil, // Review disabled
+		config: WorkerConfig{
+			TargetBranch: "main",
+			NoPR:         true,
+		},
+	}
+
+	ctx := context.Background()
+	// Should not panic when reviewer is nil
+	worker.runCodeReview(ctx)
+}
+
+// TestMergeToFeatureBranch_ReviewFailsButMergeProceeds verifies that
+// merge proceeds despite review failure (advisory)
+func TestMergeToFeatureBranch_ReviewFailsButMergeProceeds(t *testing.T) {
+	// Mock reviewer that returns an error
+	mockReviewer := &MockReviewer{
+		ReviewErr: errors.New("review failed to execute"),
+	}
+
+	eventBus := events.NewBus(100)
+	collected := collectEventsForWorkerTest(eventBus)
+
+	worker := &Worker{
+		unit:     &discovery.Unit{ID: "test-unit"},
+		reviewer: mockReviewer,
+		config: WorkerConfig{
+			TargetBranch: "main",
+			NoPR:         true,
+		},
+		events:       eventBus,
+		reviewConfig: &config.CodeReviewConfig{Enabled: true, Verbose: true},
+	}
+
+	ctx := context.Background()
+	// Should not panic or return error - review is advisory
+	worker.runCodeReview(ctx)
+
+	// Verify review was attempted
+	assert.True(t, mockReviewer.ReviewCalled, "expected review to be called")
+
+	// Wait for events to be processed
+	waitForEventsInWorkerTest(eventBus)
+
+	// Should emit CodeReviewFailed but NOT block anything
+	var hasFailed bool
+	for _, e := range collected.Get() {
+		if e.Type == events.CodeReviewFailed {
+			hasFailed = true
+		}
+	}
+	assert.True(t, hasFailed, "expected CodeReviewFailed event")
+}
+
+// TestMergeToFeatureBranch_ReviewIssuesButMergeProceeds verifies that
+// merge proceeds despite issues found (advisory)
+func TestMergeToFeatureBranch_ReviewIssuesButMergeProceeds(t *testing.T) {
+	// Mock reviewer that finds issues
+	mockReviewer := &MockReviewer{
+		ReviewResult: &provider.ReviewResult{
+			Passed: false,
+			Issues: []provider.ReviewIssue{
+				{File: "test.go", Line: 10, Severity: "warning", Message: "test issue"},
+			},
+		},
+	}
+
+	eventBus := events.NewBus(100)
+	collected := collectEventsForWorkerTest(eventBus)
+
+	worker := &Worker{
+		unit:     &discovery.Unit{ID: "test-unit"},
+		reviewer: mockReviewer,
+		config: WorkerConfig{
+			TargetBranch: "main",
+			NoPR:         true,
+		},
+		events: eventBus,
+		reviewConfig: &config.CodeReviewConfig{
+			Enabled:          true,
+			MaxFixIterations: 0, // Review-only mode (no fix attempts)
+		},
+	}
+
+	ctx := context.Background()
+	// Should not panic or return error - review is advisory
+	worker.runCodeReview(ctx)
+
+	// Verify review was called
+	assert.True(t, mockReviewer.ReviewCalled, "expected review to be called")
+
+	// Wait for events to be processed
+	waitForEventsInWorkerTest(eventBus)
+
+	// Should emit CodeReviewIssuesFound but NOT block anything
+	var hasIssuesFound bool
+	for _, e := range collected.Get() {
+		if e.Type == events.CodeReviewIssuesFound {
+			hasIssuesFound = true
+		}
+	}
+	assert.True(t, hasIssuesFound, "expected CodeReviewIssuesFound event")
+}
+
+// MockReviewer implements provider.Reviewer for testing
+type MockReviewer struct {
+	ReviewResult *provider.ReviewResult
+	ReviewErr    error
+	ReviewCalled bool
+}
+
+func (m *MockReviewer) Review(ctx context.Context, workdir, baseBranch string) (*provider.ReviewResult, error) {
+	m.ReviewCalled = true
+	if m.ReviewErr != nil {
+		return nil, m.ReviewErr
+	}
+	return m.ReviewResult, nil
+}
+
+func (m *MockReviewer) Name() provider.ProviderType {
+	return "mock"
+}
+
+// collectEventsForWorkerTest subscribes to the event bus and collects events for testing
+func collectEventsForWorkerTest(bus *events.Bus) *events.EventCollector {
+	return events.NewEventCollector(bus)
+}
+
+// waitForEventsInWorkerTest waits for the event bus to process all pending events
+func waitForEventsInWorkerTest(bus *events.Bus) {
+	bus.Wait()
 }

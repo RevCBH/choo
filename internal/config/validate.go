@@ -94,6 +94,15 @@ func validateConfig(cfg *Config) error {
 		})
 	}
 
+	// CodeReview validation
+	if err := cfg.CodeReview.Validate(); err != nil {
+		errs = append(errs, &ValidationError{
+			Field:   "code_review",
+			Value:   cfg.CodeReview.Provider,
+			Message: err.Error(),
+		})
+	}
+
 	// LogLevel must be one of: debug, info, warn, error (case-sensitive)
 	validLogLevels := map[string]bool{
 		"debug": true,
