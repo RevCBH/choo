@@ -174,6 +174,19 @@ func (s *GRPCServer) StartJob(ctx context.Context, req *apiv1.StartJobRequest) (
 			return nil, status.Errorf(codes.Internal, "failed to check for existing job: %v", err)
 		}
 		if existingRun != nil {
+			// Validate that target branch and tasks dir match before attaching.
+			// This prevents attaching to a job with different configuration.
+			if existingRun.TargetBranch != req.TargetBranch {
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"job already running for branch %s but with different target branch (running: %s, requested: %s)",
+					req.FeatureBranch, existingRun.TargetBranch, req.TargetBranch)
+			}
+			if existingRun.TasksDir != req.TasksDir {
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"job already running for branch %s but with different tasks dir (running: %s, requested: %s)",
+					req.FeatureBranch, existingRun.TasksDir, req.TasksDir)
+			}
+
 			// Return existing job ID - client should attach to this
 			return &apiv1.StartJobResponse{
 				JobId:  existingRun.ID,

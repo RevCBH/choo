@@ -149,12 +149,19 @@ func startDaemonBackground() error {
 	// Close the log file handle in the parent - the child has its own copy
 	logFile.Close()
 
-	// Wait briefly and verify the daemon started successfully
-	time.Sleep(500 * time.Millisecond)
-	if isDaemonRunning() {
-		fmt.Printf("Daemon started (PID: %d)\n", pid)
-		fmt.Printf("Logs: %s\n", logPath)
-		return nil
+	// Poll with retries to verify daemon started successfully.
+	// Use exponential backoff: 100ms, 200ms, 400ms, 800ms, 1600ms (total ~3s)
+	// This handles slower systems while still being responsive on fast ones.
+	const maxRetries = 5
+	delay := 100 * time.Millisecond
+	for i := 0; i < maxRetries; i++ {
+		time.Sleep(delay)
+		if isDaemonRunning() {
+			fmt.Printf("Daemon started (PID: %d)\n", pid)
+			fmt.Printf("Logs: %s\n", logPath)
+			return nil
+		}
+		delay *= 2
 	}
 
 	return fmt.Errorf("daemon failed to start - check %s for details", logPath)
@@ -263,47 +270,78 @@ func newDaemonLogsCmd(a *App) *cobra.Command {
 	return cmd
 }
 
-// showLogs displays the last N lines of the log file
+// showLogs displays the last N lines of the log file.
+// Uses an efficient approach that reads from the end of the file
+// instead of loading the entire file into memory.
 func showLogs(logPath string, lines int) error {
-	if lines == 0 {
-		// Show all lines
-		f, err := os.Open(logPath)
-		if err != nil {
-			return fmt.Errorf("failed to open log file: %w", err)
-		}
-		defer f.Close()
-		_, err = io.Copy(os.Stdout, f)
-		return err
-	}
-
-	// Show last N lines (similar to tail -n)
 	f, err := os.Open(logPath)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
 	defer f.Close()
 
-	// Read all lines into a buffer
-	var allLines []string
-	scanner := bufio.NewScanner(f)
-	// Increase buffer size for long lines
-	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
-	for scanner.Scan() {
-		allLines = append(allLines, scanner.Text())
-	}
-	if err := scanner.Err(); err != nil {
-		return fmt.Errorf("error reading log file: %w", err)
+	if lines == 0 {
+		// Show all lines
+		_, err = io.Copy(os.Stdout, f)
+		return err
 	}
 
-	// Print last N lines
-	start := len(allLines) - lines
-	if start < 0 {
-		start = 0
+	// Get file size
+	stat, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat log file: %w", err)
 	}
-	for _, line := range allLines[start:] {
-		fmt.Println(line)
+	fileSize := stat.Size()
+
+	if fileSize == 0 {
+		return nil // Empty file
 	}
-	return nil
+
+	// Read from end to find the position of the Nth newline from the end.
+	// We use a buffer to read chunks from the end.
+	const bufSize = 8192
+	buf := make([]byte, bufSize)
+	newlineCount := 0
+	var startPos int64 = 0
+
+	// Start from end of file and work backwards
+	pos := fileSize
+	for pos > 0 && newlineCount <= lines {
+		// Calculate how much to read
+		readSize := int64(bufSize)
+		if pos < readSize {
+			readSize = pos
+		}
+		pos -= readSize
+
+		// Seek and read
+		if _, err := f.Seek(pos, io.SeekStart); err != nil {
+			return fmt.Errorf("failed to seek: %w", err)
+		}
+		n, err := f.Read(buf[:readSize])
+		if err != nil && err != io.EOF {
+			return fmt.Errorf("failed to read: %w", err)
+		}
+
+		// Count newlines from end of buffer
+		for i := n - 1; i >= 0; i-- {
+			if buf[i] == '\n' {
+				newlineCount++
+				if newlineCount > lines {
+					// Found the position - start after this newline
+					startPos = pos + int64(i) + 1
+					break
+				}
+			}
+		}
+	}
+
+	// Seek to start position and copy to stdout
+	if _, err := f.Seek(startPos, io.SeekStart); err != nil {
+		return fmt.Errorf("failed to seek: %w", err)
+	}
+	_, err = io.Copy(os.Stdout, f)
+	return err
 }
 
 // followLogs tails the log file, showing new content as it's written

@@ -9,13 +9,13 @@ import (
 // Store maintains the current orchestration state.
 // It is safe for concurrent access.
 type Store struct {
-	mu          sync.RWMutex
-	connected   bool              // true when orchestrator is connected
-	status      string            // "waiting", "running", "completed", "failed"
-	startedAt   time.Time
-	parallelism int
-	graph       *GraphData
-	units       map[string]*UnitState
+	mu             sync.RWMutex
+	connectedCount int               // number of connected jobs (for concurrent job support)
+	status         string            // "waiting", "running", "completed", "failed"
+	startedAt      time.Time
+	parallelism    int
+	graph          *GraphData
+	units          map[string]*UnitState
 }
 
 // NewStore creates an empty state store in "waiting" status.
@@ -180,7 +180,7 @@ func (s *Store) Snapshot() *StateSnapshot {
 	}
 
 	snapshot := &StateSnapshot{
-		Connected:   s.connected,
+		Connected:   s.connectedCount > 0,
 		Status:      s.status,
 		Parallelism: s.parallelism,
 		Units:       units,
@@ -205,10 +205,18 @@ func (s *Store) Graph() *GraphData {
 
 // SetConnected updates the connection status.
 // Called when orchestrator connects/disconnects from socket.
+// Uses reference counting to support multiple concurrent jobs:
+// - SetConnected(true) increments the count
+// - SetConnected(false) decrements the count
+// The store reports as "connected" when count > 0.
 func (s *Store) SetConnected(connected bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.connected = connected
+	if connected {
+		s.connectedCount++
+	} else if s.connectedCount > 0 {
+		s.connectedCount--
+	}
 }
 
 // Reset clears all state for a new run.
@@ -216,7 +224,7 @@ func (s *Store) SetConnected(connected bool) {
 func (s *Store) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.connected = false
+	s.connectedCount = 0
 	s.status = "waiting"
 	s.startedAt = time.Time{}
 	s.parallelism = 0
