@@ -3,7 +3,7 @@ package worker
 import (
 	"context"
 	"errors"
-	"os/exec"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -13,6 +13,7 @@ import (
 	"github.com/RevCBH/choo/internal/events"
 	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/provider"
+	"github.com/RevCBH/choo/internal/testutil"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -35,37 +36,22 @@ func TestNewWorker_WithGitOps(t *testing.T) {
 }
 
 func TestNewWorker_CreatesGitOps(t *testing.T) {
-	// Create a real worktree structure for this test
 	baseDir := t.TempDir()
-	mainRepo := filepath.Join(baseDir, "main")
 	worktreeBase := filepath.Join(baseDir, "worktrees")
 	unitID := "test-unit"
-
-	// Initialize main repo with an initial commit
-	if err := exec.Command("git", "init", mainRepo).Run(); err != nil {
-		t.Fatalf("failed to init git repo: %v", err)
-	}
-	cmd := exec.Command("git", "-C", mainRepo, "commit", "--allow-empty", "-m", "initial")
-	cmd.Env = append(cmd.Environ(),
-		"GIT_AUTHOR_NAME=Test",
-		"GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=Test",
-		"GIT_COMMITTER_EMAIL=test@test.com",
-	)
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to create initial commit: %v", err)
-	}
-
-	// Create worktrees directory
-	if err := exec.Command("mkdir", "-p", worktreeBase).Run(); err != nil {
-		t.Fatalf("failed to create worktree base: %v", err)
-	}
-
-	// Create worktree at path matching unit ID
 	worktreePath := filepath.Join(worktreeBase, unitID)
-	if err := exec.Command("git", "-C", mainRepo, "worktree", "add", worktreePath, "-b", "test-branch").Run(); err != nil {
-		t.Fatalf("failed to create worktree: %v", err)
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("failed to create worktree path: %v", err)
 	}
+
+	runner := testutil.NewStubRunner()
+	runner.StubDefault("rev-parse --show-toplevel", worktreePath, nil)
+	runner.StubDefault("rev-parse --absolute-git-dir", filepath.Join(baseDir, ".git", "worktrees", unitID), nil)
+	prevRunner := git.DefaultRunner()
+	git.SetDefaultRunner(runner)
+	t.Cleanup(func() {
+		git.SetDefaultRunner(prevRunner)
+	})
 
 	unit := &discovery.Unit{ID: unitID}
 	cfg := WorkerConfig{WorktreeBase: worktreeBase}
@@ -114,38 +100,21 @@ func TestNewWorker_RejectsRelativePath(t *testing.T) {
 }
 
 func TestInitGitOps(t *testing.T) {
-	// Create a real worktree for this test
-	// We need an actual git worktree (not just a repo) because NewWorktreeGitOps
-	// rejects repo roots for safety
 	baseDir := t.TempDir()
-	mainRepo := filepath.Join(baseDir, "main")
 	worktreeBase := filepath.Join(baseDir, "worktrees")
 	worktreePath := filepath.Join(worktreeBase, "test-wt")
-
-	// Initialize main repo with an initial commit
-	if err := exec.Command("git", "init", mainRepo).Run(); err != nil {
-		t.Fatalf("failed to init git repo: %v", err)
-	}
-	cmd := exec.Command("git", "-C", mainRepo, "commit", "--allow-empty", "-m", "initial")
-	cmd.Env = append(cmd.Environ(),
-		"GIT_AUTHOR_NAME=Test",
-		"GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=Test",
-		"GIT_COMMITTER_EMAIL=test@test.com",
-	)
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("failed to create initial commit: %v", err)
+	if err := os.MkdirAll(worktreePath, 0755); err != nil {
+		t.Fatalf("failed to create worktree path: %v", err)
 	}
 
-	// Create worktrees directory
-	if err := exec.Command("mkdir", "-p", worktreeBase).Run(); err != nil {
-		t.Fatalf("failed to create worktree base: %v", err)
-	}
-
-	// Create worktree
-	if err := exec.Command("git", "-C", mainRepo, "worktree", "add", worktreePath, "-b", "test-branch").Run(); err != nil {
-		t.Fatalf("failed to create worktree: %v", err)
-	}
+	runner := testutil.NewStubRunner()
+	runner.StubDefault("rev-parse --show-toplevel", worktreePath, nil)
+	runner.StubDefault("rev-parse --absolute-git-dir", filepath.Join(baseDir, ".git", "worktrees", "test-wt"), nil)
+	prevRunner := git.DefaultRunner()
+	git.SetDefaultRunner(runner)
+	t.Cleanup(func() {
+		git.SetDefaultRunner(prevRunner)
+	})
 
 	// Create worker with no initial gitOps
 	w := &Worker{

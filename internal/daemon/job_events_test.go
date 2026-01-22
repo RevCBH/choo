@@ -2,8 +2,6 @@ package daemon
 
 import (
 	"context"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -12,55 +10,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// setupTestRepo creates a temporary git repository for testing with proper config.
-// Returns the repo path. The directory is automatically cleaned up when the test ends.
-func setupTestRepo(t *testing.T) string {
-	t.Helper()
-
-	tmpDir, err := os.MkdirTemp("", "daemon_test_repo_*")
-	require.NoError(t, err)
-	t.Cleanup(func() {
-		os.RemoveAll(tmpDir)
-	})
-
-	// Initialize git repo
-	cmd := exec.Command("git", "init")
-	cmd.Dir = tmpDir
-	require.NoError(t, cmd.Run())
-
-	// Configure git user for commits
-	cmd = exec.Command("git", "config", "user.email", "test@example.com")
-	cmd.Dir = tmpDir
-	require.NoError(t, cmd.Run())
-
-	cmd = exec.Command("git", "config", "user.name", "Test User")
-	cmd.Dir = tmpDir
-	require.NoError(t, cmd.Run())
-
-	// Add a remote (doesn't need to be real, just parseable)
-	cmd = exec.Command("git", "remote", "add", "origin", "https://github.com/test-owner/test-repo.git")
-	cmd.Dir = tmpDir
-	require.NoError(t, cmd.Run())
-
-	// Create an initial commit so we have a valid branch
-	readmePath := filepath.Join(tmpDir, "README.md")
-	require.NoError(t, os.WriteFile(readmePath, []byte("# Test Repo"), 0644))
-
-	cmd = exec.Command("git", "add", ".")
-	cmd.Dir = tmpDir
-	require.NoError(t, cmd.Run())
-
-	cmd = exec.Command("git", "commit", "-m", "Initial commit")
-	cmd.Dir = tmpDir
-	require.NoError(t, cmd.Run())
-
-	// Create a tasks directory
-	tasksDir := filepath.Join(tmpDir, "specs", "tasks")
-	require.NoError(t, os.MkdirAll(tasksDir, 0755))
-
-	return tmpDir
-}
 
 // validJobConfigWithRepo returns a valid JobConfig for testing using the given repo path.
 func validJobConfigWithRepo(repoPath string) JobConfig {

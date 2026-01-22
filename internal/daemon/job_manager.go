@@ -44,6 +44,10 @@ type jobManagerImpl struct {
 	OnJobComplete func(jobID string)
 }
 
+var newOrchestrator = func(cfg orchestrator.Config, deps orchestrator.Dependencies) orchestratorRunner {
+	return orchestrator.New(cfg, deps)
+}
+
 // NewJobManager creates a new job manager.
 func NewJobManager(database *db.DB, maxJobs int) *jobManagerImpl {
 	return &jobManagerImpl{
@@ -175,7 +179,7 @@ func (jm *jobManagerImpl) Start(ctx context.Context, cancel context.CancelFunc, 
 		GitHub:    ghClient,
 	}
 
-	orch := orchestrator.New(orchConfig, orchDeps)
+	orch := newOrchestrator(orchConfig, orchDeps)
 
 	// 12. Set up event forwarding to Store (always) and Hub (if available)
 	// Mark store as connected when job starts

@@ -15,11 +15,15 @@ import (
 // cancellation and event access.
 type ManagedJob struct {
 	ID           string
-	Orchestrator *orchestrator.Orchestrator
+	Orchestrator orchestratorRunner
 	Cancel       context.CancelFunc
 	Events       *events.Bus
 	StartedAt    time.Time
 	Config       JobConfig
+}
+
+type orchestratorRunner interface {
+	Run(ctx context.Context) (*orchestrator.Result, error)
 }
 
 // Validate checks the JobConfig for required fields.

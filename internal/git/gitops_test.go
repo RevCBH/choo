@@ -1,4 +1,6 @@
-// internal/git/gitops_test.go
+//go:build integration
+// +build integration
+
 package git
 
 import (
