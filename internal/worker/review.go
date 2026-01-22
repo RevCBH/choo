@@ -297,17 +297,17 @@ func (w *Worker) cleanupWorktreeLegacy(ctx context.Context) {
 		return
 	}
 
-	if err := w.runner().Exec(ctx, w.worktreePath, "reset", "HEAD"); err != nil {
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "reset", "HEAD"); err != nil {
 		if w.reviewConfig != nil && w.reviewConfig.Verbose {
 			fmt.Fprintf(os.Stderr, "Warning: git reset failed: %v\n", err)
 		}
 	}
-	if err := w.runner().Exec(ctx, w.worktreePath, "clean", "-fd"); err != nil {
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "clean", "-fd"); err != nil {
 		if w.reviewConfig != nil && w.reviewConfig.Verbose {
 			fmt.Fprintf(os.Stderr, "Warning: git clean failed: %v\n", err)
 		}
 	}
-	if err := w.runner().Exec(ctx, w.worktreePath, "checkout", "."); err != nil {
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "checkout", "."); err != nil {
 		if w.reviewConfig != nil && w.reviewConfig.Verbose {
 			fmt.Fprintf(os.Stderr, "Warning: git checkout failed: %v\n", err)
 		}

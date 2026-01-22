@@ -46,6 +46,8 @@ type Worker struct {
 
 	reviewer     provider.Reviewer        // For code review (may be nil if disabled)
 	reviewConfig *config.CodeReviewConfig // Review configuration
+	//nolint:unused // WIP: used by merge flow when PR creation is wired up.
+	prNumber int
 
 	// invokeClaudeWithOutput is the function that invokes Claude and captures output
 	// Can be overridden for testing
