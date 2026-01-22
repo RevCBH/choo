@@ -3,10 +3,12 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/RevCBH/choo/internal/config"
@@ -921,4 +923,207 @@ func TestCleanupWorktree_CheckoutFiles_Dot(t *testing.T) {
 	if len(paths) != 1 || paths[0] != "." {
 		t.Errorf("expected CheckoutFiles to be called with [\".\"], got %v", paths)
 	}
+}
+
+// === GitOps-based commitReviewFixes tests ===
+
+func TestCommitReviewFixes_GitOps_NoChanges(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: true}
+
+	w := &Worker{gitOps: mockOps}
+
+	committed, err := w.commitReviewFixes(context.Background())
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if committed {
+		t.Error("expected committed=false when no changes")
+	}
+	mockOps.AssertCalled(t, "Status")
+	mockOps.AssertNotCalled(t, "AddAll")
+	mockOps.AssertNotCalled(t, "Commit")
+}
+
+func TestCommitReviewFixes_GitOps_WithChanges(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+
+	w := &Worker{gitOps: mockOps}
+
+	committed, err := w.commitReviewFixes(context.Background())
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !committed {
+		t.Error("expected committed=true when changes exist")
+	}
+	mockOps.AssertCalled(t, "AddAll")
+	mockOps.AssertCalled(t, "Commit")
+}
+
+func TestCommitReviewFixes_GitOps_ProtectedBranch(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+	mockOps.CommitErr = fmt.Errorf("%w: main", git.ErrProtectedBranch)
+
+	w := &Worker{gitOps: mockOps}
+
+	_, err := w.commitReviewFixes(context.Background())
+
+	if err == nil {
+		t.Error("expected error for protected branch")
+	}
+	if !errors.Is(err, git.ErrProtectedBranch) {
+		t.Errorf("expected error to wrap ErrProtectedBranch, got %v", err)
+	}
+}
+
+func TestCommitReviewFixes_GitOps_StatusError(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusErr = errors.New("status failed")
+
+	w := &Worker{gitOps: mockOps}
+
+	_, err := w.commitReviewFixes(context.Background())
+
+	if err == nil {
+		t.Error("expected error from Status")
+	}
+	if !strings.Contains(err.Error(), "checking for changes") {
+		t.Errorf("expected error to contain 'checking for changes', got %v", err)
+	}
+}
+
+func TestCommitReviewFixes_GitOps_AddAllError(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+	mockOps.AddAllErr = errors.New("add failed")
+
+	w := &Worker{gitOps: mockOps}
+
+	_, err := w.commitReviewFixes(context.Background())
+
+	if err == nil {
+		t.Error("expected error from AddAll")
+	}
+	if !strings.Contains(err.Error(), "staging changes") {
+		t.Errorf("expected error to contain 'staging changes', got %v", err)
+	}
+}
+
+func TestCommitReviewFixes_GitOps_CommitMessage(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+
+	w := &Worker{gitOps: mockOps}
+	w.commitReviewFixes(context.Background())
+
+	commitCalls := mockOps.GetCallsFor("Commit")
+	if len(commitCalls) != 1 {
+		t.Fatalf("expected 1 Commit call, got %d", len(commitCalls))
+	}
+	msg := commitCalls[0].Args[0].(string)
+	if msg != "fix: address code review feedback" {
+		t.Errorf("expected message 'fix: address code review feedback', got %s", msg)
+	}
+}
+
+func TestCommitReviewFixes_GitOps_NoVerify(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+
+	w := &Worker{gitOps: mockOps}
+	w.commitReviewFixes(context.Background())
+
+	commitCalls := mockOps.GetCallsFor("Commit")
+	if len(commitCalls) != 1 {
+		t.Fatalf("expected 1 Commit call, got %d", len(commitCalls))
+	}
+	opts := commitCalls[0].Args[1].(git.CommitOpts)
+	if !opts.NoVerify {
+		t.Error("expected NoVerify=true")
+	}
+}
+
+// === GitOps-based hasUncommittedChanges tests ===
+
+func TestHasUncommittedChanges_GitOps_Clean(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: true}
+
+	w := &Worker{gitOps: mockOps}
+
+	hasChanges, err := w.hasUncommittedChanges(context.Background())
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if hasChanges {
+		t.Error("expected hasChanges=false when Clean=true")
+	}
+}
+
+func TestHasUncommittedChanges_GitOps_Modified(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+
+	w := &Worker{gitOps: mockOps}
+
+	hasChanges, err := w.hasUncommittedChanges(context.Background())
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if !hasChanges {
+		t.Error("expected hasChanges=true when files modified")
+	}
+}
+
+func TestHasUncommittedChanges_GitOps_NilGitOps(t *testing.T) {
+	// Test that nil gitOps falls back to legacy behavior
+	repoDir := setupTestRepo(t)
+
+	w := &Worker{
+		gitOps:       nil, // No GitOps
+		worktreePath: repoDir,
+		gitRunner:    git.DefaultRunner(),
+	}
+
+	// Clean repo should return false
+	hasChanges, err := w.hasUncommittedChanges(context.Background())
+
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if hasChanges {
+		t.Error("expected hasChanges=false for clean repo")
+	}
+}
+
+func TestCommitReviewFixes_GitOps_NilGitOps(t *testing.T) {
+	// Test that nil gitOps falls back to legacy behavior
+	repoDir := setupTestRepo(t)
+
+	// Create a file to commit
+	testFile := filepath.Join(repoDir, "test.txt")
+	require.NoError(t, os.WriteFile(testFile, []byte("modified"), 0644))
+
+	w := &Worker{
+		gitOps:       nil, // No GitOps
+		worktreePath: repoDir,
+		gitRunner:    git.DefaultRunner(),
+	}
+
+	committed, err := w.commitReviewFixes(context.Background())
+
+	require.NoError(t, err)
+	assert.True(t, committed)
+
+	// Verify commit was created
+	output, err := w.runner().Exec(context.Background(), repoDir, "log", "-1", "--pretty=format:%s")
+	require.NoError(t, err)
+	assert.Equal(t, "fix: address code review feedback", output)
 }

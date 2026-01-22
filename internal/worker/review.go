@@ -165,23 +165,57 @@ func (w *Worker) invokeProviderForFix(ctx context.Context, fixPrompt string) err
 // commitReviewFixes commits any changes made during the fix attempt.
 // Returns (true, nil) if changes were committed, (false, nil) if no changes.
 func (w *Worker) commitReviewFixes(ctx context.Context) (bool, error) {
-	// 1. Check for staged/unstaged changes using git status
-	hasChanges, err := w.hasUncommittedChanges(ctx)
+	// Phase 1-2: Check if GitOps is available
+	if w.gitOps == nil {
+		return w.commitReviewFixesLegacy(ctx)
+	}
+
+	// 1. Check for staged/unstaged changes via Status
+	status, err := w.gitOps.Status(ctx)
 	if err != nil {
 		return false, fmt.Errorf("checking for changes: %w", err)
 	}
-	if !hasChanges {
-		return false, nil // No changes to commit
+	if status.Clean {
+		return false, nil
 	}
 
 	// 2. Stage all changes
-	if _, err := w.runner().Exec(ctx, w.worktreePath, "add", "-A"); err != nil {
+	if err := w.gitOps.AddAll(ctx); err != nil {
 		return false, fmt.Errorf("staging changes: %w", err)
 	}
 
-	// 3. Commit with standardized message (--no-verify to skip hooks)
+	// 3. Commit with standardized message
 	commitMsg := "fix: address code review feedback"
-	if _, err := w.runner().Exec(ctx, w.worktreePath, "commit", "-m", commitMsg, "--no-verify"); err != nil {
+	if err := w.gitOps.Commit(ctx, commitMsg, git.CommitOpts{NoVerify: true}); err != nil {
+		// Handle branch guard errors
+		if errors.Is(err, git.ErrProtectedBranch) {
+			return false, fmt.Errorf("cannot commit to protected branch: %w", err)
+		}
+		return false, fmt.Errorf("committing changes: %w", err)
+	}
+
+	return true, nil
+}
+
+// commitReviewFixesLegacy is the old implementation using raw Runner.
+// Retained for Phase 1-2 backward compatibility.
+func (w *Worker) commitReviewFixesLegacy(ctx context.Context) (bool, error) {
+	if w.worktreePath == "" {
+		return false, nil
+	}
+
+	// Check for changes
+	out, _ := w.runner().Exec(ctx, w.worktreePath, "status", "--porcelain")
+	if strings.TrimSpace(out) == "" {
+		return false, nil
+	}
+
+	// Stage and commit
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "add", "-A"); err != nil {
+		return false, fmt.Errorf("staging changes: %w", err)
+	}
+	_, err := w.runner().Exec(ctx, w.worktreePath, "commit", "-m", "fix: address code review feedback", "--no-verify")
+	if err != nil {
 		return false, fmt.Errorf("committing changes: %w", err)
 	}
 
@@ -190,12 +224,29 @@ func (w *Worker) commitReviewFixes(ctx context.Context) (bool, error) {
 
 // hasUncommittedChanges returns true if there are staged or unstaged changes.
 func (w *Worker) hasUncommittedChanges(ctx context.Context) (bool, error) {
-	// git status --porcelain returns empty string if clean
-	output, err := w.runner().Exec(ctx, w.worktreePath, "status", "--porcelain")
+	// Phase 1-2: Check if GitOps is available
+	if w.gitOps == nil {
+		return w.hasUncommittedChangesLegacy(ctx)
+	}
+
+	status, err := w.gitOps.Status(ctx)
 	if err != nil {
 		return false, err
 	}
-	return strings.TrimSpace(output) != "", nil
+	return !status.Clean, nil
+}
+
+// hasUncommittedChangesLegacy is the old implementation using raw Runner.
+func (w *Worker) hasUncommittedChangesLegacy(ctx context.Context) (bool, error) {
+	if w.worktreePath == "" {
+		return false, nil
+	}
+
+	out, err := w.runner().Exec(ctx, w.worktreePath, "status", "--porcelain")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
 }
 
 // cleanupWorktree resets any uncommitted changes left by failed fix attempts.
