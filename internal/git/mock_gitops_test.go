@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+// testAuditLogger implements AuditLogger for tests
+type testAuditLogger struct {
+	entries []AuditEntry
+}
+
+func (l *testAuditLogger) Log(entry AuditEntry) {
+	l.entries = append(l.entries, entry)
+}
+
 func TestMockGitOps_MethodsStatus(t *testing.T) {
 	mock := NewMockGitOps("/repo")
 	mock.StatusResult = StatusResult{
@@ -107,4 +116,146 @@ func TestMockGitOps_MethodsRecordsCalls(t *testing.T) {
 func TestMockGitOps_MethodsImplementsInterface(t *testing.T) {
 	// Compile-time check that MockGitOps implements GitOps
 	var _ GitOps = (*MockGitOps)(nil)
+}
+
+// Safety simulation tests
+
+func TestMockGitOps_SafetyDestructiveBlocked(t *testing.T) {
+	mock := NewMockGitOpsWithOpts("/repo", GitOpsOpts{
+		AllowDestructive: false,
+	})
+
+	err := mock.ResetHard(context.Background(), "HEAD")
+
+	if !errors.Is(err, ErrDestructiveNotAllowed) {
+		t.Errorf("expected ErrDestructiveNotAllowed, got %v", err)
+	}
+	if len(mock.Calls) != 1 || mock.Calls[0].BlockedBy != "AllowDestructive" {
+		t.Error("expected call to be blocked by AllowDestructive")
+	}
+}
+
+func TestMockGitOps_SafetyCleanBlocked(t *testing.T) {
+	mock := NewMockGitOpsWithOpts("/repo", GitOpsOpts{
+		AllowDestructive: false,
+	})
+
+	err := mock.Clean(context.Background(), CleanOpts{Force: true})
+
+	if !errors.Is(err, ErrDestructiveNotAllowed) {
+		t.Errorf("expected ErrDestructiveNotAllowed, got %v", err)
+	}
+	if len(mock.Calls) != 1 || mock.Calls[0].BlockedBy != "AllowDestructive" {
+		t.Error("expected call to be blocked by AllowDestructive")
+	}
+}
+
+func TestMockGitOps_SafetyCheckoutFilesBlocked(t *testing.T) {
+	mock := NewMockGitOpsWithOpts("/repo", GitOpsOpts{
+		AllowDestructive: false,
+	})
+
+	err := mock.CheckoutFiles(context.Background(), "file.go")
+
+	if !errors.Is(err, ErrDestructiveNotAllowed) {
+		t.Errorf("expected ErrDestructiveNotAllowed, got %v", err)
+	}
+	if len(mock.Calls) != 1 || mock.Calls[0].BlockedBy != "AllowDestructive" {
+		t.Error("expected call to be blocked by AllowDestructive")
+	}
+}
+
+func TestMockGitOps_SafetyForcePushBlocked(t *testing.T) {
+	mock := NewMockGitOpsWithOpts("/repo", GitOpsOpts{
+		AllowDestructive: false,
+	})
+
+	err := mock.Push(context.Background(), "origin", "main", PushOpts{Force: true})
+
+	if !errors.Is(err, ErrDestructiveNotAllowed) {
+		t.Errorf("expected ErrDestructiveNotAllowed, got %v", err)
+	}
+	if len(mock.Calls) != 1 || mock.Calls[0].BlockedBy != "AllowDestructive" {
+		t.Error("expected call to be blocked by AllowDestructive")
+	}
+}
+
+func TestMockGitOps_SafetyDestructiveAllowed(t *testing.T) {
+	mock := NewMockGitOpsWithOpts("/repo", GitOpsOpts{
+		AllowDestructive: true,
+	})
+
+	err := mock.ResetHard(context.Background(), "HEAD")
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	err = mock.Clean(context.Background(), CleanOpts{Force: true})
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	err = mock.CheckoutFiles(context.Background(), "file.go")
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+
+	if len(mock.Calls) != 3 {
+		t.Errorf("expected 3 calls, got %d", len(mock.Calls))
+	}
+	for _, call := range mock.Calls {
+		if call.BlockedBy != "" {
+			t.Errorf("expected call %s not to be blocked, but was blocked by %s", call.Method, call.BlockedBy)
+		}
+	}
+}
+
+func TestMockGitOps_SafetyBranchGuardProtected(t *testing.T) {
+	mock := NewMockGitOpsWithOpts("/repo", GitOpsOpts{
+		BranchGuard: &BranchGuard{
+			ProtectedBranches: []string{"main", "master"},
+		},
+		AllowDestructive: true,
+	})
+	mock.CurrentBranchResult = "main"
+
+	err := mock.Commit(context.Background(), "msg", CommitOpts{})
+
+	if !errors.Is(err, ErrProtectedBranch) {
+		t.Errorf("expected ErrProtectedBranch, got %v", err)
+	}
+}
+
+func TestMockGitOps_SafetyBranchGuardAllowed(t *testing.T) {
+	mock := NewMockGitOpsWithOpts("/repo", GitOpsOpts{
+		BranchGuard: &BranchGuard{
+			ProtectedBranches: []string{"main"},
+		},
+		AllowDestructive: true,
+	})
+	mock.CurrentBranchResult = "feature/test"
+
+	err := mock.Commit(context.Background(), "msg", CommitOpts{})
+
+	if err != nil {
+		t.Errorf("expected no error, got %v", err)
+	}
+}
+
+func TestMockGitOps_SafetyAuditLogged(t *testing.T) {
+	logger := &testAuditLogger{}
+	mock := NewMockGitOpsWithOpts("/repo", GitOpsOpts{
+		AuditLogger:      logger,
+		AllowDestructive: true,
+	})
+
+	mock.Commit(context.Background(), "msg", CommitOpts{})
+
+	entries := mock.GetAuditEntries()
+	if len(entries) != 1 {
+		t.Errorf("expected 1 audit entry, got %d", len(entries))
+	}
+	if entries[0].Operation != "Commit" {
+		t.Errorf("expected operation Commit, got %s", entries[0].Operation)
+	}
 }
