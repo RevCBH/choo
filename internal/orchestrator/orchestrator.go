@@ -33,6 +33,8 @@ type Orchestrator struct {
 	// Runtime state
 	units   []*discovery.Unit
 	unitMap map[string]*discovery.Unit // unitID -> Unit for quick lookup
+	// completedUnits tracks unit IDs for PR description
+	completedUnits []string
 
 	// Synchronization for background goroutines
 	escalateMu     sync.Mutex
@@ -82,6 +84,12 @@ type Config struct {
 
 	// FeatureBranch is the feature branch name when in feature mode
 	FeatureBranch string
+
+	// FeatureTitle is the title used for feature PRs
+	FeatureTitle string
+
+	// FeatureDescription is the summary used for feature PRs
+	FeatureDescription string
 
 	// FeatureMode is true when operating in feature mode
 	FeatureMode bool
@@ -841,8 +849,7 @@ func (o *Orchestrator) dryRun(units []*discovery.Unit) (*Result, error) {
 // prURLPattern matches GitHub PR URLs
 var prURLPattern = regexp.MustCompile(`https://github\.com/[^/]+/[^/]+/pull/\d+`)
 
-// createFeaturePR creates a PR for the feature branch using Claude
-// If completedUnitIDs is nil, it uses o.units to get the list
+// createFeaturePR creates a pull request for the feature branch.
 func (o *Orchestrator) createFeaturePR(ctx context.Context, completedUnitIDs ...string) (string, error) {
 	if !o.cfg.FeatureMode || o.cfg.FeatureBranch == "" {
 		return "", nil // Not in feature mode, nothing to do
@@ -857,50 +864,46 @@ func (o *Orchestrator) createFeaturePR(ctx context.Context, completedUnitIDs ...
 		return "", fmt.Errorf("failed to push feature branch: %w", err)
 	}
 
-	// Collect completed unit names
-	var completedUnits []string
 	if len(completedUnitIDs) > 0 {
-		completedUnits = completedUnitIDs
-	} else {
+		o.completedUnits = append([]string(nil), completedUnitIDs...)
+	} else if len(o.completedUnits) == 0 {
 		for _, unit := range o.units {
-			completedUnits = append(completedUnits, unit.ID)
+			o.completedUnits = append(o.completedUnits, unit.ID)
 		}
 	}
 
-	// Build prompt for Claude
-	prompt := worker.BuildFeaturePRPrompt(o.cfg.FeatureBranch, o.cfg.TargetBranch, completedUnits)
+	title := fmt.Sprintf("feat: %s", o.cfg.FeatureTitle)
+	body := o.buildPRBody()
 
-	// Get Claude command (use configured command or default)
-	claudeCmd := o.cfg.ClaudeCommand
-	if claudeCmd == "" {
-		claudeCmd = "claude"
-	}
-
-	// Invoke Claude to create the PR
-	cmd := exec.CommandContext(ctx, claudeCmd,
-		"--dangerously-skip-permissions",
-		"-p", prompt,
+	prCmd := exec.CommandContext(ctx, "gh", "pr", "create",
+		"--base", o.cfg.TargetBranch,
+		"--head", o.cfg.FeatureBranch,
+		"--title", title,
+		"--body", body,
 	)
-	cmd.Dir = o.cfg.RepoRoot
+	prCmd.Dir = o.cfg.RepoRoot
 
-	output, err := cmd.Output()
+	output, err := prCmd.CombinedOutput()
 	if err != nil {
-		return "", fmt.Errorf("claude failed to create PR: %w", err)
+		return "", fmt.Errorf("gh pr create failed: %w", err)
 	}
 
-	// Extract PR URL from output
 	prURL := prURLPattern.FindString(string(output))
 	if prURL == "" {
-		return "", fmt.Errorf("could not find PR URL in Claude output")
+		prURL = strings.TrimSpace(string(output))
+	}
+	if prURL == "" {
+		return "", fmt.Errorf("could not find PR URL in gh output")
 	}
 
-	// Emit event
-	o.bus.Emit(events.NewEvent(events.PRCreated, "").
-		WithPayload(map[string]any{
-			"url":    prURL,
-			"branch": o.cfg.FeatureBranch,
-			"target": o.cfg.TargetBranch,
-		}))
+	if o.bus != nil {
+		o.bus.Emit(events.NewEvent(events.PRCreated, "").
+			WithPayload(map[string]any{
+				"url":    prURL,
+				"branch": o.cfg.FeatureBranch,
+				"target": o.cfg.TargetBranch,
+			}))
+	}
 
 	return prURL, nil
 }
