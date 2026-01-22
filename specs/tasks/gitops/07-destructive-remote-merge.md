@@ -1,6 +1,6 @@
 ---
 task: 7
-status: pending
+status: complete
 backpressure: "go test ./internal/git/... -run 'TestGitOps_Destructive|TestGitOps_Remote|TestGitOps_Merge' -v"
 depends_on: [3, 6]
 ---
