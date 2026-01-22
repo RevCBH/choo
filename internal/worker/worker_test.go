@@ -45,7 +45,11 @@ func TestNewWorker_CreatesGitOps(t *testing.T) {
 	}
 
 	runner := testutil.NewStubRunner()
-	runner.StubDefault("rev-parse --show-toplevel", worktreePath, nil)
+	canonicalWorktreePath := worktreePath
+	if resolved, err := filepath.EvalSymlinks(worktreePath); err == nil {
+		canonicalWorktreePath = filepath.Clean(resolved)
+	}
+	runner.StubDefault("rev-parse --show-toplevel", canonicalWorktreePath, nil)
 	runner.StubDefault("rev-parse --absolute-git-dir", filepath.Join(baseDir, ".git", "worktrees", unitID), nil)
 	prevRunner := git.DefaultRunner()
 	git.SetDefaultRunner(runner)
@@ -108,7 +112,11 @@ func TestInitGitOps(t *testing.T) {
 	}
 
 	runner := testutil.NewStubRunner()
-	runner.StubDefault("rev-parse --show-toplevel", worktreePath, nil)
+	canonicalWorktreePath := worktreePath
+	if resolved, err := filepath.EvalSymlinks(worktreePath); err == nil {
+		canonicalWorktreePath = filepath.Clean(resolved)
+	}
+	runner.StubDefault("rev-parse --show-toplevel", canonicalWorktreePath, nil)
 	runner.StubDefault("rev-parse --absolute-git-dir", filepath.Join(baseDir, ".git", "worktrees", "test-wt"), nil)
 	prevRunner := git.DefaultRunner()
 	git.SetDefaultRunner(runner)

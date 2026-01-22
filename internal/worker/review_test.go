@@ -401,9 +401,9 @@ func TestReviewFixLoop_CleanupOnExit(t *testing.T) {
 	ctx := context.Background()
 	w.runReviewFixLoop(ctx, issues)
 
-	assert.Equal(t, 1, runner.callsFor("reset", "HEAD"))
-	assert.Equal(t, 1, runner.callsFor("clean", "-fd"))
-	assert.Equal(t, 1, runner.callsFor("checkout", "."))
+	assert.Equal(t, 2, runner.callsFor("reset", "HEAD"))
+	assert.Equal(t, 2, runner.callsFor("clean", "-fd"))
+	assert.Equal(t, 2, runner.callsFor("checkout", "."))
 }
 
 func TestInvokeProviderForFix_NilProvider(t *testing.T) {
