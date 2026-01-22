@@ -2,9 +2,12 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
+	"testing"
 	"time"
 )
 
@@ -476,4 +479,161 @@ func (m *MockGitOps) MergeAbort(ctx context.Context) error {
 	defer m.mu.Unlock()
 	m.record(MockCall{Method: "MergeAbort"})
 	return m.MergeAbortErr
+}
+
+// Assertion helpers
+
+// AssertCalled verifies that a method was called at least once.
+func (m *MockGitOps) AssertCalled(t testing.TB, method string) {
+	t.Helper()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, call := range m.Calls {
+		if call.Method == method {
+			return
+		}
+	}
+	t.Errorf("expected %s to be called, but it wasn't", method)
+}
+
+// AssertNotCalled verifies that a method was never called.
+func (m *MockGitOps) AssertNotCalled(t testing.TB, method string) {
+	t.Helper()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, call := range m.Calls {
+		if call.Method == method {
+			t.Errorf("expected %s not to be called, but it was", method)
+			return
+		}
+	}
+}
+
+// AssertCallCount verifies the exact number of times a method was called.
+func (m *MockGitOps) AssertCallCount(t testing.TB, method string, count int) {
+	t.Helper()
+	actual := m.CallCount(method)
+	if actual != count {
+		t.Errorf("expected %s to be called %d times, got %d", method, count, actual)
+	}
+}
+
+// CallCount returns the number of times a method was called.
+func (m *MockGitOps) CallCount(method string) int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	count := 0
+	for _, call := range m.Calls {
+		if call.Method == method {
+			count++
+		}
+	}
+	return count
+}
+
+// AssertCalledWith verifies a method was called with specific arguments.
+func (m *MockGitOps) AssertCalledWith(t testing.TB, method string, args ...any) {
+	t.Helper()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, call := range m.Calls {
+		if call.Method == method && reflect.DeepEqual(call.Args, args) {
+			return
+		}
+	}
+	t.Errorf("expected %s to be called with %v, but it wasn't", method, args)
+}
+
+// AssertCallOrder verifies methods were called in a specific sequence.
+func (m *MockGitOps) AssertCallOrder(t testing.TB, methods ...string) {
+	t.Helper()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if len(methods) == 0 {
+		return
+	}
+
+	methodIdx := 0
+	for _, call := range m.Calls {
+		if call.Method == methods[methodIdx] {
+			methodIdx++
+			if methodIdx == len(methods) {
+				return // All methods found in order
+			}
+		}
+	}
+
+	t.Errorf("expected call order %v, but only found %d of %d in order", methods, methodIdx, len(methods))
+}
+
+// GetCalls returns all recorded calls for inspection.
+func (m *MockGitOps) GetCalls() []MockCall {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return append([]MockCall{}, m.Calls...)
+}
+
+// GetCallsFor returns all calls to a specific method.
+func (m *MockGitOps) GetCallsFor(method string) []MockCall {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var calls []MockCall
+	for _, call := range m.Calls {
+		if call.Method == method {
+			calls = append(calls, call)
+		}
+	}
+	return calls
+}
+
+// Safety-related assertion helpers
+
+// AssertDestructiveBlocked verifies a destructive operation was rejected.
+func (m *MockGitOps) AssertDestructiveBlocked(t testing.TB, method string) {
+	t.Helper()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, call := range m.Calls {
+		if call.Method == method && call.BlockedBy == "AllowDestructive" {
+			if errors.Is(call.Error, ErrDestructiveNotAllowed) {
+				return
+			}
+		}
+	}
+	t.Errorf("expected %s to be blocked by AllowDestructive check, but it wasn't", method)
+}
+
+// AssertBranchGuardTriggered verifies a branch guard check rejected an operation.
+func (m *MockGitOps) AssertBranchGuardTriggered(t testing.TB, method string) {
+	t.Helper()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, call := range m.Calls {
+		if call.Method == method && call.BlockedBy == "BranchGuard" {
+			return
+		}
+	}
+	t.Errorf("expected %s to trigger BranchGuard, but it didn't", method)
+}
+
+// AssertAuditLogged verifies an audit entry was created for the given operation.
+func (m *MockGitOps) AssertAuditLogged(t testing.TB, operation string) {
+	t.Helper()
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for _, entry := range m.AuditEntries {
+		if entry.Operation == operation {
+			return
+		}
+	}
+	t.Errorf("expected audit entry for %s, but none found", operation)
 }
