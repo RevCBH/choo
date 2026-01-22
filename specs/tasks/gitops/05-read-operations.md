@@ -1,6 +1,6 @@
 ---
 task: 5
-status: pending
+status: complete
 backpressure: "go test ./internal/git/... -run TestGitOps_Read -v"
 depends_on: [4]
 ---
