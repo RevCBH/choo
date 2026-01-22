@@ -352,26 +352,190 @@ func (g *gitOps) BranchExists(ctx context.Context, branch string) (bool, error) 
 	return err == nil, nil
 }
 
-// Stub implementations for interface compliance - will be implemented in Tasks #6-7
+// validateBranchGuard enforces branch/remote constraints before write operations.
+func (g *gitOps) validateBranchGuard(ctx context.Context) error {
+	if g.opts.BranchGuard == nil {
+		return nil
+	}
 
-func (g *gitOps) CheckoutBranch(ctx context.Context, branch string, create bool) error {
-	panic("not implemented")
+	branch, err := g.currentBranchInternal(ctx)
+	if err != nil {
+		return fmt.Errorf("branch guard: %w", err)
+	}
+
+	guard := g.opts.BranchGuard
+
+	// Check exact match
+	if guard.ExpectedBranch != "" && branch != guard.ExpectedBranch {
+		return fmt.Errorf("%w: expected=%s, actual=%s", ErrUnexpectedBranch, guard.ExpectedBranch, branch)
+	}
+
+	// Check prefix match
+	if len(guard.AllowedBranchPrefixes) > 0 {
+		allowed := false
+		for _, prefix := range guard.AllowedBranchPrefixes {
+			if strings.HasPrefix(branch, prefix) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return fmt.Errorf("%w: branch=%s, allowed=%v", ErrUnexpectedBranch, branch, guard.AllowedBranchPrefixes)
+		}
+	}
+
+	// Check protected branches
+	protected := guard.ProtectedBranches
+	if len(protected) == 0 {
+		protected = []string{"main", "master"}
+	}
+	for _, p := range protected {
+		if branch == p {
+			return fmt.Errorf("%w: %s", ErrProtectedBranch, branch)
+		}
+	}
+
+	return nil
 }
 
+// Add stages the specified files.
 func (g *gitOps) Add(ctx context.Context, paths ...string) error {
-	panic("not implemented")
+	if err := g.validateRuntime(ctx); err != nil {
+		return err
+	}
+	args := append([]string{"add", "--"}, paths...)
+	_, err := g.exec(ctx, args...)
+	return err
 }
 
+// AddAll stages all changes (git add -A).
 func (g *gitOps) AddAll(ctx context.Context) error {
-	panic("not implemented")
+	if err := g.validateRuntime(ctx); err != nil {
+		return err
+	}
+	_, err := g.exec(ctx, "add", "-A")
+	return err
 }
 
+// Reset unstages the specified files (or all if none specified).
+// Acquires per-repo lock.
 func (g *gitOps) Reset(ctx context.Context, paths ...string) error {
-	panic("not implemented")
+	start := time.Now()
+	checks := []string{"path_valid"}
+
+	if err := g.validateRuntime(ctx); err != nil {
+		g.audit(AuditEntry{
+			Timestamp: start, Operation: "Reset", RepoPath: g.path,
+			SafetyChecks: checks, ChecksPassed: false, FailureReason: err.Error(),
+			Duration: time.Since(start),
+		})
+		return err
+	}
+
+	lock := getRepoLock(g.path)
+	lock.Lock()
+	defer lock.Unlock()
+
+	args := []string{"reset", "HEAD"}
+	if len(paths) > 0 {
+		args = append(args, "--")
+		args = append(args, paths...)
+	}
+	_, err := g.exec(ctx, args...)
+
+	g.audit(AuditEntry{
+		Timestamp: start, Operation: "Reset", RepoPath: g.path, Args: args,
+		SafetyChecks: checks, ChecksPassed: err == nil,
+		Duration: time.Since(start), Error: errorString(err),
+	})
+
+	return err
 }
 
+// Commit creates a commit with the given message.
+// Validates branch guard and acquires per-repo lock.
 func (g *gitOps) Commit(ctx context.Context, msg string, opts CommitOpts) error {
-	panic("not implemented")
+	start := time.Now()
+	checks := []string{"path_valid", "branch_guard"}
+
+	if err := g.validateRuntime(ctx); err != nil {
+		g.audit(AuditEntry{
+			Timestamp: start, Operation: "Commit", RepoPath: g.path,
+			SafetyChecks: checks, ChecksPassed: false, FailureReason: err.Error(),
+			Duration: time.Since(start),
+		})
+		return err
+	}
+
+	if err := g.validateBranchGuard(ctx); err != nil {
+		g.audit(AuditEntry{
+			Timestamp: start, Operation: "Commit", RepoPath: g.path,
+			SafetyChecks: checks, ChecksPassed: false, FailureReason: err.Error(),
+			Duration: time.Since(start),
+		})
+		return err
+	}
+
+	lock := getRepoLock(g.path)
+	lock.Lock()
+	defer lock.Unlock()
+
+	args := []string{"commit", "-m", msg}
+	if opts.NoVerify {
+		args = append(args, "--no-verify")
+	}
+	if opts.Author != "" {
+		args = append(args, "--author="+opts.Author)
+	}
+	if opts.AllowEmpty {
+		args = append(args, "--allow-empty")
+	}
+
+	branch, _ := g.currentBranchInternal(ctx)
+	_, err := g.exec(ctx, args...)
+
+	g.audit(AuditEntry{
+		Timestamp: start, Operation: "Commit", RepoPath: g.path, Branch: branch,
+		SafetyChecks: checks, ChecksPassed: err == nil,
+		Duration: time.Since(start), Error: errorString(err),
+	})
+
+	return err
+}
+
+// CheckoutBranch switches to a branch, optionally creating it.
+// Acquires per-repo lock to prevent concurrent branch operations.
+func (g *gitOps) CheckoutBranch(ctx context.Context, branch string, create bool) error {
+	start := time.Now()
+	checks := []string{"path_valid", "branch_guard"}
+
+	if err := g.validateRuntime(ctx); err != nil {
+		g.audit(AuditEntry{
+			Timestamp: start, Operation: "CheckoutBranch", RepoPath: g.path,
+			SafetyChecks: checks, ChecksPassed: false, FailureReason: err.Error(),
+			Duration: time.Since(start),
+		})
+		return err
+	}
+
+	lock := getRepoLock(g.path)
+	lock.Lock()
+	defer lock.Unlock()
+
+	args := []string{"checkout"}
+	if create {
+		args = append(args, "-b")
+	}
+	args = append(args, branch)
+	_, err := g.exec(ctx, args...)
+
+	g.audit(AuditEntry{
+		Timestamp: start, Operation: "CheckoutBranch", RepoPath: g.path,
+		Branch: branch, Args: args, SafetyChecks: checks, ChecksPassed: err == nil,
+		Duration: time.Since(start), Error: errorString(err),
+	})
+
+	return err
 }
 
 func (g *gitOps) CheckoutFiles(ctx context.Context, paths ...string) error {

@@ -276,3 +276,197 @@ func TestGitOps_ReadBranchExists_NotFound(t *testing.T) {
 		t.Error("expected nonexistent branch to not exist")
 	}
 }
+
+// Write operation tests
+
+func TestGitOps_WriteAdd(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{AllowRepoRoot: true})
+	err := ops.Add(context.Background(), "file.txt")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	status, _ := ops.Status(context.Background())
+	if len(status.Staged) != 1 {
+		t.Errorf("expected 1 staged file, got %d", len(status.Staged))
+	}
+}
+
+func TestGitOps_WriteAddAll(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content1"), 0644)
+	os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("content2"), 0644)
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{AllowRepoRoot: true})
+	err := ops.AddAll(context.Background())
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	status, _ := ops.Status(context.Background())
+	if len(status.Staged) != 2 {
+		t.Errorf("expected 2 staged files, got %d", len(status.Staged))
+	}
+}
+
+func TestGitOps_WriteReset(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", dir, "commit", "--allow-empty", "-m", "init").Run()
+	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
+	exec.Command("git", "-C", dir, "add", "file.txt").Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{AllowRepoRoot: true})
+
+	// Verify file is staged
+	status, _ := ops.Status(context.Background())
+	if len(status.Staged) != 1 {
+		t.Fatalf("expected 1 staged file before reset, got %d", len(status.Staged))
+	}
+
+	err := ops.Reset(context.Background(), "file.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify file is unstaged
+	status, _ = ops.Status(context.Background())
+	if len(status.Staged) != 0 {
+		t.Errorf("expected 0 staged files after reset, got %d", len(status.Staged))
+	}
+	if len(status.Untracked) != 1 {
+		t.Errorf("expected 1 untracked file after reset, got %d", len(status.Untracked))
+	}
+}
+
+func TestGitOps_WriteCommit(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", "-b", "feature", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", dir, "commit", "--allow-empty", "-m", "init").Run()
+	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
+	exec.Command("git", "-C", dir, "add", ".").Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{AllowRepoRoot: true})
+	err := ops.Commit(context.Background(), "test commit", CommitOpts{})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify commit was created
+	logs, _ := ops.Log(context.Background(), LogOpts{MaxCount: 1})
+	if len(logs) == 0 {
+		t.Fatal("expected at least one commit")
+	}
+	if logs[0].Subject != "test commit" {
+		t.Errorf("expected subject 'test commit', got %s", logs[0].Subject)
+	}
+}
+
+func TestGitOps_WriteCommit_NoVerify(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", "-b", "feature", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", dir, "commit", "--allow-empty", "-m", "init").Run()
+
+	// Create a pre-commit hook that always fails
+	hooksDir := filepath.Join(dir, ".git", "hooks")
+	os.MkdirAll(hooksDir, 0755)
+	hookPath := filepath.Join(hooksDir, "pre-commit")
+	os.WriteFile(hookPath, []byte("#!/bin/sh\nexit 1"), 0755)
+
+	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
+	exec.Command("git", "-C", dir, "add", ".").Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{AllowRepoRoot: true})
+
+	// Without NoVerify, commit should fail
+	err := ops.Commit(context.Background(), "test commit", CommitOpts{NoVerify: false})
+	if err == nil {
+		t.Error("expected commit to fail without NoVerify")
+	}
+
+	// With NoVerify, commit should succeed
+	err = ops.Commit(context.Background(), "test commit", CommitOpts{NoVerify: true})
+	if err != nil {
+		t.Fatalf("unexpected error with NoVerify: %v", err)
+	}
+}
+
+func TestGitOps_WriteCommit_ProtectedBranch(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", "-b", "main", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", dir, "commit", "--allow-empty", "-m", "init").Run()
+	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("content"), 0644)
+	exec.Command("git", "-C", dir, "add", ".").Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{
+		AllowRepoRoot: true,
+		BranchGuard:   &BranchGuard{}, // Uses default protected: main, master
+	})
+
+	err := ops.Commit(context.Background(), "test", CommitOpts{})
+
+	if !errors.Is(err, ErrProtectedBranch) {
+		t.Errorf("expected ErrProtectedBranch, got %v", err)
+	}
+}
+
+func TestGitOps_WriteCheckoutBranch_Create(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", "-b", "main", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", dir, "commit", "--allow-empty", "-m", "init").Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{AllowRepoRoot: true})
+	err := ops.CheckoutBranch(context.Background(), "feature/test", true)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	branch, _ := ops.CurrentBranch(context.Background())
+	if branch != "feature/test" {
+		t.Errorf("expected feature/test, got %s", branch)
+	}
+}
+
+func TestGitOps_WriteCheckoutBranch_Existing(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", "-b", "main", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", dir, "commit", "--allow-empty", "-m", "init").Run()
+	exec.Command("git", "-C", dir, "branch", "feature").Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{AllowRepoRoot: true})
+	err := ops.CheckoutBranch(context.Background(), "feature", false)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	branch, _ := ops.CurrentBranch(context.Background())
+	if branch != "feature" {
+		t.Errorf("expected feature, got %s", branch)
+	}
+}
