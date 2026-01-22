@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // JSONEvent is the wire format for serialized events over container stdout.
@@ -34,6 +37,20 @@ type JSONEvent struct {
 
 	// Error contains error message if this is a failure event
 	Error string `json:"error,omitempty"`
+}
+
+// IsJSONMode returns true if JSON event output should be enabled.
+// Checks: (1) explicit forceJSON flag, (2) non-TTY stdout.
+func IsJSONMode(forceJSON bool) bool {
+	if forceJSON {
+		return true
+	}
+
+	if os.Stdout != nil {
+		return !term.IsTerminal(int(os.Stdout.Fd()))
+	}
+
+	return true
 }
 
 // JSONEmitter writes events as JSON lines to a writer.

@@ -73,6 +73,27 @@ func (b *Bus) Emit(e Event) {
 	}
 }
 
+// EmitRaw publishes an event without modifying the timestamp.
+// Use for re-emitting events from external sources (containers, replays).
+func (b *Bus) EmitRaw(e Event) {
+	b.mu.RLock()
+	closed := b.closed
+	b.mu.RUnlock()
+
+	if closed {
+		return
+	}
+
+	b.wg.Add(1)
+	select {
+	case b.ch <- e:
+		// Delivered
+	default:
+		b.wg.Done()
+		log.Printf("WARN: event buffer full, dropping %s", e.Type)
+	}
+}
+
 // Close stops the dispatch loop and releases resources
 // Blocks until all pending events are processed
 // Safe to call multiple times (subsequent calls are no-op)

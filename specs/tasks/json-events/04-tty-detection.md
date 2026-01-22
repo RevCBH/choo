@@ -1,6 +1,6 @@
 ---
 task: 4
-status: pending
+status: complete
 backpressure: "go test ./internal/events/... -run TestIsJSONMode"
 depends_on: [1, 2, 3]
 ---
