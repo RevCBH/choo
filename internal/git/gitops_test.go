@@ -470,3 +470,240 @@ func TestGitOps_WriteCheckoutBranch_Existing(t *testing.T) {
 		t.Errorf("expected feature, got %s", branch)
 	}
 }
+
+// Destructive operation tests
+
+func TestGitOps_DestructiveCheckoutFiles_Blocked(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", dir).Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{
+		AllowRepoRoot:    true,
+		AllowDestructive: false,
+	})
+
+	err := ops.CheckoutFiles(context.Background(), ".")
+	if !errors.Is(err, ErrDestructiveNotAllowed) {
+		t.Errorf("expected ErrDestructiveNotAllowed, got %v", err)
+	}
+}
+
+func TestGitOps_DestructiveClean_Blocked(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", dir).Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{
+		AllowRepoRoot:    true,
+		AllowDestructive: false,
+	})
+
+	err := ops.Clean(context.Background(), CleanOpts{Force: true})
+	if !errors.Is(err, ErrDestructiveNotAllowed) {
+		t.Errorf("expected ErrDestructiveNotAllowed, got %v", err)
+	}
+}
+
+func TestGitOps_DestructiveResetHard_Blocked(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", dir).Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{
+		AllowRepoRoot:    true,
+		AllowDestructive: false,
+	})
+
+	err := ops.ResetHard(context.Background(), "HEAD")
+	if !errors.Is(err, ErrDestructiveNotAllowed) {
+		t.Errorf("expected ErrDestructiveNotAllowed, got %v", err)
+	}
+}
+
+func TestGitOps_DestructiveCheckoutFiles_Allowed(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	filePath := filepath.Join(dir, "file.txt")
+	os.WriteFile(filePath, []byte("original"), 0644)
+	exec.Command("git", "-C", dir, "add", ".").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "init").Run()
+	os.WriteFile(filePath, []byte("modified"), 0644)
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{
+		AllowRepoRoot:    true,
+		AllowDestructive: true,
+	})
+
+	err := ops.CheckoutFiles(context.Background(), "file.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	content, _ := os.ReadFile(filePath)
+	if string(content) != "original" {
+		t.Errorf("expected 'original', got '%s'", content)
+	}
+}
+
+func TestGitOps_DestructiveClean_Allowed(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	exec.Command("git", "-C", dir, "commit", "--allow-empty", "-m", "init").Run()
+	untrackedPath := filepath.Join(dir, "untracked.txt")
+	os.WriteFile(untrackedPath, []byte("untracked"), 0644)
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{
+		AllowRepoRoot:    true,
+		AllowDestructive: true,
+	})
+
+	err := ops.Clean(context.Background(), CleanOpts{Force: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if _, err := os.Stat(untrackedPath); !os.IsNotExist(err) {
+		t.Error("expected untracked file to be removed")
+	}
+}
+
+func TestGitOps_DestructiveResetHard_Allowed(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", "-b", "feature", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+	filePath := filepath.Join(dir, "file.txt")
+	os.WriteFile(filePath, []byte("original"), 0644)
+	exec.Command("git", "-C", dir, "add", ".").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "init").Run()
+	os.WriteFile(filePath, []byte("modified"), 0644)
+	exec.Command("git", "-C", dir, "add", ".").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "modified").Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{
+		AllowRepoRoot:    true,
+		AllowDestructive: true,
+	})
+
+	// Get the first commit SHA
+	sha, _ := ops.RevParse(context.Background(), "HEAD~1")
+
+	err := ops.ResetHard(context.Background(), sha)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	content, _ := os.ReadFile(filePath)
+	if string(content) != "original" {
+		t.Errorf("expected 'original', got '%s'", content)
+	}
+}
+
+// Remote operation tests
+
+func TestGitOps_RemoteForcePush_Blocked(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", dir).Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{
+		AllowRepoRoot:    true,
+		AllowDestructive: false,
+	})
+
+	err := ops.Push(context.Background(), "origin", "main", PushOpts{Force: true})
+	if !errors.Is(err, ErrDestructiveNotAllowed) {
+		t.Errorf("expected ErrDestructiveNotAllowed, got %v", err)
+	}
+}
+
+func TestGitOps_RemoteForceWithLeasePush_Blocked(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", dir).Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{
+		AllowRepoRoot:    true,
+		AllowDestructive: false,
+	})
+
+	err := ops.Push(context.Background(), "origin", "main", PushOpts{ForceWithLease: true})
+	if !errors.Is(err, ErrDestructiveNotAllowed) {
+		t.Errorf("expected ErrDestructiveNotAllowed for force-with-lease, got %v", err)
+	}
+}
+
+// Merge operation tests
+
+func TestGitOps_MergeFastForward(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", "-b", "main", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+
+	// Create initial commit on main
+	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("initial"), 0644)
+	exec.Command("git", "-C", dir, "add", ".").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "init").Run()
+
+	// Create feature branch with a new commit
+	exec.Command("git", "-C", dir, "checkout", "-b", "feature").Run()
+	os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("feature"), 0644)
+	exec.Command("git", "-C", dir, "add", ".").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "feature").Run()
+
+	// Go back to main and merge
+	exec.Command("git", "-C", dir, "checkout", "main").Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{AllowRepoRoot: true})
+
+	err := ops.Merge(context.Background(), "feature", MergeOpts{FFOnly: true})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify feature file now exists on main
+	if _, err := os.Stat(filepath.Join(dir, "feature.txt")); os.IsNotExist(err) {
+		t.Error("expected feature.txt to exist after merge")
+	}
+}
+
+func TestGitOps_MergeAbort(t *testing.T) {
+	dir := t.TempDir()
+	exec.Command("git", "init", "-b", "main", dir).Run()
+	exec.Command("git", "-C", dir, "config", "user.email", "test@test.com").Run()
+	exec.Command("git", "-C", dir, "config", "user.name", "Test").Run()
+
+	// Create initial commit
+	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("initial"), 0644)
+	exec.Command("git", "-C", dir, "add", ".").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "init").Run()
+
+	// Create branch with conflicting change
+	exec.Command("git", "-C", dir, "checkout", "-b", "feature").Run()
+	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("feature change"), 0644)
+	exec.Command("git", "-C", dir, "add", ".").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "feature").Run()
+
+	// Go back to main and make conflicting change
+	exec.Command("git", "-C", dir, "checkout", "main").Run()
+	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("main change"), 0644)
+	exec.Command("git", "-C", dir, "add", ".").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "main").Run()
+
+	// Try to merge (will conflict)
+	exec.Command("git", "-C", dir, "merge", "feature").Run()
+
+	ops, _ := NewGitOps(dir, GitOpsOpts{AllowRepoRoot: true})
+
+	err := ops.MergeAbort(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Verify we're back to clean state with main's content
+	content, _ := os.ReadFile(filepath.Join(dir, "file.txt"))
+	if string(content) != "main change" {
+		t.Errorf("expected 'main change', got '%s'", content)
+	}
+}
