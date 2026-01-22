@@ -32,6 +32,8 @@ type RunOptions struct {
 	Unit         string // Run only specified unit (single-unit mode)
 	SkipReview   bool   // Auto-merge without waiting for review
 	TasksDir     string // Path to specs/tasks/ directory
+	CloneURL     string // URL to clone before running (used in container)
+	JSONEvents   bool   // Emit events as JSON to stdout (for daemon parsing)
 	Web          bool   // Enable web UI event forwarding
 	WebSocket    string // Custom Unix socket path (optional)
 	NoTUI        bool   // Disable TUI even when stdout is a TTY
@@ -72,13 +74,18 @@ func (opts RunOptions) Validate() error {
 	return nil
 }
 
+// isContainerMode returns true if running in container mode.
+func (opts RunOptions) isContainerMode() bool {
+	return opts.CloneURL != "" || opts.JSONEvents
+}
+
 // runWithDaemon executes a job via the daemon and attaches to event stream.
 // If the daemon is not running, it will be started automatically.
 func runWithDaemon(ctx context.Context, tasksDir string, parallelism int, target, feature string) error {
 	// Auto-start daemon if not running
 	if !isDaemonRunning() {
 		fmt.Println("Starting daemon...")
-		if err := startDaemonBackground(); err != nil {
+		if err := startDaemonBackground(DaemonStartOptions{}); err != nil {
 			return fmt.Errorf("failed to start daemon: %w", err)
 		}
 		// Give daemon a moment to initialize
@@ -123,6 +130,28 @@ func runInline(ctx context.Context, opts RunOptions, app *App) error {
 	return app.RunOrchestrator(ctx, opts)
 }
 
+// registerRunFlags adds flags to the run command.
+func registerRunFlags(cmd *cobra.Command, opts *RunOptions) {
+	cmd.Flags().IntVarP(&opts.Parallelism, "parallelism", "p", opts.Parallelism, "Max concurrent units")
+	cmd.Flags().StringVarP(&opts.TargetBranch, "target", "t", opts.TargetBranch, "Branch PRs target (default: current branch)")
+	cmd.Flags().BoolVarP(&opts.DryRun, "dry-run", "n", opts.DryRun, "Show execution plan without running")
+	cmd.Flags().BoolVar(&opts.NoPR, "no-pr", opts.NoPR, "Skip PR creation")
+	cmd.Flags().StringVar(&opts.Unit, "unit", opts.Unit, "Run only specified unit (single-unit mode)")
+	cmd.Flags().BoolVar(&opts.SkipReview, "skip-review", opts.SkipReview, "Auto-merge without waiting for review")
+	cmd.Flags().StringVar(&opts.TasksDir, "tasks", opts.TasksDir, "Path to tasks directory")
+	cmd.Flags().StringVar(&opts.CloneURL, "clone-url", opts.CloneURL,
+		"Clone repository from URL before running (container mode)")
+	cmd.Flags().BoolVar(&opts.JSONEvents, "json-events", opts.JSONEvents,
+		"Emit events as JSON to stdout (for daemon parsing)")
+	cmd.Flags().BoolVar(&opts.Web, "web", opts.Web, "Enable web UI event forwarding")
+	cmd.Flags().StringVar(&opts.WebSocket, "web-socket", opts.WebSocket, "Custom Unix socket path (default: ~/.choo/web.sock)")
+	cmd.Flags().BoolVar(&opts.NoTUI, "no-tui", opts.NoTUI, "Disable interactive TUI (use summary-only output)")
+	cmd.Flags().StringVar(&opts.Feature, "feature", opts.Feature, "PRD ID for feature mode (targets feature branch)")
+	cmd.Flags().BoolVar(&opts.UseDaemon, "use-daemon", opts.UseDaemon, "Use daemon mode")
+	cmd.Flags().StringVar(&opts.Provider, "provider", opts.Provider, "Default provider for task execution (claude, codex). Units without frontmatter override use this.")
+	cmd.Flags().StringVar(&opts.ForceTaskProvider, "force-task-provider", opts.ForceTaskProvider, "Force provider for ALL task execution, ignoring per-unit frontmatter (claude, codex)")
+}
+
 // NewRunCmd creates the run command
 func NewRunCmd(app *App) *cobra.Command {
 	opts := RunOptions{
@@ -133,8 +162,11 @@ func NewRunCmd(app *App) *cobra.Command {
 		Unit:              "",
 		SkipReview:        false,
 		TasksDir:          "specs/tasks",
+		CloneURL:          "",
+		JSONEvents:        false,
 		Provider:          "", // Empty means use default from config/env
 		ForceTaskProvider: "", // Empty means respect per-unit settings
+		UseDaemon:         true,
 	}
 
 	cmd := &cobra.Command{
@@ -215,22 +247,7 @@ Use --unit to run a single unit, or --dry-run to preview execution plan.`,
 		},
 	}
 
-	// Add flags
-	cmd.Flags().IntVarP(&opts.Parallelism, "parallelism", "p", 4, "Max concurrent units")
-	cmd.Flags().StringVarP(&opts.TargetBranch, "target", "t", "main", "Branch PRs target (default: current branch)")
-	cmd.Flags().BoolVarP(&opts.DryRun, "dry-run", "n", false, "Show execution plan without running")
-	cmd.Flags().BoolVar(&opts.NoPR, "no-pr", false, "Skip PR creation")
-	cmd.Flags().StringVar(&opts.Unit, "unit", "", "Run only specified unit (single-unit mode)")
-	cmd.Flags().BoolVar(&opts.SkipReview, "skip-review", false, "Auto-merge without waiting for review")
-	cmd.Flags().BoolVar(&opts.Web, "web", false, "Enable web UI event forwarding")
-	cmd.Flags().StringVar(&opts.WebSocket, "web-socket", "", "Custom Unix socket path (default: ~/.choo/web.sock)")
-	cmd.Flags().BoolVar(&opts.NoTUI, "no-tui", false, "Disable interactive TUI (use summary-only output)")
-	cmd.Flags().StringVar(&opts.Feature, "feature", "", "PRD ID for feature mode (targets feature branch)")
-	cmd.Flags().BoolVar(&opts.UseDaemon, "use-daemon", true, "Use daemon mode")
-
-	// Provider flags
-	cmd.Flags().StringVar(&opts.Provider, "provider", "", "Default provider for task execution (claude, codex). Units without frontmatter override use this.")
-	cmd.Flags().StringVar(&opts.ForceTaskProvider, "force-task-provider", "", "Force provider for ALL task execution, ignoring per-unit frontmatter (claude, codex)")
+	registerRunFlags(cmd, &opts)
 
 	// Safety flags
 	cmd.Flags().BoolVar(&opts.Force, "force", false, "Force run even with uncommitted changes in working directory")

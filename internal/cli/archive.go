@@ -29,11 +29,32 @@ func NewArchiveCmd(_ *App) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "archive",
 		Short: "Move completed specs to specs/completed/",
+		Long: `Archive moves spec files with "status: complete" in their
+frontmatter to the specs/completed/ directory.
+
+This command is typically run automatically after all units in a
+feature have completed, but can be run manually to clean up specs.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			_, err := Archive(opts)
-			return err
+			if verbose, err := cmd.Flags().GetBool("verbose"); err == nil {
+				opts.Verbose = verbose
+			}
+
+			archived, err := Archive(opts)
+			if err != nil {
+				return err
+			}
+
+			if len(archived) == 0 {
+				fmt.Println("No specs to archive")
+			} else {
+				fmt.Printf("Archived %d specs\n", len(archived))
+			}
+			return nil
 		},
 	}
+
+	cmd.Flags().StringVar(&opts.SpecsDir, "specs", "specs", "Path to specs directory")
+	cmd.Flags().BoolVar(&opts.DryRun, "dry-run", false, "Show what would be archived without moving files")
 
 	return cmd
 }
