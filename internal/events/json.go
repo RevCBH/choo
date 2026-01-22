@@ -1,7 +1,10 @@
 package events
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"sync"
@@ -113,4 +116,64 @@ func (je JSONEvent) ToEvent() Event {
 		Payload: payload,
 		Error:   je.Error,
 	}
+}
+
+const defaultMaxLineSize = 64 * 1024
+
+// JSONLineReader reads events from a JSON lines stream.
+// Not thread-safe; use from a single goroutine.
+type JSONLineReader struct {
+	r       *bufio.Reader
+	maxLine int
+}
+
+// NewJSONLineReader creates a new JSON line reader from r.
+// Uses a 64KB buffer by default for line reading.
+func NewJSONLineReader(r io.Reader) *JSONLineReader {
+	return &JSONLineReader{
+		r:       bufio.NewReaderSize(r, defaultMaxLineSize),
+		maxLine: defaultMaxLineSize,
+	}
+}
+
+// Read reads the next JSON line and parses it into an internal Event.
+// Converts from JSONEvent wire format to internal Event.
+// Returns io.EOF when the stream is exhausted.
+// Returns an error for malformed JSON (caller should log and continue).
+func (jr *JSONLineReader) Read() (Event, error) {
+	for {
+		line, err := jr.r.ReadBytes('\n')
+		if err != nil && err != io.EOF {
+			return Event{}, err
+		}
+		if len(line) == 0 && err == io.EOF {
+			return Event{}, io.EOF
+		}
+
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 {
+			if err == io.EOF {
+				return Event{}, io.EOF
+			}
+			continue
+		}
+
+		event, parseErr := ParseJSONEvent(line)
+		if parseErr != nil {
+			return Event{}, parseErr
+		}
+
+		return event, nil
+	}
+}
+
+// ParseJSONEvent parses a JSON line (in JSONEvent wire format) into an internal Event.
+// Standalone function for single-line parsing.
+func ParseJSONEvent(line []byte) (Event, error) {
+	var je JSONEvent
+	if err := json.Unmarshal(line, &je); err != nil {
+		return Event{}, fmt.Errorf("invalid JSON: %w", err)
+	}
+
+	return je.ToEvent(), nil
 }
