@@ -200,17 +200,11 @@ func TestClaudeReviewer_ParseOutput_NoJSON(t *testing.T) {
 	reviewer := NewClaudeReviewer("")
 	output := "This is just plain text without any JSON"
 	result, err := reviewer.parseOutput(output)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
+	if err == nil {
+		t.Fatal("Expected an error when no JSON found, got nil")
 	}
-	if !result.Passed {
-		t.Error("Expected Passed=true for graceful degradation")
-	}
-	if result.Summary != "No structured review output" {
-		t.Errorf("Expected summary 'No structured review output', got %q", result.Summary)
-	}
-	if result.RawOutput != output {
-		t.Error("Expected RawOutput to be preserved")
+	if result != nil {
+		t.Error("Expected nil result when error returned")
 	}
 }
 
@@ -219,16 +213,10 @@ func TestClaudeReviewer_ParseOutput_MalformedJSON(t *testing.T) {
 	// Use malformed but structurally complete JSON (invalid field type)
 	output := `{"passed": "not a boolean", "summary": "All good", "issues": []}`
 	result, err := reviewer.parseOutput(output)
-	if err != nil {
-		t.Fatalf("Expected no error, got %v", err)
+	if err == nil {
+		t.Fatal("Expected an error for malformed JSON, got nil")
 	}
-	if !result.Passed {
-		t.Error("Expected Passed=true for graceful degradation")
-	}
-	if result.Summary != "Failed to parse review output" {
-		t.Errorf("Expected summary 'Failed to parse review output', got %q", result.Summary)
-	}
-	if result.RawOutput != output {
-		t.Error("Expected RawOutput to be preserved")
+	if result != nil {
+		t.Error("Expected nil result when error returned")
 	}
 }

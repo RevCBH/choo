@@ -79,16 +79,13 @@ func (r *ClaudeReviewer) getDiff(ctx context.Context, workdir, baseBranch string
 }
 
 // parseOutput extracts and parses JSON from Claude's response.
-// Returns graceful degradation (passed=true) if parsing fails.
+// Returns an error if parsing fails - the caller handles this gracefully
+// by emitting CodeReviewFailed and proceeding to merge.
 func (r *ClaudeReviewer) parseOutput(output string) (*ReviewResult, error) {
 	// Extract JSON from Claude's response
 	jsonStr := extractJSON(output)
 	if jsonStr == "" {
-		return &ReviewResult{
-			Passed:    true,
-			Summary:   "No structured review output",
-			RawOutput: output,
-		}, nil
+		return nil, fmt.Errorf("no JSON found in review output")
 	}
 
 	var parsed struct {
@@ -98,11 +95,7 @@ func (r *ClaudeReviewer) parseOutput(output string) (*ReviewResult, error) {
 	}
 
 	if err := json.Unmarshal([]byte(jsonStr), &parsed); err != nil {
-		return &ReviewResult{
-			Passed:    true,
-			Summary:   "Failed to parse review output",
-			RawOutput: output,
-		}, nil
+		return nil, fmt.Errorf("failed to parse review JSON: %w", err)
 	}
 
 	return &ReviewResult{
