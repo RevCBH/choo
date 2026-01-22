@@ -382,3 +382,126 @@ func collectEventsForWorkerTest(bus *events.Bus) *events.EventCollector {
 func waitForEventsInWorkerTest(bus *events.Bus) {
 	bus.Wait()
 }
+
+// newTestWorker creates a Worker configured for testing with MockGitOps.
+func newTestWorker(t *testing.T) *Worker {
+	t.Helper()
+	mockOps := git.NewMockGitOps("/test/worktree")
+	return &Worker{
+		gitOps:       mockOps,
+		worktreePath: "/test/worktree",
+		reviewConfig: &config.CodeReviewConfig{Verbose: false},
+	}
+}
+
+// newTestWorkerWithConfig creates a Worker with custom configuration.
+func newTestWorkerWithConfig(t *testing.T, cfg func(*Worker, *git.MockGitOps)) *Worker {
+	t.Helper()
+	mockOps := git.NewMockGitOps("/test/worktree")
+	w := &Worker{
+		gitOps:       mockOps,
+		worktreePath: "/test/worktree",
+		reviewConfig: &config.CodeReviewConfig{Verbose: false},
+	}
+	if cfg != nil {
+		cfg(w, mockOps)
+	}
+	return w
+}
+
+// getMockGitOps extracts the MockGitOps from a Worker for assertions.
+func getMockGitOps(t *testing.T, w *Worker) *git.MockGitOps {
+	t.Helper()
+	mock, ok := w.gitOps.(*git.MockGitOps)
+	if !ok {
+		t.Fatal("expected Worker to have MockGitOps")
+	}
+	return mock
+}
+
+func TestWorker_SafetyInvariants(t *testing.T) {
+	t.Run("gitOps path matches worktreePath", func(t *testing.T) {
+		w := newTestWorker(t)
+		mock := getMockGitOps(t, w)
+
+		if mock.Path() != w.worktreePath {
+			t.Errorf("gitOps path %s doesn't match worktreePath %s",
+				mock.Path(), w.worktreePath)
+		}
+	})
+
+	t.Run("cleanupWorktree uses gitOps not runner", func(t *testing.T) {
+		// Use a tracking runner that records if it was called
+		trackingRunner := &trackingGitRunner{}
+
+		mockOps := git.NewMockGitOps("/test/worktree")
+		w := &Worker{
+			gitOps:       mockOps,
+			gitRunner:    trackingRunner,
+			worktreePath: "/test/worktree",
+		}
+
+		w.cleanupWorktree(context.Background())
+
+		if trackingRunner.called {
+			t.Error("cleanupWorktree should use gitOps, not runner")
+		}
+		mockOps.AssertCalled(t, "Reset")
+	})
+
+	t.Run("commitReviewFixes uses gitOps not runner", func(t *testing.T) {
+		trackingRunner := &trackingGitRunner{}
+
+		mockOps := git.NewMockGitOps("/test/worktree")
+		mockOps.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+		w := &Worker{
+			gitOps:       mockOps,
+			gitRunner:    trackingRunner,
+			worktreePath: "/test/worktree",
+		}
+
+		w.commitReviewFixes(context.Background())
+
+		if trackingRunner.called {
+			t.Error("commitReviewFixes should use gitOps, not runner")
+		}
+		mockOps.AssertCalled(t, "Commit")
+	})
+}
+
+// trackingGitRunner is a test helper that tracks whether any method was called.
+type trackingGitRunner struct {
+	called bool
+}
+
+func (t *trackingGitRunner) Exec(ctx context.Context, dir string, args ...string) (string, error) {
+	t.called = true
+	return "", errors.New("unexpected call to runner")
+}
+
+func (t *trackingGitRunner) ExecWithStdin(ctx context.Context, dir string, stdin string, args ...string) (string, error) {
+	t.called = true
+	return "", errors.New("unexpected call to runner")
+}
+
+func TestWorker_ReviewLoopWithGitOps(t *testing.T) {
+	t.Run("full fix loop uses correct git operations", func(t *testing.T) {
+		w := newTestWorkerWithConfig(t, func(w *Worker, mock *git.MockGitOps) {
+			mock.StatusResult = git.StatusResult{Clean: false, Modified: []string{"file.go"}}
+		})
+
+		// Simulate fix loop
+		w.cleanupWorktree(context.Background())
+		// ... provider makes fixes ...
+		mock := getMockGitOps(t, w)
+		mock.StatusResult = git.StatusResult{Clean: false, Modified: []string{"fixed.go"}}
+		committed, _ := w.commitReviewFixes(context.Background())
+
+		if !committed {
+			t.Error("expected changes to be committed")
+		}
+
+		// Verify call order
+		mock.AssertCallOrder(t, "Reset", "Clean", "CheckoutFiles", "Status", "AddAll", "Commit")
+	})
+}
