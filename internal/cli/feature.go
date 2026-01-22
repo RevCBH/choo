@@ -19,6 +19,7 @@ feature workflow state.`,
 		NewFeatureStartCmd(app),
 		NewFeatureStatusCmd(app),
 		NewFeatureResumeCmd(app),
+		NewFeatureSpecCmd(app),
 	)
 
 	return cmd
