@@ -1,6 +1,12 @@
 package events
 
-import "time"
+import (
+	"encoding/json"
+	"io"
+	"log"
+	"sync"
+	"time"
+)
 
 // JSONEvent is the wire format for serialized events over container stdout.
 // This matches the PRD-defined format with "timestamp" field.
@@ -25,6 +31,45 @@ type JSONEvent struct {
 
 	// Error contains error message if this is a failure event
 	Error string `json:"error,omitempty"`
+}
+
+// JSONEmitter writes events as JSON lines to a writer.
+// Thread-safe for concurrent Emit calls.
+type JSONEmitter struct {
+	w   io.Writer
+	mu  sync.Mutex
+	enc *json.Encoder
+}
+
+// NewJSONEmitter creates a new JSON emitter that writes to w.
+// Each event is written as a single JSON line (newline-delimited).
+func NewJSONEmitter(w io.Writer) *JSONEmitter {
+	return &JSONEmitter{
+		w:   w,
+		enc: json.NewEncoder(w),
+	}
+}
+
+// Emit converts the internal Event to JSONEvent wire format and writes it.
+// Thread-safe: uses mutex to prevent interleaved writes.
+// Returns an error if JSON encoding fails or the write fails.
+func (e *JSONEmitter) Emit(event Event) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	je := ToJSONEvent(event)
+	return e.enc.Encode(je)
+}
+
+// JSONEmitterHandler returns a Handler that emits events as JSON lines.
+// Use this to subscribe the emitter to an event bus.
+// Errors are logged but not propagated (handler interface has no return).
+func JSONEmitterHandler(emitter *JSONEmitter) Handler {
+	return func(e Event) {
+		if err := emitter.Emit(e); err != nil {
+			log.Printf("WARN: failed to emit JSON event: %v", err)
+		}
+	}
 }
 
 // ToJSONEvent converts an internal Event to the wire format JSONEvent.
