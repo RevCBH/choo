@@ -7,7 +7,7 @@ depends_on: [1]
 
 # Build Image Script
 
-**Parent spec**: Container Image Setup
+**Parent spec**: `/specs/CONTAINER-IMAGE.md`
 **Task**: #2 - Build Image Script
 
 ## Objective
