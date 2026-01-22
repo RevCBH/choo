@@ -4,6 +4,7 @@ package git
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 )
 
@@ -257,5 +258,117 @@ func TestMockGitOps_SafetyAuditLogged(t *testing.T) {
 	}
 	if entries[0].Operation != "Commit" {
 		t.Errorf("expected operation Commit, got %s", entries[0].Operation)
+	}
+}
+
+// Assertion helper tests
+
+func TestMockGitOps_AssertCalled(t *testing.T) {
+	mock := NewMockGitOps("/repo")
+	mock.Status(context.Background())
+
+	// This should pass
+	mock.AssertCalled(t, "Status")
+}
+
+func TestMockGitOps_AssertNotCalled(t *testing.T) {
+	mock := NewMockGitOps("/repo")
+	mock.Status(context.Background())
+
+	// This should pass
+	mock.AssertNotCalled(t, "Commit")
+}
+
+func TestMockGitOps_AssertCallCount(t *testing.T) {
+	mock := NewMockGitOps("/repo")
+	ctx := context.Background()
+
+	mock.Status(ctx)
+	mock.Status(ctx)
+	mock.Add(ctx, "file.go")
+
+	mock.AssertCallCount(t, "Status", 2)
+	mock.AssertCallCount(t, "Add", 1)
+	mock.AssertCallCount(t, "Commit", 0)
+}
+
+func TestMockGitOps_AssertCalledWith(t *testing.T) {
+	mock := NewMockGitOps("/repo")
+	mock.Commit(context.Background(), "test message", CommitOpts{NoVerify: true})
+
+	mock.AssertCalledWith(t, "Commit", "test message", CommitOpts{NoVerify: true})
+}
+
+func TestMockGitOps_AssertCallOrder(t *testing.T) {
+	mock := NewMockGitOps("/repo")
+	ctx := context.Background()
+
+	mock.Status(ctx)
+	mock.Add(ctx, "file.go")
+	mock.Commit(ctx, "msg", CommitOpts{})
+
+	// This should pass
+	mock.AssertCallOrder(t, "Status", "Add", "Commit")
+}
+
+func TestMockGitOps_GetCallsFor(t *testing.T) {
+	mock := NewMockGitOps("/repo")
+	ctx := context.Background()
+
+	mock.Add(ctx, "file1.go")
+	mock.Status(ctx)
+	mock.Add(ctx, "file2.go")
+
+	calls := mock.GetCallsFor("Add")
+
+	if len(calls) != 2 {
+		t.Errorf("expected 2 Add calls, got %d", len(calls))
+	}
+	if calls[0].Args[0].([]string)[0] != "file1.go" {
+		t.Error("expected first Add to have file1.go")
+	}
+	if calls[1].Args[0].([]string)[0] != "file2.go" {
+		t.Error("expected second Add to have file2.go")
+	}
+}
+
+func TestMockGitOps_AssertDestructiveBlocked(t *testing.T) {
+	mock := NewMockGitOpsWithOpts("/repo", GitOpsOpts{
+		AllowDestructive: false,
+	})
+
+	mock.ResetHard(context.Background(), "HEAD")
+
+	mock.AssertDestructiveBlocked(t, "ResetHard")
+}
+
+func TestMockGitOps_AssertBranchGuardTriggered(t *testing.T) {
+	mock := NewMockGitOpsWithOpts("/repo", GitOpsOpts{
+		BranchGuard:      &BranchGuard{ProtectedBranches: []string{"main"}},
+		AllowDestructive: true,
+	})
+	mock.CurrentBranchResult = "main"
+
+	mock.Commit(context.Background(), "msg", CommitOpts{})
+
+	mock.AssertBranchGuardTriggered(t, "Commit")
+}
+
+func TestMockGitOps_ThreadSafety(t *testing.T) {
+	mock := NewMockGitOps("/repo")
+	var wg sync.WaitGroup
+
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			mock.Status(context.Background())
+		}()
+	}
+
+	wg.Wait()
+
+	if mock.CallCount("Status") != 100 {
+		t.Errorf("expected 100 Status calls, got %d", mock.CallCount("Status"))
 	}
 }
