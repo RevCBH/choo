@@ -27,21 +27,25 @@ type Worker struct {
 	config       WorkerConfig
 	events       *events.Bus
 	git          *git.WorktreeManager
-	gitRunner    git.Runner
+
+	// Phase 1: GitOps added alongside gitRunner
+	// Phase 3: gitRunner removed, only gitOps remains
+	gitOps    git.GitOps // Safe git operations interface
+	gitRunner git.Runner // Deprecated: raw runner for unmigrated code
+
 	github       *github.PRClient
 	provider     provider.Provider
 	escalator    escalate.Escalator
 	mergeMu      *sync.Mutex // Shared mutex for serializing merge operations
+
+	// Keep raw path for provider invocation (providers need filesystem path)
 	worktreePath string
 	branch       string
 	currentTask  *discovery.Task
 
-	reviewer     provider.Reviewer      // For code review (may be nil if disabled)
+	reviewer     provider.Reviewer        // For code review (may be nil if disabled)
 	reviewConfig *config.CodeReviewConfig // Review configuration
-
-	// prNumber is the PR number after creation
-	//nolint:unused // WIP: used by forcePushAndMerge when conflict resolution is fully integrated
-	prNumber int
+	prNumber     int
 
 	// invokeClaudeWithOutput is the function that invokes Claude and captures output
 	// Can be overridden for testing
@@ -60,8 +64,9 @@ type WorkerConfig struct {
 	BackpressureTimeout time.Duration
 	BaselineTimeout     time.Duration
 	NoPR                bool
-	SuppressOutput      bool   // When true, don't tee Claude output to stdout (TUI mode)
-	ClaudeCommand       string // Claude CLI command for non-task operations (conflict resolution, etc.)
+	SuppressOutput      bool            // When true, don't tee Claude output to stdout (TUI mode)
+	ClaudeCommand       string          // Claude CLI command for non-task operations (conflict resolution, etc.)
+	AuditLogger         git.AuditLogger // Optional: log all git operations
 }
 
 // BaselineCheck represents a single baseline validation command
@@ -73,14 +78,19 @@ type BaselineCheck struct {
 
 // WorkerDeps bundles worker dependencies for injection
 type WorkerDeps struct {
-	Events       *events.Bus
-	Git          *git.WorktreeManager
-	GitRunner    git.Runner
+	Events *events.Bus
+	Git    *git.WorktreeManager
+
+	// Phase 1: Both GitOps and GitRunner supported
+	// Phase 3: Only GitOps required
+	GitOps    git.GitOps // Preferred: safe git interface
+	GitRunner git.Runner // Deprecated: raw runner
+
 	GitHub       *github.PRClient
 	Provider     provider.Provider
 	Escalator    escalate.Escalator
-	MergeMu      *sync.Mutex // Shared mutex for serializing merge operations
-	Reviewer     provider.Reviewer      // Optional: for code review
+	MergeMu      *sync.Mutex              // Shared mutex for serializing merge operations
+	Reviewer     provider.Reviewer        // Optional: for code review
 	ReviewConfig *config.CodeReviewConfig // Optional: review settings
 }
 
