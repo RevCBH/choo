@@ -187,7 +187,7 @@ func TestReviewFixLoop_Success(t *testing.T) {
 	collected := collectEvents(eventBus)
 
 	prov := &mockProvider{} // Succeeds
-	worktreePath := t.TempDir()
+	worktreePath := setupTestRepo(t)
 
 	// Create a file so commitReviewFixes has something to commit
 	testFile := filepath.Join(worktreePath, "test.go")
@@ -205,10 +205,6 @@ func TestReviewFixLoop_Success(t *testing.T) {
 			Verbose:          true,
 		},
 	}
-
-	// Initialize git repo for test
-	exec.Command("git", "init", worktreePath).Run()
-	exec.Command("git", "-C", worktreePath, "add", ".").Run()
 
 	issues := []provider.ReviewIssue{
 		{File: "main.go", Line: 10, Severity: "error", Message: "unused variable"},
