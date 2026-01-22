@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"strings"
+
 	"github.com/RevCBH/choo/internal/events"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -72,6 +74,7 @@ func (b *Bridge) eventToMsg(evt events.Event) tea.Msg {
 	case events.TaskClaudeInvoke:
 		taskNum := 0
 		taskTitle := ""
+		providerName := "Claude" // default for backward compatibility
 		if evt.Task != nil {
 			taskNum = *evt.Task
 		}
@@ -79,12 +82,16 @@ func (b *Bridge) eventToMsg(evt events.Event) tea.Msg {
 			if t, ok := payload["title"].(string); ok {
 				taskTitle = t
 			}
+			if p, ok := payload["provider"].(string); ok && p != "" {
+				// Capitalize provider name for display
+				providerName = capitalizeProvider(p)
+			}
 		}
 		return TaskPhaseMsg{
 			UnitID:    evt.Unit,
 			TaskNum:   taskNum,
 			TaskTitle: taskTitle,
-			Phase:     "invoking Claude",
+			Phase:     "invoking " + providerName,
 			PhaseIcon: IconClaude,
 		}
 
@@ -130,4 +137,12 @@ func (b *Bridge) SendDone() {
 // SendQuit sends a QuitMsg to the program
 func (b *Bridge) SendQuit() {
 	b.program.Send(QuitMsg{})
+}
+
+// capitalizeProvider returns the provider name with first letter capitalized
+func capitalizeProvider(name string) string {
+	if name == "" {
+		return "Claude"
+	}
+	return strings.ToUpper(name[:1]) + name[1:]
 }
