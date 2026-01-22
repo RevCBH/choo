@@ -7,7 +7,7 @@ depends_on: []
 
 # Multi-Stage Dockerfile
 
-**Parent spec**: Container Image Setup
+**Parent spec**: `/specs/CONTAINER-IMAGE.md`
 **Task**: #1 - Multi-Stage Dockerfile
 
 ## Objective
