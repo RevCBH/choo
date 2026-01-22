@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"sync"
 )
 
@@ -100,8 +101,8 @@ func (m *MockGitOps) Opts() GitOpsOpts {
 	return m.opts
 }
 
-// Reset clears all recorded calls, preserving stub configuration.
-func (m *MockGitOps) Reset() {
+// ResetCalls clears all recorded calls, preserving stub configuration.
+func (m *MockGitOps) ResetCalls() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Calls = make([]MockCall, 0)
@@ -144,4 +145,144 @@ func (m *MockGitOps) ResetAll() {
 // record adds a call to the call log (must hold lock)
 func (m *MockGitOps) record(call MockCall) {
 	m.Calls = append(m.Calls, call)
+}
+
+// Read operations
+
+func (m *MockGitOps) Status(ctx context.Context) (StatusResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "Status"})
+	return m.StatusResult, m.StatusErr
+}
+
+func (m *MockGitOps) RevParse(ctx context.Context, ref string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "RevParse", Args: []any{ref}})
+	return m.RevParseResult, m.RevParseErr
+}
+
+func (m *MockGitOps) Diff(ctx context.Context, base, head string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "Diff", Args: []any{base, head}})
+	return m.DiffResult, m.DiffErr
+}
+
+func (m *MockGitOps) Log(ctx context.Context, opts LogOpts) ([]CommitRecord, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "Log", Args: []any{opts}})
+	return m.LogResult, m.LogErr
+}
+
+// Branch operations
+
+func (m *MockGitOps) CurrentBranch(ctx context.Context) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "CurrentBranch"})
+	return m.CurrentBranchResult, m.CurrentBranchErr
+}
+
+func (m *MockGitOps) CheckoutBranch(ctx context.Context, branch string, create bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "CheckoutBranch", Args: []any{branch, create}})
+	return m.CheckoutBranchErr
+}
+
+func (m *MockGitOps) BranchExists(ctx context.Context, branch string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "BranchExists", Args: []any{branch}})
+	return m.BranchExistsResult, m.BranchExistsErr
+}
+
+// Staging operations
+
+func (m *MockGitOps) Add(ctx context.Context, paths ...string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "Add", Args: []any{paths}})
+	return m.AddErr
+}
+
+func (m *MockGitOps) AddAll(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "AddAll"})
+	return m.AddAllErr
+}
+
+func (m *MockGitOps) Reset(ctx context.Context, paths ...string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "Reset", Args: []any{paths}})
+	return m.ResetErr
+}
+
+// Commit operations
+
+func (m *MockGitOps) Commit(ctx context.Context, msg string, opts CommitOpts) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "Commit", Args: []any{msg, opts}})
+	return m.CommitErr
+}
+
+// Working tree operations
+
+func (m *MockGitOps) CheckoutFiles(ctx context.Context, paths ...string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "CheckoutFiles", Args: []any{paths}})
+	return m.CheckoutFilesErr
+}
+
+func (m *MockGitOps) Clean(ctx context.Context, opts CleanOpts) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "Clean", Args: []any{opts}})
+	return m.CleanErr
+}
+
+func (m *MockGitOps) ResetHard(ctx context.Context, ref string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "ResetHard", Args: []any{ref}})
+	return m.ResetHardErr
+}
+
+// Remote operations
+
+func (m *MockGitOps) Fetch(ctx context.Context, remote, ref string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "Fetch", Args: []any{remote, ref}})
+	return m.FetchErr
+}
+
+func (m *MockGitOps) Push(ctx context.Context, remote, branch string, opts PushOpts) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "Push", Args: []any{remote, branch, opts}})
+	return m.PushErr
+}
+
+// Merge operations
+
+func (m *MockGitOps) Merge(ctx context.Context, branch string, opts MergeOpts) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "Merge", Args: []any{branch, opts}})
+	return m.MergeErr
+}
+
+func (m *MockGitOps) MergeAbort(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.record(MockCall{Method: "MergeAbort"})
+	return m.MergeAbortErr
 }
