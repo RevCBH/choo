@@ -1066,3 +1066,106 @@ func TestCommitReviewFixes_GitOps_NilGitOps(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, committed)
 }
+
+// === GitOps-based cleanupWorktree tests ===
+
+func TestCleanupWorktree_UsesGitOps(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	w := &Worker{
+		gitOps:       mockOps,
+		reviewConfig: &config.CodeReviewConfig{Verbose: true},
+	}
+
+	w.cleanupWorktree(context.Background())
+
+	mockOps.AssertCalled(t, "Reset")
+	mockOps.AssertCalled(t, "Clean")
+	mockOps.AssertCalled(t, "CheckoutFiles")
+
+	// Verify Clean was called with correct options
+	cleanCalls := mockOps.GetCallsFor("Clean")
+	if len(cleanCalls) != 1 {
+		t.Fatalf("expected 1 Clean call, got %d", len(cleanCalls))
+	}
+	opts := cleanCalls[0].Args[0].(git.CleanOpts)
+	if !opts.Force {
+		t.Error("expected Force=true for Clean")
+	}
+	if !opts.Directories {
+		t.Error("expected Directories=true for Clean")
+	}
+}
+
+func TestCleanupWorktree_NilGitOps_NoOp(t *testing.T) {
+	w := &Worker{
+		gitOps:       nil,
+		worktreePath: "", // Prevents legacy fallback from doing anything
+	}
+
+	// Should not panic
+	w.cleanupWorktree(context.Background())
+}
+
+func TestCleanupWorktree_ResetError_Continues(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.ResetErr = errors.New("reset failed")
+	w := &Worker{
+		gitOps:       mockOps,
+		reviewConfig: &config.CodeReviewConfig{Verbose: false},
+	}
+
+	w.cleanupWorktree(context.Background())
+
+	// Should still call Clean and CheckoutFiles despite Reset error
+	mockOps.AssertCalled(t, "Clean")
+	mockOps.AssertCalled(t, "CheckoutFiles")
+}
+
+func TestCleanupWorktree_CleanError_Continues(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	mockOps.CleanErr = errors.New("clean failed")
+	w := &Worker{
+		gitOps:       mockOps,
+		reviewConfig: &config.CodeReviewConfig{Verbose: false},
+	}
+
+	w.cleanupWorktree(context.Background())
+
+	// Should still call CheckoutFiles despite Clean error
+	mockOps.AssertCalled(t, "CheckoutFiles")
+}
+
+func TestCleanupWorktree_CleanOpts(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	w := &Worker{gitOps: mockOps}
+
+	w.cleanupWorktree(context.Background())
+
+	cleanCalls := mockOps.GetCallsFor("Clean")
+	if len(cleanCalls) != 1 {
+		t.Fatalf("expected 1 Clean call, got %d", len(cleanCalls))
+	}
+	opts := cleanCalls[0].Args[0].(git.CleanOpts)
+	if !opts.Force {
+		t.Error("expected Force=true for Clean")
+	}
+	if !opts.Directories {
+		t.Error("expected Directories=true for Clean")
+	}
+}
+
+func TestCleanupWorktree_CheckoutFiles_Dot(t *testing.T) {
+	mockOps := git.NewMockGitOps("/test/worktree")
+	w := &Worker{gitOps: mockOps}
+
+	w.cleanupWorktree(context.Background())
+
+	checkoutCalls := mockOps.GetCallsFor("CheckoutFiles")
+	if len(checkoutCalls) != 1 {
+		t.Fatalf("expected 1 CheckoutFiles call, got %d", len(checkoutCalls))
+	}
+	paths := checkoutCalls[0].Args[0].([]string)
+	if len(paths) != 1 || paths[0] != "." {
+		t.Errorf("expected CheckoutFiles to be called with [\".\"], got %v", paths)
+	}
+}
