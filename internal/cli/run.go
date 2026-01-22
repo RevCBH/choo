@@ -74,11 +74,6 @@ func (opts RunOptions) Validate() error {
 	return nil
 }
 
-// isContainerMode returns true if running in container mode.
-func (opts RunOptions) isContainerMode() bool {
-	return opts.CloneURL != "" || opts.JSONEvents
-}
-
 // runWithDaemon executes a job via the daemon and attaches to event stream.
 // If the daemon is not running, it will be started automatically.
 func runWithDaemon(ctx context.Context, tasksDir string, parallelism int, target, feature string) error {
