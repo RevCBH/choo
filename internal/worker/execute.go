@@ -17,7 +17,10 @@ func Execute(ctx context.Context, unit *discovery.Unit, cfg WorkerConfig, deps W
 	}
 
 	// Create worker
-	worker := NewWorker(unit, cfg, deps)
+	worker, err := NewWorker(unit, cfg, deps)
+	if err != nil {
+		return fmt.Errorf("failed to create worker: %w", err)
+	}
 
 	// Run worker
 	if err := worker.Run(ctx); err != nil {

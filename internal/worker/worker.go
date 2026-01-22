@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -99,17 +100,44 @@ type WorkerDeps struct {
 // Deprecated: Use Provider field in WorkerDeps instead
 type ClaudeClient any
 
-// NewWorker creates a worker for executing a unit
-func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker {
+// NewWorker creates a worker for executing a unit.
+// Uses convenience constructors for appropriate safety defaults.
+func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) (*Worker, error) {
+	// Use provided GitOps or create from WorktreeBase
+	gitOps := deps.GitOps
+	if gitOps == nil && cfg.WorktreeBase != "" && unit != nil {
+		worktreePath := filepath.Join(cfg.WorktreeBase, unit.ID)
+
+		// Use convenience constructor with safety options
+		// NewWorktreeGitOps sets AllowDestructive=true because:
+		// - Worktrees are isolated from main repository
+		// - cleanupWorktree() needs Reset, Clean, CheckoutFiles
+		// - Worktrees are disposable and meant to be reset
+		var err error
+		gitOps, err = git.NewWorktreeGitOps(worktreePath, cfg.WorktreeBase)
+		if err != nil {
+			// During Phase 1-2, path may not exist yet (created later)
+			// Only fail on validation errors, not path-not-found
+			if !errors.Is(err, git.ErrPathNotFound) && !errors.Is(err, git.ErrNotGitRepo) {
+				return nil, fmt.Errorf("invalid worktree path %q: %w", worktreePath, err)
+			}
+			// Path doesn't exist yet - that's OK, gitOps will be nil
+			gitOps = nil
+		}
+	}
+
+	// Fall back to raw runner for backward compatibility
 	gitRunner := deps.GitRunner
 	if gitRunner == nil {
 		gitRunner = git.DefaultRunner()
 	}
+
 	return &Worker{
 		unit:         unit,
 		config:       cfg,
 		events:       deps.Events,
 		git:          deps.Git,
+		gitOps:       gitOps,
 		gitRunner:    gitRunner,
 		github:       deps.GitHub,
 		provider:     deps.Provider,
@@ -117,7 +145,27 @@ func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) *Worker 
 		mergeMu:      deps.MergeMu,
 		reviewer:     deps.Reviewer,
 		reviewConfig: deps.ReviewConfig,
+	}, nil
+}
+
+// InitGitOps initializes GitOps after worktree is created.
+// Call this after setupWorktree() to enable safe git operations.
+func (w *Worker) InitGitOps() error {
+	if w.gitOps != nil {
+		return nil // Already initialized
 	}
+
+	if w.worktreePath == "" {
+		return fmt.Errorf("worktree path not set")
+	}
+
+	var err error
+	w.gitOps, err = git.NewWorktreeGitOps(w.worktreePath, w.config.WorktreeBase)
+	if err != nil {
+		return fmt.Errorf("initializing gitops: %w", err)
+	}
+
+	return nil
 }
 
 // Run executes the unit through all phases: setup, task loop, baseline, PR
