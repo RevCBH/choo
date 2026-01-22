@@ -14,6 +14,10 @@ type Config struct {
 	MaxJobs       int    // Default: 10
 	WebAddr       string // Default: :8080
 	WebSocketPath string // Default: ~/.choo/web.sock
+
+	ContainerMode    bool   // Enable container isolation for job execution
+	ContainerImage   string // Container image to use, e.g., "choo:latest"
+	ContainerRuntime string // "auto", "docker", or "podman"
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -52,6 +56,16 @@ func (c *Config) Validate() error {
 
 	if !filepath.IsAbs(c.DBPath) {
 		return fmt.Errorf("DBPath must be absolute, got %s", c.DBPath)
+	}
+
+	if c.ContainerMode {
+		if c.ContainerImage == "" {
+			return fmt.Errorf("ContainerImage is required when ContainerMode is enabled")
+		}
+		if c.ContainerRuntime != "" && c.ContainerRuntime != "auto" &&
+			c.ContainerRuntime != "docker" && c.ContainerRuntime != "podman" {
+			return fmt.Errorf("ContainerRuntime must be 'auto', 'docker', or 'podman', got %s", c.ContainerRuntime)
+		}
 	}
 
 	return nil

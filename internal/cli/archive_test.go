@@ -3,150 +3,320 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"sort"
 	"testing"
 )
 
-func TestArchiveCompleted_MovesUnitAndSpec(t *testing.T) {
+func TestArchive_MovesCompletedSpecs(t *testing.T) {
 	tmpDir := t.TempDir()
-
 	specsDir := filepath.Join(tmpDir, "specs")
-	tasksDir := filepath.Join(specsDir, "tasks")
-	unitDir := filepath.Join(tasksDir, "unit-one")
-	if err := os.MkdirAll(unitDir, 0755); err != nil {
-		t.Fatalf("failed to create unit dir: %v", err)
+	if err := os.MkdirAll(specsDir, 0755); err != nil {
+		t.Fatalf("failed to create specs dir: %v", err)
 	}
 
-	implPlan := filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md")
-	if err := os.WriteFile(implPlan, []byte(`---
-unit: unit-one
-orch_status: complete
----
-# Plan
-`), 0644); err != nil {
-		t.Fatalf("failed to write implementation plan: %v", err)
-	}
-
-	taskFile := filepath.Join(unitDir, "01-task.md")
-	if err := os.WriteFile(taskFile, []byte(`---
-task: 1
+	completeSpec := `---
 status: complete
-backpressure: "true"
 ---
-# Task
-`), 0644); err != nil {
-		t.Fatalf("failed to write task file: %v", err)
+# Complete Spec`
+	if err := os.WriteFile(filepath.Join(specsDir, "COMPLETE.md"), []byte(completeSpec), 0644); err != nil {
+		t.Fatalf("failed to write spec: %v", err)
 	}
 
-	specFile := filepath.Join(specsDir, "UNIT-ONE.md")
-	if err := os.WriteFile(specFile, []byte("# Spec"), 0644); err != nil {
-		t.Fatalf("failed to write spec file: %v", err)
-	}
-
-	app := New()
-	err := app.ArchiveCompleted(ArchiveOptions{TasksDir: tasksDir})
+	archived, err := Archive(ArchiveOptions{SpecsDir: specsDir})
 	if err != nil {
-		t.Fatalf("ArchiveCompleted failed: %v", err)
+		t.Fatalf("Archive() error = %v", err)
 	}
 
-	archivedUnitDir := filepath.Join(specsDir, "completed", "tasks", "unit-one")
-	if _, err := os.Stat(archivedUnitDir); err != nil {
-		t.Fatalf("expected archived unit dir to exist: %v", err)
+	// Verify complete spec moved
+	completedDir := filepath.Join(specsDir, "completed")
+	if _, err := os.Stat(filepath.Join(completedDir, "COMPLETE.md")); os.IsNotExist(err) {
+		t.Error("COMPLETE.md should be in completed directory")
+	}
+	if _, err := os.Stat(filepath.Join(specsDir, "COMPLETE.md")); !os.IsNotExist(err) {
+		t.Error("COMPLETE.md should not be in specs directory")
 	}
 
-	archivedSpec := filepath.Join(specsDir, "completed", "UNIT-ONE.md")
-	if _, err := os.Stat(archivedSpec); err != nil {
-		t.Fatalf("expected archived spec file to exist: %v", err)
-	}
-
-	if _, err := os.Stat(unitDir); !os.IsNotExist(err) {
-		t.Fatalf("expected unit dir to be moved, got err=%v", err)
-	}
-
-	if _, err := os.Stat(specFile); !os.IsNotExist(err) {
-		t.Fatalf("expected spec file to be moved, got err=%v", err)
+	if len(archived) != 1 || archived[0] != "COMPLETE.md" {
+		t.Errorf("archived = %v, want [COMPLETE.md]", archived)
 	}
 }
 
-func TestArchiveCompleted_SkipsIncompleteUnits(t *testing.T) {
+func TestArchive_SkipsIncompleteSpecs(t *testing.T) {
 	tmpDir := t.TempDir()
-
 	specsDir := filepath.Join(tmpDir, "specs")
-	tasksDir := filepath.Join(specsDir, "tasks")
-	unitDir := filepath.Join(tasksDir, "unit-two")
-	if err := os.MkdirAll(unitDir, 0755); err != nil {
-		t.Fatalf("failed to create unit dir: %v", err)
+	if err := os.MkdirAll(specsDir, 0755); err != nil {
+		t.Fatalf("failed to create specs dir: %v", err)
 	}
 
-	implPlan := filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md")
-	if err := os.WriteFile(implPlan, []byte(`---
-unit: unit-two
-orch_status: in_progress
+	incompleteSpec := `---
+status: in_progress
 ---
-# Plan
-`), 0644); err != nil {
-		t.Fatalf("failed to write implementation plan: %v", err)
+# Incomplete Spec`
+	if err := os.WriteFile(filepath.Join(specsDir, "INCOMPLETE.md"), []byte(incompleteSpec), 0644); err != nil {
+		t.Fatalf("failed to write spec: %v", err)
 	}
 
-	taskFile := filepath.Join(unitDir, "01-task.md")
-	if err := os.WriteFile(taskFile, []byte(`---
-task: 1
-status: complete
-backpressure: "true"
----
-# Task
-`), 0644); err != nil {
-		t.Fatalf("failed to write task file: %v", err)
-	}
-
-	app := New()
-	err := app.ArchiveCompleted(ArchiveOptions{TasksDir: tasksDir})
+	archived, err := Archive(ArchiveOptions{SpecsDir: specsDir})
 	if err != nil {
-		t.Fatalf("ArchiveCompleted failed: %v", err)
+		t.Fatalf("Archive() error = %v", err)
 	}
 
-	if _, err := os.Stat(unitDir); err != nil {
-		t.Fatalf("expected unit dir to remain, got err=%v", err)
+	// Verify incomplete spec not moved
+	if _, err := os.Stat(filepath.Join(specsDir, "INCOMPLETE.md")); os.IsNotExist(err) {
+		t.Error("INCOMPLETE.md should remain in specs directory")
+	}
+
+	if len(archived) != 0 {
+		t.Errorf("archived = %v, want []", archived)
 	}
 }
 
-func TestArchiveCompleted_AllTasksComplete_NoUnitStatus(t *testing.T) {
+func TestArchive_SkipsNoFrontmatter(t *testing.T) {
 	tmpDir := t.TempDir()
-
 	specsDir := filepath.Join(tmpDir, "specs")
-	tasksDir := filepath.Join(specsDir, "tasks")
-	unitDir := filepath.Join(tasksDir, "unit-three")
+	if err := os.MkdirAll(specsDir, 0755); err != nil {
+		t.Fatalf("failed to create specs dir: %v", err)
+	}
+
+	content := `# Spec Without Frontmatter`
+	if err := os.WriteFile(filepath.Join(specsDir, "NOFM.md"), []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write spec: %v", err)
+	}
+
+	archived, err := Archive(ArchiveOptions{SpecsDir: specsDir})
+	if err != nil {
+		t.Fatalf("Archive() error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(specsDir, "NOFM.md")); os.IsNotExist(err) {
+		t.Error("NOFM.md should remain in specs directory")
+	}
+
+	if len(archived) != 0 {
+		t.Errorf("archived = %v, want []", archived)
+	}
+}
+
+func TestArchive_SkipsReadme(t *testing.T) {
+	tmpDir := t.TempDir()
+	specsDir := filepath.Join(tmpDir, "specs")
+	if err := os.MkdirAll(specsDir, 0755); err != nil {
+		t.Fatalf("failed to create specs dir: %v", err)
+	}
+
+	readme := `---
+status: complete
+---
+# README`
+	if err := os.WriteFile(filepath.Join(specsDir, "README.md"), []byte(readme), 0644); err != nil {
+		t.Fatalf("failed to write README: %v", err)
+	}
+
+	archived, err := Archive(ArchiveOptions{SpecsDir: specsDir})
+	if err != nil {
+		t.Fatalf("Archive() error = %v", err)
+	}
+
+	// Verify README not moved
+	if _, err := os.Stat(filepath.Join(specsDir, "README.md")); os.IsNotExist(err) {
+		t.Error("README.md should remain in specs directory")
+	}
+
+	if len(archived) != 0 {
+		t.Errorf("archived = %v, want []", archived)
+	}
+}
+
+func TestArchive_CreatesCompletedDir(t *testing.T) {
+	tmpDir := t.TempDir()
+	specsDir := filepath.Join(tmpDir, "specs")
+	if err := os.MkdirAll(specsDir, 0755); err != nil {
+		t.Fatalf("failed to create specs dir: %v", err)
+	}
+
+	_, err := Archive(ArchiveOptions{SpecsDir: specsDir})
+	if err != nil {
+		t.Fatalf("Archive() error = %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(specsDir, "completed")); err != nil {
+		t.Fatalf("expected completed directory to exist: %v", err)
+	}
+}
+
+func TestArchive_DryRunNoMove(t *testing.T) {
+	tmpDir := t.TempDir()
+	specsDir := filepath.Join(tmpDir, "specs")
+	if err := os.MkdirAll(specsDir, 0755); err != nil {
+		t.Fatalf("failed to create specs dir: %v", err)
+	}
+
+	completeSpec := `---
+status: complete
+---
+# Complete Spec`
+	if err := os.WriteFile(filepath.Join(specsDir, "COMPLETE.md"), []byte(completeSpec), 0644); err != nil {
+		t.Fatalf("failed to write spec: %v", err)
+	}
+
+	archived, err := Archive(ArchiveOptions{SpecsDir: specsDir, DryRun: true})
+	if err != nil {
+		t.Fatalf("Archive() error = %v", err)
+	}
+
+	// Verify file not actually moved
+	if _, err := os.Stat(filepath.Join(specsDir, "COMPLETE.md")); os.IsNotExist(err) {
+		t.Error("COMPLETE.md should remain in specs directory during dry run")
+	}
+
+	// But it should be reported as archived
+	if len(archived) != 1 {
+		t.Errorf("archived = %v, want [COMPLETE.md]", archived)
+	}
+}
+
+func TestArchive_ReturnsArchivedList(t *testing.T) {
+	tmpDir := t.TempDir()
+	specsDir := filepath.Join(tmpDir, "specs")
+	if err := os.MkdirAll(specsDir, 0755); err != nil {
+		t.Fatalf("failed to create specs dir: %v", err)
+	}
+
+	completeOne := `---
+status: complete
+---
+# Complete Spec 1`
+	completeTwo := `---
+status: complete
+---
+# Complete Spec 2`
+	if err := os.WriteFile(filepath.Join(specsDir, "COMPLETE_ONE.md"), []byte(completeOne), 0644); err != nil {
+		t.Fatalf("failed to write spec: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(specsDir, "COMPLETE_TWO.md"), []byte(completeTwo), 0644); err != nil {
+		t.Fatalf("failed to write spec: %v", err)
+	}
+
+	archived, err := Archive(ArchiveOptions{SpecsDir: specsDir})
+	if err != nil {
+		t.Fatalf("Archive() error = %v", err)
+	}
+
+	sort.Strings(archived)
+	want := []string{"COMPLETE_ONE.md", "COMPLETE_TWO.md"}
+	if len(archived) != len(want) {
+		t.Fatalf("archived = %v, want %v", archived, want)
+	}
+	for i := range want {
+		if archived[i] != want[i] {
+			t.Fatalf("archived = %v, want %v", archived, want)
+		}
+	}
+}
+
+func TestShouldArchive_CompleteStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "test.md")
+
+	content := `---
+status: complete
+---
+# Test`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write spec: %v", err)
+	}
+
+	if !shouldArchive(path) {
+		t.Error("shouldArchive() = false, want true for status: complete")
+	}
+}
+
+func TestShouldArchive_PendingStatus(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "test.md")
+
+	content := `---
+status: pending
+---
+# Test`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write spec: %v", err)
+	}
+
+	if shouldArchive(path) {
+		t.Error("shouldArchive() = true, want false for status: pending")
+	}
+}
+
+func TestShouldArchive_NoFrontmatter(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "test.md")
+
+	content := `# Test without frontmatter`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write spec: %v", err)
+	}
+
+	if shouldArchive(path) {
+		t.Error("shouldArchive() = true, want false for no frontmatter")
+	}
+}
+
+func TestIsUnitComplete_AllComplete(t *testing.T) {
+	tmpDir := t.TempDir()
+	unitDir := filepath.Join(tmpDir, "test-unit")
 	if err := os.MkdirAll(unitDir, 0755); err != nil {
 		t.Fatalf("failed to create unit dir: %v", err)
 	}
 
-	implPlan := filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md")
-	if err := os.WriteFile(implPlan, []byte(`---
-unit: unit-three
+	plan := `---
+unit: test-unit
 ---
-# Plan
-`), 0644); err != nil {
-		t.Fatalf("failed to write implementation plan: %v", err)
-	}
-
-	taskFile := filepath.Join(unitDir, "01-task.md")
-	if err := os.WriteFile(taskFile, []byte(`---
+# Plan`
+	task := `---
 task: 1
 status: complete
-backpressure: "true"
 ---
-# Task
-`), 0644); err != nil {
-		t.Fatalf("failed to write task file: %v", err)
+# Task`
+
+	if err := os.WriteFile(filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md"), []byte(plan), 0644); err != nil {
+		t.Fatalf("failed to write plan: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(task), 0644); err != nil {
+		t.Fatalf("failed to write task: %v", err)
 	}
 
-	app := New()
-	err := app.ArchiveCompleted(ArchiveOptions{TasksDir: tasksDir})
-	if err != nil {
-		t.Fatalf("ArchiveCompleted failed: %v", err)
+	if !isUnitComplete(unitDir) {
+		t.Error("isUnitComplete() = false, want true when all tasks complete")
+	}
+}
+
+func TestIsUnitComplete_SomePending(t *testing.T) {
+	tmpDir := t.TempDir()
+	unitDir := filepath.Join(tmpDir, "test-unit")
+	if err := os.MkdirAll(unitDir, 0755); err != nil {
+		t.Fatalf("failed to create unit dir: %v", err)
 	}
 
-	archivedUnitDir := filepath.Join(specsDir, "completed", "tasks", "unit-three")
-	if _, err := os.Stat(archivedUnitDir); err != nil {
-		t.Fatalf("expected archived unit dir to exist: %v", err)
+	completeTask := `---
+task: 1
+status: complete
+---
+# Task 1`
+	pendingTask := `---
+task: 2
+status: pending
+---
+# Task 2`
+
+	if err := os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(completeTask), 0644); err != nil {
+		t.Fatalf("failed to write task: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(unitDir, "02-task.md"), []byte(pendingTask), 0644); err != nil {
+		t.Fatalf("failed to write task: %v", err)
+	}
+
+	if isUnitComplete(unitDir) {
+		t.Error("isUnitComplete() = true, want false when some tasks pending")
 	}
 }

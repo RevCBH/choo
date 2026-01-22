@@ -30,11 +30,21 @@ func NewDaemonCmd(a *App) *cobra.Command {
 	return cmd
 }
 
+// DaemonStartOptions holds flags for daemon start command.
+type DaemonStartOptions struct {
+	Foreground bool
+	Verbose    bool
+
+	ContainerMode    bool
+	ContainerImage   string
+	ContainerRuntime string
+}
+
 // newDaemonStartCmd creates the 'daemon start' command
 // By default, starts the daemon in the background after checking if it's already running.
 // Use --foreground to run in blocking mode (useful for debugging or process managers).
 func newDaemonStartCmd(a *App) *cobra.Command {
-	var foreground bool
+	opts := DaemonStartOptions{}
 
 	cmd := &cobra.Command{
 		Use:   "start",
@@ -46,12 +56,17 @@ func newDaemonStartCmd(a *App) *cobra.Command {
 				return nil
 			}
 
-			if foreground {
+			if verbose, err := cmd.Flags().GetBool("verbose"); err == nil {
+				opts.Verbose = verbose
+			}
+
+			cfg, err := buildDaemonConfig(opts)
+			if err != nil {
+				return fmt.Errorf("failed to load config: %w", err)
+			}
+
+			if opts.Foreground {
 				// Run in foreground (original behavior)
-				cfg, err := daemon.DefaultConfig()
-				if err != nil {
-					return fmt.Errorf("failed to load config: %w", err)
-				}
 				d, err := daemon.New(cfg)
 				if err != nil {
 					return err
@@ -60,13 +75,39 @@ func newDaemonStartCmd(a *App) *cobra.Command {
 			}
 
 			// Start daemon in background
-			return startDaemonBackground()
+			return startDaemonBackground(opts)
 		},
 	}
 
-	cmd.Flags().BoolVar(&foreground, "foreground", false, "Run daemon in foreground (blocking)")
+	registerDaemonStartFlags(cmd, &opts)
 
 	return cmd
+}
+
+// registerDaemonStartFlags adds flags to the daemon start command.
+func registerDaemonStartFlags(cmd *cobra.Command, opts *DaemonStartOptions) {
+	cmd.Flags().BoolVarP(&opts.Foreground, "foreground", "f", false,
+		"Run daemon in foreground (don't daemonize)")
+	cmd.Flags().BoolVar(&opts.ContainerMode, "container-mode", false,
+		"Enable container isolation for job execution")
+	cmd.Flags().StringVar(&opts.ContainerImage, "container-image", "choo:latest",
+		"Container image to use for jobs")
+	cmd.Flags().StringVar(&opts.ContainerRuntime, "container-runtime", "auto",
+		"Container runtime: auto, docker, or podman")
+}
+
+// buildDaemonConfig creates a daemon.Config from CLI options.
+func buildDaemonConfig(opts DaemonStartOptions) (*daemon.Config, error) {
+	cfg, err := daemon.DefaultConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	cfg.ContainerMode = opts.ContainerMode
+	cfg.ContainerImage = opts.ContainerImage
+	cfg.ContainerRuntime = opts.ContainerRuntime
+
+	return cfg, nil
 }
 
 // isDaemonRunning checks if the daemon is already running by checking
@@ -89,7 +130,7 @@ func isDaemonRunning() bool {
 // startDaemonBackground spawns the daemon process in the background.
 // The child process is started in its own process group and session,
 // so it won't be affected by signals sent to the parent (e.g., Ctrl+C).
-func startDaemonBackground() error {
+func startDaemonBackground(opts DaemonStartOptions) error {
 	// Get the path to the current executable
 	exe, err := os.Executable()
 	if err != nil {
@@ -118,7 +159,20 @@ func startDaemonBackground() error {
 	}
 
 	// Start daemon process with --foreground flag
-	cmd := exec.Command(exe, "daemon", "start", "--foreground")
+	args := []string{"daemon", "start", "--foreground"}
+	if opts.ContainerMode {
+		args = append(args, "--container-mode")
+	}
+	if opts.ContainerImage != "" {
+		args = append(args, "--container-image", opts.ContainerImage)
+	}
+	if opts.ContainerRuntime != "" {
+		args = append(args, "--container-runtime", opts.ContainerRuntime)
+	}
+	if opts.Verbose {
+		args = append(args, "--verbose")
+	}
+	cmd := exec.Command(exe, args...)
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Stdin = nil

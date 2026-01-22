@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/RevCBH/choo/internal/config"
+	"github.com/RevCBH/choo/internal/container"
 	"github.com/RevCBH/choo/internal/daemon/db"
 	"github.com/RevCBH/choo/internal/escalate"
 	"github.com/RevCBH/choo/internal/events"
@@ -28,6 +29,10 @@ type jobManagerImpl struct {
 
 	mu   sync.RWMutex
 	jobs map[string]*ManagedJob
+
+	containerJobs map[string]*ManagedContainerJob
+	runtime       container.Manager
+	cfg           *Config
 
 	eventBus *events.Bus // Global daemon event bus
 
@@ -51,11 +56,13 @@ var newOrchestrator = func(cfg orchestrator.Config, deps orchestrator.Dependenci
 // NewJobManager creates a new job manager.
 func NewJobManager(database *db.DB, maxJobs int) *jobManagerImpl {
 	return &jobManagerImpl{
-		db:       database,
-		maxJobs:  maxJobs,
-		jobs:     make(map[string]*ManagedJob),
-		eventBus: events.NewBus(1000), // Global event bus for daemon-level events
-		store:    web.NewStore(),      // Always have a store for state tracking
+		db:            database,
+		maxJobs:       maxJobs,
+		jobs:          make(map[string]*ManagedJob),
+		containerJobs: make(map[string]*ManagedContainerJob),
+		cfg:           &Config{},
+		eventBus:      events.NewBus(1000), // Global event bus for daemon-level events
+		store:         web.NewStore(),      // Always have a store for state tracking
 	}
 }
 

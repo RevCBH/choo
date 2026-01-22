@@ -401,6 +401,7 @@ func TestReviewFixLoop_CleanupOnExit(t *testing.T) {
 	ctx := context.Background()
 	w.runReviewFixLoop(ctx, issues)
 
+	// Cleanup is called twice: once in the loop on provider failure, once at function exit
 	assert.Equal(t, 2, runner.callsFor("reset", "HEAD"))
 	assert.Equal(t, 2, runner.callsFor("clean", "-fd"))
 	assert.Equal(t, 2, runner.callsFor("checkout", "."))
