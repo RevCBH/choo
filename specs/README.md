@@ -230,36 +230,97 @@ These specs convert Charlotte from CLI-based to daemon-based architecture:
 3. **DAEMON-CORE** + **DAEMON-CLIENT** (parallel, depend on DAEMON-GRPC)
 4. **DAEMON-CLI** (depends on DAEMON-CORE and DAEMON-CLIENT)
 
-## Safe Git Operations Specs (v0.7)
+## Container Isolation Specs (v0.6)
 
-These specs address a production bug where tests ran destructive git commands on the actual repository instead of test directories. The solution is a higher-level `GitOps` interface with path validation at construction time.
+These specs enable isolated job execution in Docker/Podman containers:
 
 | Spec | Description | Dependencies |
 |------|-------------|--------------|
-| **[GITOPS](GITOPS.md)** | Safe git operations interface with path validation at construction | - |
-| **[GITOPS-MOCK](GITOPS-MOCK.md)** | Mock implementation with call tracking and assertion helpers | GITOPS |
-| **[GITOPS-WORKER](GITOPS-WORKER.md)** | Worker migration from raw Runner to GitOps interface | GITOPS, GITOPS-MOCK |
+| **[CONTAINER-MANAGER](CONTAINER-MANAGER.md)** | Container lifecycle management using Docker/Podman CLI | - |
+| **[JSON-EVENTS](JSON-EVENTS.md)** | JSON event emitter and parser for container stdout communication | EVENTS |
+| **[CONTAINER-IMAGE](CONTAINER-IMAGE.md)** | Dockerfile and build script for choo container image | - |
+| **[CONTAINER-DAEMON](CONTAINER-DAEMON.md)** | Daemon integration for dispatching jobs to containers and bridging events | DAEMON-CORE, CONTAINER-MANAGER, JSON-EVENTS |
 
 ### Dependency Graph
 
 ```
-┌──────────────┐
-│    GITOPS    │
-└──────┬───────┘
-       │
-       ▼
-┌──────────────┐
-│ GITOPS-MOCK  │
-└──────┬───────┘
-       │
-       ▼
-┌──────────────────┐
-│  GITOPS-WORKER   │
-└──────────────────┘
+                                    ┌────────┐
+                                    │ EVENTS │
+                                    └───┬────┘
+                                        │
+┌───────────────────┐  ┌────────────────┼────────────────┐
+│ CONTAINER-MANAGER │  │                ▼                │
+└─────────┬─────────┘  │         ┌─────────────┐         │
+          │            │         │ JSON-EVENTS │         │
+          │            │         └──────┬──────┘         │
+          │            │                │                │
+          │    ┌───────┴────────┐       │                │
+          │    │  DAEMON-CORE   │       │                │
+          │    └───────┬────────┘       │                │
+          │            │                │                │
+          └────────────┼────────────────┘                │
+                       │                                 │
+                       ▼                                 │
+             ┌──────────────────┐                        │
+             │ CONTAINER-DAEMON │                        │
+             └──────────────────┘                        │
+                                                         │
+┌─────────────────┐                                      │
+│ CONTAINER-IMAGE │  (independent, build-time only)      │
+└─────────────────┘
 ```
 
 ### Implementation Order
 
-1. **GITOPS** (foundational interface and implementation)
-2. **GITOPS-MOCK** (mock for testing, depends on GITOPS)
-3. **GITOPS-WORKER** (worker integration, depends on both)
+1. **CONTAINER-MANAGER** + **JSON-EVENTS** + **CONTAINER-IMAGE** (parallel, minimal dependencies)
+2. **CONTAINER-DAEMON** (depends on DAEMON-CORE, CONTAINER-MANAGER, JSON-EVENTS)
+
+### Task Breakdown
+
+Each spec has been decomposed into atomic tasks in `specs/tasks/`:
+
+| Unit | Tasks | Description |
+|------|-------|-------------|
+| `container-manager/` | 3 | Core types, runtime detection, CLI manager implementation |
+| `json-events/` | 4 | Wire types, JSON emitter, JSON reader, TTY detection |
+| `container-image/` | 2 | Dockerfile, build script |
+| `container-daemon/` | 6 | Config types, log streamer, container job, archive, CLI extensions, orchestrator completion |
+
+**Total: 15 atomic tasks**
+
+#### Unit Dependency Graph
+
+```
+container-manager ──┐
+                    ├──► container-daemon
+json-events ────────┘
+
+container-image (independent, build-time only)
+```
+
+#### Task Execution Order
+
+**Phase 1** (parallel):
+- `container-manager/01-core-types.md`
+- `container-manager/02-runtime-detection.md`
+- `json-events/01-wire-types.md`
+- `container-image/01-dockerfile.md`
+
+**Phase 2** (depends on phase 1):
+- `container-manager/03-cli-manager.md`
+- `json-events/02-json-emitter.md`
+- `json-events/03-json-reader.md`
+- `container-image/02-build-script.md`
+
+**Phase 3** (depends on phase 2):
+- `json-events/04-tty-detection.md`
+- `container-daemon/01-config-types.md`
+- `container-daemon/04-archive.md`
+
+**Phase 4** (depends on phase 3):
+- `container-daemon/02-log-streamer.md`
+- `container-daemon/05-cli-extensions.md`
+- `container-daemon/06-orchestrator-complete.md`
+
+**Phase 5** (final integration):
+- `container-daemon/03-container-job.md`
