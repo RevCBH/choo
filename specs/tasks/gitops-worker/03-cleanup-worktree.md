@@ -1,6 +1,6 @@
 ---
 task: 3
-status: complete
+status: pending
 backpressure: "go test ./internal/worker/... -run TestCleanupWorktree -v"
 depends_on: [2]
 ---

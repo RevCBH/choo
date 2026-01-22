@@ -1,6 +1,6 @@
 ---
 task: 5
-status: complete
+status: pending
 backpressure: "go test ./internal/worker/... -v"
 depends_on: [3, 4]
 ---

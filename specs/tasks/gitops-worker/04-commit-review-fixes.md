@@ -1,6 +1,6 @@
 ---
 task: 4
-status: complete
+status: pending
 backpressure: "go test ./internal/worker/... -run 'TestCommitReviewFixes|TestHasUncommittedChanges' -v"
 depends_on: [2]
 ---

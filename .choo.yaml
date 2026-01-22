@@ -1,6 +1,5 @@
 claude:
   max_turns: 50
-  # command: /Users/bennett/.nvm/versions/node/v22.16.0/bin/claude
 
 # Baseline checks mirror CI (.github/workflows/ci.yml)
 baseline_checks:

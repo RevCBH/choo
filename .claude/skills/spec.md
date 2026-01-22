@@ -43,9 +43,10 @@ Template** below. Pass:
 **Critical**: Do NOT tell subagents to read the skill file or PRD themselves.
 Embed all context in their prompt.
 
-### Phase 3: Validation (Spawn spec-validator agent)
+## Phase 3: Validation (Spawn spec-validator agent)
 
-After spec-writing subagents complete, spawn a `general-purpose` subagent to validate and fix cross-spec consistency issues. Use this prompt:
+After spec-writing subagents complete, spawn a `general-purpose` subagent to
+validate and fix cross-spec consistency issues. Use this prompt:
 
 ```
 You are acting as a Spec Validator. Validate and fix specs against the PRD.
@@ -83,11 +84,13 @@ Read all files, apply auto-fixes directly to spec files, and produce a validatio
 - Remaining issues requiring human decision
 ```
 
-See `.claude/agents/spec-validator.md` for full validation rules and output format.
+See `.claude/agents/spec-validator.md` for full validation rules and output
+format.
 
 ### Phase 4: Documentation (You do this)
 
 After validation completes, update `specs/README.md` with:
+
 - [ ] Table of new specs with descriptions and dependencies
 - [ ] Dependency graph (ASCII diagram showing relationships)
 - [ ] Suggested implementation order (parallelizable groups)
@@ -168,11 +171,10 @@ Create a technical specification at `{{OUTPUT_PATH}}`.
 
 ### Module Structure
 ```
-path/to/module/
-├── file.go    # Purpose
-└── other.go   # Purpose
-```
 
+path/to/module/ ├── file.go # Purpose └── other.go # Purpose
+
+````
 ### Core Types
 ```go
 // Include ALL fields with types
@@ -180,7 +182,7 @@ path/to/module/
 type Example struct {
     Field string // Explain if needed
 }
-```
+````
 
 ### API Surface
 
@@ -368,3 +370,4 @@ PRD section 8 content, code snippets]
 - [ ] No vague language ("fast", "robust")
 - [ ] No marketing speak
 - [ ] Technical terms used correctly
+```

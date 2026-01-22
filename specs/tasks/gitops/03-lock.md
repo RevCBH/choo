@@ -1,6 +1,6 @@
 ---
 task: 3
-status: complete
+status: pending
 backpressure: "go test ./internal/git/... -run TestRepoLock -v"
 depends_on: []
 ---

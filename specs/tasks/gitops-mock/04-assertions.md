@@ -1,6 +1,6 @@
 ---
 task: 4
-status: complete
+status: pending
 backpressure: "go test ./internal/git/... -run TestMockGitOps_Assert -v"
 depends_on: [2]
 ---

@@ -294,10 +294,9 @@ func NewGitOps(path string, opts GitOpsOpts) (GitOps, error) {
     if err != nil {
         return nil, fmt.Errorf("%w: %v", ErrNotGitRepo, err)
     }
-    toplevel = filepath.Clean(strings.TrimSpace(toplevel))
 
     // 7. Path matches toplevel
-    if toplevel != canonical {
+    if filepath.Clean(toplevel) != canonical {
         return nil, fmt.Errorf("%w: toplevel=%s, path=%s", ErrPathMismatch, toplevel, canonical)
     }
 
@@ -311,10 +310,8 @@ func NewGitOps(path string, opts GitOpsOpts) (GitOps, error) {
 
     // 9. Under worktree base
     if !opts.AllowRepoRoot && opts.WorktreeBase != "" {
-        base := filepath.Clean(opts.WorktreeBase)
-        rel, err := filepath.Rel(base, canonical)
-        if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
-            return nil, fmt.Errorf("%w: path=%s, base=%s", ErrOutsideWorktreeBase, canonical, base)
+        if !strings.HasPrefix(canonical, opts.WorktreeBase) {
+            return nil, fmt.Errorf("%w: path=%s, base=%s", ErrOutsideWorktreeBase, canonical, opts.WorktreeBase)
         }
     }
 
@@ -341,16 +338,17 @@ type BranchGuard struct {
     ProtectedBranches    []string // Never allow writes to these (default: ["main", "master"])
 }
 
-func (g *gitOps) validateBranchGuard(ctx context.Context, remote string) error {
+func (g *gitOps) validateBranchGuard(ctx context.Context) error {
     if g.opts.BranchGuard == nil {
         return nil // No guard configured
     }
 
-    guard := g.opts.BranchGuard
     branch, err := g.CurrentBranch(ctx)
     if err != nil {
         return fmt.Errorf("branch guard: %w", err)
     }
+
+    guard := g.opts.BranchGuard
 
     // Check exact match
     if guard.ExpectedBranch != "" && branch != guard.ExpectedBranch {
@@ -382,25 +380,6 @@ func (g *gitOps) validateBranchGuard(ctx context.Context, remote string) error {
         }
     }
 
-    // Check remote URL
-    if remote != "" && len(guard.AllowedRemotes) > 0 {
-        url, err := g.runner.Exec(ctx, g.path, "remote", "get-url", remote)
-        if err != nil {
-            return fmt.Errorf("branch guard: %w", err)
-        }
-        url = strings.TrimSpace(url)
-        allowed := false
-        for _, r := range guard.AllowedRemotes {
-            if url == r {
-                allowed = true
-                break
-            }
-        }
-        if !allowed {
-            return fmt.Errorf("%w: remote=%s, url=%s, allowed=%v", ErrUnexpectedRemote, remote, url, guard.AllowedRemotes)
-        }
-    }
-
     return nil
 }
 ```
@@ -429,7 +408,7 @@ func (g *gitOps) ResetHard(ctx context.Context, ref string) error {
     if !g.opts.AllowDestructive {
         return fmt.Errorf("%w: ResetHard", ErrDestructiveNotAllowed)
     }
-    if err := g.validateBranchGuard(ctx, ""); err != nil {
+    if err := g.validateBranchGuard(ctx); err != nil {
         return err
     }
     // ... execute
@@ -446,7 +425,7 @@ func (g *gitOps) Push(ctx context.Context, remote, branch string, opts PushOpts)
     if (opts.Force || opts.ForceWithLease) && !g.opts.AllowDestructive {
         return fmt.Errorf("%w: Push --force", ErrDestructiveNotAllowed)
     }
-    if err := g.validateBranchGuard(ctx, remote); err != nil {
+    if err := g.validateBranchGuard(ctx); err != nil {
         return err
     }
     // ... execute

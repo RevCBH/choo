@@ -1,6 +1,6 @@
 ---
 task: 2
-status: complete
+status: pending
 backpressure: "go test ./internal/git/... -run TestMockGitOps_Methods -v"
 depends_on: [1]
 ---
