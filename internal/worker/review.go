@@ -2,12 +2,14 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 
 	"github.com/RevCBH/choo/internal/events"
+	"github.com/RevCBH/choo/internal/git"
 	"github.com/RevCBH/choo/internal/provider"
 )
 
@@ -197,34 +199,54 @@ func (w *Worker) hasUncommittedChanges(ctx context.Context) (bool, error) {
 }
 
 // cleanupWorktree resets any uncommitted changes left by failed fix attempts.
-// This ensures the worktree is clean before proceeding to merge.
-// Errors are logged but not returned - cleanup is best-effort.
+// Uses GitOps for safe operations with path validation.
 func (w *Worker) cleanupWorktree(ctx context.Context) {
-	// Guard: skip if no worktree path configured (prevents accidental cleanup of cwd)
-	if w.worktreePath == "" {
+	// Phase 1-2: Check if GitOps is available
+	if w.gitOps == nil {
+		// Fall back to old behavior during migration
+		w.cleanupWorktreeLegacy(ctx)
 		return
 	}
 
-	// 1. Reset staged changes (git reset)
-	if _, err := w.runner().Exec(ctx, w.worktreePath, "reset", "HEAD"); err != nil {
+	// 1. Reset staged changes
+	if err := w.gitOps.Reset(ctx); err != nil {
+		// Log but continue - cleanup is best-effort
 		if w.reviewConfig != nil && w.reviewConfig.Verbose {
 			fmt.Fprintf(os.Stderr, "Warning: git reset failed: %v\n", err)
 		}
-		// Continue with cleanup
 	}
 
-	// 2. Clean untracked files (git clean -fd)
-	if _, err := w.runner().Exec(ctx, w.worktreePath, "clean", "-fd"); err != nil {
+	// 2. Clean untracked files
+	if err := w.gitOps.Clean(ctx, git.CleanOpts{Force: true, Directories: true}); err != nil {
+		// Handle specific safety errors
+		if errors.Is(err, git.ErrDestructiveNotAllowed) {
+			// This shouldn't happen with NewWorktreeGitOps, but log it
+			fmt.Fprintf(os.Stderr, "BUG: destructive operations not allowed on worktree\n")
+		}
 		if w.reviewConfig != nil && w.reviewConfig.Verbose {
 			fmt.Fprintf(os.Stderr, "Warning: git clean failed: %v\n", err)
 		}
-		// Continue with cleanup
 	}
 
-	// 3. Restore modified files (git checkout .)
-	if _, err := w.runner().Exec(ctx, w.worktreePath, "checkout", "."); err != nil {
+	// 3. Restore modified files
+	if err := w.gitOps.CheckoutFiles(ctx, "."); err != nil {
+		if errors.Is(err, git.ErrDestructiveNotAllowed) {
+			fmt.Fprintf(os.Stderr, "BUG: destructive operations not allowed on worktree\n")
+		}
 		if w.reviewConfig != nil && w.reviewConfig.Verbose {
 			fmt.Fprintf(os.Stderr, "Warning: git checkout failed: %v\n", err)
 		}
 	}
+}
+
+// cleanupWorktreeLegacy is the old implementation using raw Runner.
+// Retained for Phase 1-2 backward compatibility.
+func (w *Worker) cleanupWorktreeLegacy(ctx context.Context) {
+	if w.worktreePath == "" {
+		return
+	}
+
+	w.runner().Exec(ctx, w.worktreePath, "reset", "HEAD")
+	w.runner().Exec(ctx, w.worktreePath, "clean", "-fd")
+	w.runner().Exec(ctx, w.worktreePath, "checkout", ".")
 }
