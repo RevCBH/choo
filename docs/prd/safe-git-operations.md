@@ -1,4 +1,23 @@
+---
+prd_id: safe-git-operations
+title: "Safe Git Operations Interface"
+status: draft
+depends_on:
+  - code-review
+---
+
 # PRD: Safe Git Operations Interface
+
+## Document Info
+
+| Field   | Value      |
+| ------- | ---------- |
+| Status  | Draft      |
+| Author  | Claude     |
+| Created | 2026-01-21 |
+| Target  | v0.7       |
+
+---
 
 ## Problem Statement
 

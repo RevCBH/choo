@@ -1,7 +1,7 @@
 ---
 prd_id: code-review
 title: "Advisory Code Review for Pre-Merge Workflow"
-status: draft
+status: completed
 depends_on:
   - mvp-orchestrator
 # Orchestrator-managed fields
@@ -16,7 +16,7 @@ depends_on:
 
 | Field   | Value      |
 | ------- | ---------- |
-| Status  | Draft      |
+| Status  | Completed  |
 | Author  | Claude     |
 | Created | 2026-01-21 |
 | Target  | v0.6       |
