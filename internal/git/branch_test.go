@@ -6,6 +6,92 @@ import (
 	"testing"
 )
 
+func TestGetWorkingDirStatus_Clean(t *testing.T) {
+	fake := newFakeRunner()
+	fake.stub("status --porcelain", "", nil)
+	SetDefaultRunner(fake)
+	defer SetDefaultRunner(nil)
+
+	status, err := GetWorkingDirStatus(context.Background(), "/test/repo")
+	if err != nil {
+		t.Fatalf("GetWorkingDirStatus() returned error: %v", err)
+	}
+
+	if status.HasChanges {
+		t.Error("GetWorkingDirStatus() HasChanges = true, want false for clean repo")
+	}
+	if len(status.ChangedFiles) != 0 {
+		t.Errorf("GetWorkingDirStatus() ChangedFiles = %v, want empty", status.ChangedFiles)
+	}
+}
+
+func TestGetWorkingDirStatus_WithChanges(t *testing.T) {
+	fake := newFakeRunner()
+	// Simulate modified and untracked files
+	fake.stub("status --porcelain", " M internal/cli/run.go\n?? newfile.txt\n", nil)
+	SetDefaultRunner(fake)
+	defer SetDefaultRunner(nil)
+
+	status, err := GetWorkingDirStatus(context.Background(), "/test/repo")
+	if err != nil {
+		t.Fatalf("GetWorkingDirStatus() returned error: %v", err)
+	}
+
+	if !status.HasChanges {
+		t.Error("GetWorkingDirStatus() HasChanges = false, want true")
+	}
+	if len(status.ChangedFiles) != 2 {
+		t.Errorf("GetWorkingDirStatus() ChangedFiles length = %d, want 2", len(status.ChangedFiles))
+	}
+}
+
+func TestGetWorkingDirStatus_WatchPaths(t *testing.T) {
+	fake := newFakeRunner()
+	// Simulate changes in specs/ directory
+	fake.stub("status --porcelain", " M specs/tasks/unit1/task.md\n M internal/cli/run.go\n", nil)
+	SetDefaultRunner(fake)
+	defer SetDefaultRunner(nil)
+
+	status, err := GetWorkingDirStatus(context.Background(), "/test/repo", "specs/", "docs/")
+	if err != nil {
+		t.Fatalf("GetWorkingDirStatus() returned error: %v", err)
+	}
+
+	if !status.HasChanges {
+		t.Error("GetWorkingDirStatus() HasChanges = false, want true")
+	}
+	if !status.PathChanges["specs/"] {
+		t.Error("GetWorkingDirStatus() PathChanges[\"specs/\"] = false, want true")
+	}
+	if status.PathChanges["docs/"] {
+		t.Error("GetWorkingDirStatus() PathChanges[\"docs/\"] = true, want false")
+	}
+}
+
+func TestGetWorkingDirStatus_RenamedFiles(t *testing.T) {
+	fake := newFakeRunner()
+	// Simulate renamed file
+	fake.stub("status --porcelain", "R  oldname.go -> newname.go\n", nil)
+	SetDefaultRunner(fake)
+	defer SetDefaultRunner(nil)
+
+	status, err := GetWorkingDirStatus(context.Background(), "/test/repo")
+	if err != nil {
+		t.Fatalf("GetWorkingDirStatus() returned error: %v", err)
+	}
+
+	if !status.HasChanges {
+		t.Error("GetWorkingDirStatus() HasChanges = false, want true")
+	}
+	if len(status.ChangedFiles) != 1 {
+		t.Errorf("GetWorkingDirStatus() ChangedFiles length = %d, want 1", len(status.ChangedFiles))
+	}
+	// Should contain the new name
+	if status.ChangedFiles[0] != "newname.go" {
+		t.Errorf("GetWorkingDirStatus() ChangedFiles[0] = %q, want %q", status.ChangedFiles[0], "newname.go")
+	}
+}
+
 // mockClaudeClient implements ClaudeClient for testing
 type mockClaudeClient struct {
 	response    string

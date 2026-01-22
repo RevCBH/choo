@@ -229,3 +229,37 @@ These specs convert Charlotte from CLI-based to daemon-based architecture:
 2. **DAEMON-GRPC** (depends on DAEMON-DB)
 3. **DAEMON-CORE** + **DAEMON-CLIENT** (parallel, depend on DAEMON-GRPC)
 4. **DAEMON-CLI** (depends on DAEMON-CORE and DAEMON-CLIENT)
+
+## Safe Git Operations Specs (v0.7)
+
+These specs address a production bug where tests ran destructive git commands on the actual repository instead of test directories. The solution is a higher-level `GitOps` interface with path validation at construction time.
+
+| Spec | Description | Dependencies |
+|------|-------------|--------------|
+| **[GITOPS](GITOPS.md)** | Safe git operations interface with path validation at construction | - |
+| **[GITOPS-MOCK](GITOPS-MOCK.md)** | Mock implementation with call tracking and assertion helpers | GITOPS |
+| **[GITOPS-WORKER](GITOPS-WORKER.md)** | Worker migration from raw Runner to GitOps interface | GITOPS, GITOPS-MOCK |
+
+### Dependency Graph
+
+```
+┌──────────────┐
+│    GITOPS    │
+└──────┬───────┘
+       │
+       ▼
+┌──────────────┐
+│ GITOPS-MOCK  │
+└──────┬───────┘
+       │
+       ▼
+┌──────────────────┐
+│  GITOPS-WORKER   │
+└──────────────────┘
+```
+
+### Implementation Order
+
+1. **GITOPS** (foundational interface and implementation)
+2. **GITOPS-MOCK** (mock for testing, depends on GITOPS)
+3. **GITOPS-WORKER** (worker integration, depends on both)
