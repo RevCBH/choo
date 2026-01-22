@@ -8,10 +8,12 @@ import (
 
 // Config holds daemon configuration with sensible defaults.
 type Config struct {
-	SocketPath string // Default: ~/.choo/daemon.sock
-	PIDFile    string // Default: ~/.choo/daemon.pid
-	DBPath     string // Default: ~/.choo/choo.db
-	MaxJobs    int    // Default: 10
+	SocketPath    string // Default: ~/.choo/daemon.sock
+	PIDFile       string // Default: ~/.choo/daemon.pid
+	DBPath        string // Default: ~/.choo/choo.db
+	MaxJobs       int    // Default: 10
+	WebAddr       string // Default: :8080
+	WebSocketPath string // Default: ~/.choo/web.sock
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -25,10 +27,12 @@ func DefaultConfig() (*Config, error) {
 	chooDir := filepath.Join(home, ".choo")
 
 	return &Config{
-		SocketPath: filepath.Join(chooDir, "daemon.sock"),
-		PIDFile:    filepath.Join(chooDir, "daemon.pid"),
-		DBPath:     filepath.Join(chooDir, "choo.db"),
-		MaxJobs:    10,
+		SocketPath:    filepath.Join(chooDir, "daemon.sock"),
+		PIDFile:       filepath.Join(chooDir, "daemon.pid"),
+		DBPath:        filepath.Join(chooDir, "choo.db"),
+		MaxJobs:       10,
+		WebAddr:       ":8080",
+		WebSocketPath: filepath.Join(chooDir, "web.sock"),
 	}, nil
 }
 

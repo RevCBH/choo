@@ -582,24 +582,74 @@ func buildGraphData(units []*discovery.Unit, levels [][]string) map[string]any {
 		}
 	}
 
-	// Build nodes
+	// Build nodes with status and completed task count for resume support
 	nodes := make([]map[string]any, 0, len(units))
 	for _, unit := range units {
+		// Count completed tasks for resume scenarios
+		completedTasks := 0
+		for _, task := range unit.Tasks {
+			if task != nil && task.Status == discovery.TaskStatusComplete {
+				completedTasks++
+			}
+		}
+
+		// Map discovery status to web status
+		status := "pending"
+		if unit.Status != "" {
+			status = string(unit.Status)
+		}
+
 		nodes = append(nodes, map[string]any{
-			"id":    unit.ID,
-			"level": levelMap[unit.ID],
-			"tasks": len(unit.Tasks),
+			"id":              unit.ID,
+			"level":           levelMap[unit.ID],
+			"tasks":           len(unit.Tasks),
+			"status":          status,
+			"completed_tasks": completedTasks,
 		})
 	}
 
-	// Build edges (from depends_on)
+	// Build dependency map for transitive reduction
+	depMap := make(map[string][]string)
+	for _, unit := range units {
+		depMap[unit.ID] = unit.DependsOn
+	}
+
+	// Build edges with transitive reduction
+	// For each unit, only include edges to dependencies that are not
+	// transitively reachable through other direct dependencies
 	var edges []map[string]any
 	for _, unit := range units {
-		for _, dep := range unit.DependsOn {
-			edges = append(edges, map[string]any{
-				"from": unit.ID,
-				"to":   dep,
-			})
+		directDeps := unit.DependsOn
+		if len(directDeps) <= 1 {
+			// No transitive edges possible with 0 or 1 dependency
+			for _, dep := range directDeps {
+				edges = append(edges, map[string]any{
+					"from": unit.ID,
+					"to":   dep,
+				})
+			}
+			continue
+		}
+
+		// For each direct dependency, check if it's reachable through another
+		for _, dep := range directDeps {
+			isTransitive := false
+			for _, otherDep := range directDeps {
+				if otherDep == dep {
+					continue
+				}
+				// Check if dep is reachable from otherDep
+				if isReachable(otherDep, dep, depMap) {
+					isTransitive = true
+					break
+				}
+			}
+			if !isTransitive {
+				edges = append(edges, map[string]any{
+					"from": unit.ID,
+					"to":   dep,
+				})
+			}
 		}
 	}
 
@@ -615,6 +665,33 @@ func buildGraphData(units []*discovery.Unit, levels [][]string) map[string]any {
 		"edges":  edges,
 		"levels": levelsData,
 	}
+}
+
+// isReachable checks if target is reachable from start by following dependencies
+func isReachable(start, target string, depMap map[string][]string) bool {
+	visited := make(map[string]bool)
+	queue := []string{start}
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		if visited[current] {
+			continue
+		}
+		visited[current] = true
+
+		for _, dep := range depMap[current] {
+			if dep == target {
+				return true
+			}
+			if !visited[dep] {
+				queue = append(queue, dep)
+			}
+		}
+	}
+
+	return false
 }
 
 // resolveProviderForUnit determines which provider to use for a unit

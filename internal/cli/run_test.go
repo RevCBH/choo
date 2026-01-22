@@ -422,23 +422,36 @@ depends_on: []
 	// The presence of the dry-run execution plan in the test output confirms inline mode ran
 }
 
-// TestRunWithDaemon_ConnectionError verifies helpful error message when daemon not running
-func TestRunWithDaemon_ConnectionError(t *testing.T) {
+// TestRunWithDaemon_AutoStartsDaemon verifies daemon is auto-started when not running
+func TestRunWithDaemon_AutoStartsDaemon(t *testing.T) {
+	// Skip if daemon is already running (don't interfere with real daemon)
+	if isDaemonRunning() {
+		t.Skip("Daemon is already running, skipping auto-start test")
+	}
+
 	ctx := context.Background()
 
-	// The error from runWithDaemon should include helpful message
-	// when the daemon socket doesn't exist
+	// runWithDaemon should attempt to auto-start the daemon
+	// In test environment, daemon start may fail (no proper environment)
+	// but we verify the attempt is made by checking the error message
 	err := runWithDaemon(ctx, "specs/tasks", 4, "main", "")
 
 	if err == nil {
-		t.Fatal("Expected error when daemon not running")
+		// If no error, daemon was successfully started - clean up
+		// This is unlikely in test environment
+		t.Log("Daemon started successfully in test environment")
+		return
 	}
 
-	if !strings.Contains(err.Error(), "failed to connect to daemon") {
-		t.Errorf("Expected helpful error message, got: %v", err)
+	// The error should indicate daemon start was attempted (not just "is daemon running?")
+	errMsg := err.Error()
+	if strings.Contains(errMsg, "is daemon running?") {
+		t.Errorf("Should have attempted to start daemon, but got old error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "is daemon running?") {
-		t.Errorf("Expected helpful error message about daemon running, got: %v", err)
+
+	// Should see either "failed to start daemon" or "failed to connect" (if daemon started but connection failed)
+	if !strings.Contains(errMsg, "failed to start daemon") && !strings.Contains(errMsg, "failed to connect") {
+		t.Errorf("Expected daemon start or connect error, got: %v", err)
 	}
 }
 

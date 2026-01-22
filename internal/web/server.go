@@ -26,6 +26,14 @@ type Server struct {
 // Initializes store, hub, socket server, and HTTP server.
 // Does not start any servers - call Start() for that.
 func New(cfg Config) (*Server, error) {
+	return NewWithStore(cfg, nil)
+}
+
+// NewWithStore creates a new web server with an external Store.
+// If store is nil, a new Store is created.
+// This allows the daemon to share state between job manager and web server,
+// enabling late-attaching clients to see current job state.
+func NewWithStore(cfg Config, store *Store) (*Server, error) {
 	if cfg.Addr == "" {
 		cfg.Addr = ":8080"
 	}
@@ -33,7 +41,11 @@ func New(cfg Config) (*Server, error) {
 		cfg.SocketPath = defaultSocketPath()
 	}
 
-	store := NewStore()
+	// Use provided store or create new one
+	if store == nil {
+		store = NewStore()
+	}
+
 	hub := NewHub()
 	socketServer := NewSocketServer(cfg.SocketPath, store, hub)
 
@@ -121,4 +133,16 @@ func (s *Server) Addr() string {
 // SocketPath returns the Unix socket path.
 func (s *Server) SocketPath() string {
 	return s.socket
+}
+
+// Hub returns the SSE hub for direct event broadcasting.
+// Used by the daemon to bypass socket-based IPC when running in-process.
+func (s *Server) Hub() *Hub {
+	return s.hub
+}
+
+// Store returns the state store for direct event handling.
+// Used by the daemon to bypass socket-based IPC when running in-process.
+func (s *Server) Store() *Store {
+	return s.store
 }

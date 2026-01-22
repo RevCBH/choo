@@ -20,18 +20,21 @@ type GRPCServer struct {
 	version    string
 
 	// Shutdown coordination
-	mu           sync.RWMutex
-	shuttingDown bool
-	shutdownCh   chan struct{}
-	activeJobs   map[string]context.CancelFunc
+	mu             sync.RWMutex
+	shuttingDown   bool
+	shutdownCh     chan struct{}
+	activeJobs     map[string]context.CancelFunc
+	onShutdown     func() // Callback to signal daemon shutdown
 }
 
 // JobManager defines the interface for job lifecycle management
 // This abstraction allows the gRPC layer to remain decoupled from
 // the actual job execution implementation
 type JobManager interface {
-	// Start creates and starts a new job, returning the job ID
-	Start(ctx context.Context, cfg JobConfig) (string, error)
+	// Start creates and starts a new job, returning the job ID.
+	// The caller provides both the context and its cancel func to allow
+	// the caller to retain control over job cancellation.
+	Start(ctx context.Context, cancel context.CancelFunc, cfg JobConfig) (string, error)
 
 	// Stop gracefully stops a running job
 	Stop(ctx context.Context, jobID string, force bool) error
@@ -100,14 +103,16 @@ type Event struct {
 	Timestamp   time.Time
 }
 
-// NewGRPCServer creates a new gRPC server instance
-func NewGRPCServer(db *db.DB, jm JobManager, version string) *GRPCServer {
+// NewGRPCServer creates a new gRPC server instance.
+// The onShutdown callback is called when a shutdown request is received via gRPC.
+func NewGRPCServer(db *db.DB, jm JobManager, version string, onShutdown func()) *GRPCServer {
 	return &GRPCServer{
 		db:         db,
 		jobManager: jm,
 		version:    version,
 		shutdownCh: make(chan struct{}),
 		activeJobs: make(map[string]context.CancelFunc),
+		onShutdown: onShutdown,
 	}
 }
 
@@ -133,14 +138,18 @@ func (s *GRPCServer) trackJob(jobID string, cancel context.CancelFunc) {
 	s.activeJobs[jobID] = cancel
 }
 
-// untrackJob removes a job from shutdown tracking
-func (s *GRPCServer) untrackJob(jobID string) {
+// UntrackJob removes a job from shutdown tracking.
+// Exported so that the daemon can wire up a completion callback.
+func (s *GRPCServer) UntrackJob(jobID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.activeJobs, jobID)
 }
 
-// StartJob creates and starts a new orchestration job
+// StartJob creates and starts a new orchestration job, or attaches to an existing one.
+// If a job is already running for the same (repo_path, feature_branch) pair,
+// returns that job's ID with status "attached" instead of creating a new one.
+// This enables CLI attach: `choo run` can join an in-progress workflow.
 func (s *GRPCServer) StartJob(ctx context.Context, req *apiv1.StartJobRequest) (*apiv1.StartJobResponse, error) {
 	// Check if server is shutting down
 	if s.isShuttingDown() {
@@ -158,10 +167,44 @@ func (s *GRPCServer) StartJob(ctx context.Context, req *apiv1.StartJobRequest) (
 		return nil, status.Errorf(codes.InvalidArgument, "repo_path is required")
 	}
 
+	// Check for existing running job for this repo/branch (attach support)
+	if req.FeatureBranch != "" {
+		existingRun, err := s.db.GetActiveRunByBranch(req.FeatureBranch, req.RepoPath)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to check for existing job: %v", err)
+		}
+		if existingRun != nil {
+			// Validate that target branch and tasks dir match before attaching.
+			// This prevents attaching to a job with different configuration.
+			if existingRun.TargetBranch != req.TargetBranch {
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"job already running for branch %s but with different target branch (running: %s, requested: %s)",
+					req.FeatureBranch, existingRun.TargetBranch, req.TargetBranch)
+			}
+			if existingRun.TasksDir != req.TasksDir {
+				return nil, status.Errorf(codes.FailedPrecondition,
+					"job already running for branch %s but with different tasks dir (running: %s, requested: %s)",
+					req.FeatureBranch, existingRun.TasksDir, req.TasksDir)
+			}
+
+			// Return existing job ID - client should attach to this
+			return &apiv1.StartJobResponse{
+				JobId:  existingRun.ID,
+				Status: "attached", // Signals this is an existing job, not newly created
+			}, nil
+		}
+
+		// No active run found - delete any completed/failed runs for this branch
+		// to avoid UNIQUE constraint violation when creating new run
+		if _, err := s.db.DeleteNonActiveRunByBranch(req.FeatureBranch, req.RepoPath); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to clean up old run: %v", err)
+		}
+	}
+
 	// Create job context for cancellation
 	jobCtx, cancel := context.WithCancel(context.Background())
 
-	jobID, err := s.jobManager.Start(jobCtx, JobConfig{
+	jobID, err := s.jobManager.Start(jobCtx, cancel, JobConfig{
 		RepoPath:      req.RepoPath,
 		TasksDir:      req.TasksDir,
 		TargetBranch:  req.TargetBranch,
@@ -207,7 +250,7 @@ func (s *GRPCServer) StopJob(ctx context.Context, req *apiv1.StopJobRequest) (*a
 	}
 
 	// Untrack job
-	s.untrackJob(req.JobId)
+	s.UntrackJob(req.JobId)
 
 	message := "job stopped gracefully"
 	if req.Force {
@@ -371,6 +414,11 @@ func (s *GRPCServer) Shutdown(ctx context.Context, req *apiv1.ShutdownRequest) (
 			jobsStopped++
 			_ = s.jobManager.Stop(ctx, jobID, true)
 		}
+	}
+
+	// Signal the daemon to shutdown
+	if s.onShutdown != nil {
+		go s.onShutdown()
 	}
 
 	return &apiv1.ShutdownResponse{
