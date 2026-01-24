@@ -13,6 +13,27 @@ func (m *Model) View() string {
 		return ""
 	}
 
+	showLogs := m.ShowLogs || len(m.LogLines) > 0
+	if m.Height <= 0 || !showLogs {
+		return m.renderBaseView()
+	}
+	logHeight := m.Height / 2
+	if logHeight < 3 {
+		return m.renderBaseView()
+	}
+	topHeight := m.Height - logHeight
+
+	top := m.renderTopArea(topHeight)
+	logs := m.renderLogArea(logHeight)
+
+	if logs == "" {
+		return top
+	}
+
+	return top + "\n" + logs
+}
+
+func (m *Model) renderBaseView() string {
 	var b strings.Builder
 
 	// Header
@@ -30,6 +51,111 @@ func (m *Model) View() string {
 	b.WriteString(m.renderFooter())
 
 	return b.String()
+}
+
+func (m *Model) renderTopArea(height int) string {
+	if height <= 0 {
+		return ""
+	}
+
+	header := m.renderHeader()
+	status := m.renderStatusLine()
+	footer := m.renderFooter()
+	active := strings.TrimRight(m.renderActiveUnits(), "\n")
+	activeLines := []string{}
+	if active != "" {
+		activeLines = strings.Split(active, "\n")
+	}
+
+	lines := []string{header}
+	if height >= 4 {
+		lines = append(lines, "")
+	}
+
+	// Leave space for status + footer.
+	reserved := 2
+	remaining := height - len(lines) - reserved
+	if remaining < 0 {
+		remaining = 0
+	}
+	if len(activeLines) > remaining {
+		activeLines = activeLines[:remaining]
+	}
+	lines = append(lines, activeLines...)
+	lines = append(lines, status)
+	lines = append(lines, footer)
+
+	return padOrTrim(lines, height)
+}
+
+func (m *Model) renderLogArea(height int) string {
+	if height <= 0 {
+		return ""
+	}
+
+	lines := make([]string, 0, height)
+	lines = append(lines, m.renderLogHeader())
+
+	visible := height - 1
+	logLines := m.tailLogLines(visible)
+	for _, line := range logLines {
+		lines = append(lines, m.Styles.LogLine.Render(m.truncateLine(line)))
+	}
+
+	return padOrTrim(lines, height)
+}
+
+func (m *Model) renderLogHeader() string {
+	width := m.Width
+	if width <= 0 {
+		return m.Styles.LogTitle.Render("Logs")
+	}
+	title := " Logs "
+	if len(title) >= width {
+		return m.Styles.LogTitle.Render(title)
+	}
+	left := (width - len(title)) / 2
+	right := width - len(title) - left
+	return m.Styles.LogTitle.Render(strings.Repeat("─", left) + title + strings.Repeat("─", right))
+}
+
+func (m *Model) tailLogLines(max int) []string {
+	if max <= 0 {
+		return nil
+	}
+	if len(m.LogLines) == 0 {
+		return []string{"(no logs yet)"}
+	}
+	if len(m.LogLines) <= max {
+		return m.LogLines
+	}
+	return m.LogLines[len(m.LogLines)-max:]
+}
+
+func (m *Model) truncateLine(line string) string {
+	if m.Width <= 0 {
+		return line
+	}
+	if len(line) <= m.Width {
+		return line
+	}
+	if m.Width <= 3 {
+		return line[:m.Width]
+	}
+	return line[:m.Width-3] + "..."
+}
+
+func padOrTrim(lines []string, height int) string {
+	if height <= 0 {
+		return ""
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
 }
 
 // renderHeader renders the title line with timer and parallelism

@@ -91,12 +91,16 @@ func TestScheduler_Schedule_MissingDep(t *testing.T) {
 	}
 
 	_, err := s.Schedule(units)
-	if err == nil {
-		t.Fatal("Schedule() error = nil, want MissingDependencyError")
+	if err != nil {
+		t.Fatalf("Schedule() error = %v, want nil", err)
 	}
 
-	if _, ok := err.(*MissingDependencyError); !ok {
-		t.Errorf("Schedule() error type = %T, want *MissingDependencyError", err)
+	state, ok := s.GetState("a")
+	if !ok {
+		t.Fatal("expected state for unit a")
+	}
+	if state.Status != StatusReady {
+		t.Fatalf("expected unit a to be ready, got %v", state.Status)
 	}
 }
 

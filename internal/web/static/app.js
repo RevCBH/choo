@@ -1,6 +1,6 @@
 // app.js - Main application
 
-import { initGraph, updateNodeStatuses, highlightDependencies, updateTaskProgress } from './graph.js';
+import { initGraph, updateNodeStatuses, highlightDependencies, updateTaskProgress, updateNodePhase } from './graph.js';
 
 // Application state
 const state = {
@@ -11,8 +11,27 @@ const state = {
     units: [],
     summary: { total: 0, pending: 0, inProgress: 0, complete: 0, failed: 0, blocked: 0 },
     graph: { nodes: [], edges: [], levels: [] },
+    workdir: "",
+    repoRoot: "",
+    branch: "",
     events: [],
     selectedUnit: null
+};
+
+const PHASE_LABELS = {
+    reviewing: "Reviewing",
+    review_passed: "Review passed",
+    review_issues: "Review issues",
+    review_fixing: "Applying review fixes",
+    review_fix_applied: "Review fixes applied",
+    review_failed: "Review failed",
+    pr_created: "PR created",
+    feature_pr_opened: "Feature PR opened",
+    pr_review: "PR review",
+    merging: "Merging",
+    merge_conflict: "Merge conflict",
+    pr_merged: "PR merged",
+    pr_failed: "PR failed"
 };
 
 let sseClient = null;
@@ -51,7 +70,11 @@ class SSEClient {
             'unit.started', 'unit.completed', 'unit.failed',
             'task.started', 'task.completed',
             'orch.started', 'orch.completed', 'orch.failed',
-            'orch.dryrun.started', 'orch.dryrun.completed'
+            'orch.dryrun.started', 'orch.dryrun.completed',
+            'codereview.started', 'codereview.passed', 'codereview.issues_found',
+            'codereview.fix_attempt', 'codereview.fix_applied', 'codereview.failed',
+            'pr.created', 'pr.review.in_progress', 'pr.merge.queued', 'pr.conflict', 'pr.merged', 'pr.failed',
+            'feature.pr.opened'
         ];
 
         eventTypes.forEach(type => {
@@ -98,6 +121,7 @@ const eventHandlers = {
             }
             updateSummary();
             updateGraphStatus(event.unit, "in_progress");
+            updateGraphPhase(event.unit, unit.phase);
             // Update graph progress blocks
             updateTaskProgress(event.unit, unit.currentTask, unit.completedTasks || 0);
         }
@@ -114,6 +138,7 @@ const eventHandlers = {
             unit.currentTask = unit.completedTasks > 0 ? unit.completedTasks - 1 : 0;
             updateSummary();
             updateGraphStatus(event.unit, "complete");
+            updateGraphPhase(event.unit, unit.phase);
             // Update graph progress blocks (all complete, none current)
             updateTaskProgress(event.unit, -1, unit.completedTasks);
         }
@@ -127,6 +152,7 @@ const eventHandlers = {
             unit.error = event.error;
             updateSummary();
             updateGraphStatus(event.unit, "failed");
+            updateGraphPhase(event.unit, unit.phase);
         }
         showToast(`Unit "${event.unit}" failed: ${event.error}`, "error");
         addEventLog(event);
@@ -155,6 +181,58 @@ const eventHandlers = {
             updateTaskProgress(event.unit, -1, unit.completedTasks);
         }
         addEventLog(event);
+    },
+
+    "codereview.started": (event) => {
+        setUnitPhase(event.unit, "reviewing");
+    },
+
+    "codereview.passed": (event) => {
+        setUnitPhase(event.unit, "review_passed");
+    },
+
+    "codereview.issues_found": (event) => {
+        setUnitPhase(event.unit, "review_issues");
+    },
+
+    "codereview.fix_attempt": (event) => {
+        setUnitPhase(event.unit, "review_fixing");
+    },
+
+    "codereview.fix_applied": (event) => {
+        setUnitPhase(event.unit, "review_fix_applied");
+    },
+
+    "codereview.failed": (event) => {
+        setUnitPhase(event.unit, "review_failed");
+    },
+
+    "pr.created": (event) => {
+        setUnitPhase(event.unit, "pr_created");
+    },
+
+    "feature.pr.opened": (event) => {
+        setUnitPhase(event.unit, "feature_pr_opened");
+    },
+
+    "pr.review.in_progress": (event) => {
+        setUnitPhase(event.unit, "pr_review");
+    },
+
+    "pr.merge.queued": (event) => {
+        setUnitPhase(event.unit, "merging");
+    },
+
+    "pr.conflict": (event) => {
+        setUnitPhase(event.unit, "merge_conflict");
+    },
+
+    "pr.merged": (event) => {
+        setUnitPhase(event.unit, "pr_merged");
+    },
+
+    "pr.failed": (event) => {
+        setUnitPhase(event.unit, "pr_failed");
     },
 
     "orch.started": (event) => {
@@ -225,6 +303,7 @@ async function init() {
                 const node = state.graph.nodes.find(n => n.id === unit.id);
                 if (node) {
                     node.status = unit.status;
+                    node.phase = unit.phase;
                     // Sync task counts - node.tasks comes from graph, unit has currentTask/totalTasks
                     if (unit.totalTasks) {
                         node.tasks = unit.totalTasks;
@@ -246,7 +325,7 @@ async function init() {
                 }
             });
 
-            initGraph(container, state.graph, {
+            await initGraph(container, state.graph, {
                 onClick: handleNodeClick,
                 onHover: handleNodeHover
             });
@@ -255,6 +334,7 @@ async function init() {
         // Render initial UI
         renderConnectionStatus();
         renderSummary();
+        renderWorkspace();
 
         // Start SSE connection
         connectSSE();
@@ -299,6 +379,7 @@ function showDetailPanel(unitId) {
     const panel = document.getElementById('detail-panel');
     const title = document.getElementById('detail-title');
     const status = document.getElementById('detail-status');
+    const phase = document.getElementById('detail-phase');
     const progress = document.getElementById('detail-progress');
     const errorDiv = document.getElementById('detail-error');
 
@@ -307,7 +388,23 @@ function showDetailPanel(unitId) {
     title.textContent = unit.id;
     status.textContent = unit.status;
     status.style.backgroundColor = getStatusColor(unit.status);
-    progress.textContent = `Task ${(unit.currentTask || 0) + 1} of ${unit.totalTasks || 0}`;
+    if (unit.phase) {
+        phase.textContent = PHASE_LABELS[unit.phase] || unit.phase;
+        phase.classList.remove('hidden');
+    } else {
+        phase.textContent = '';
+        phase.classList.add('hidden');
+    }
+    const totalTasks = unit.totalTasks || 0;
+    let currentTask = unit.currentTask;
+    if (currentTask == null || currentTask < 0) {
+        if (unit.completedTasks && unit.completedTasks > 0) {
+            currentTask = Math.min(unit.completedTasks, totalTasks) - 1;
+        } else {
+            currentTask = 0;
+        }
+    }
+    progress.textContent = `Task ${totalTasks === 0 ? 0 : currentTask + 1} of ${totalTasks}`;
 
     if (unit.error) {
         errorDiv.textContent = unit.error;
@@ -353,6 +450,17 @@ function renderSummary() {
     });
 }
 
+function renderWorkspace() {
+    const cwdEl = document.getElementById('workspace-cwd');
+    const repoEl = document.getElementById('workspace-repo');
+    const branchEl = document.getElementById('workspace-branch');
+    if (!cwdEl || !repoEl || !branchEl) return;
+
+    cwdEl.textContent = state.workdir || '—';
+    repoEl.textContent = state.repoRoot || '—';
+    branchEl.textContent = state.branch || '—';
+}
+
 function updateSummary() {
     const summary = { total: 0, pending: 0, inProgress: 0, complete: 0, failed: 0, blocked: 0 };
 
@@ -373,6 +481,18 @@ function updateSummary() {
 function updateGraphStatus(unitId, status) {
     const statusMap = new Map([[unitId, status]]);
     updateNodeStatuses(statusMap);
+}
+
+function updateGraphPhase(unitId, phase) {
+    updateNodePhase(unitId, phase);
+}
+
+function setUnitPhase(unitId, phaseKey) {
+    const unit = state.units.find(u => u.id === unitId);
+    if (!unit) return;
+
+    unit.phase = phaseKey;
+    updateGraphPhase(unitId, phaseKey);
 }
 
 function addEventLog(event) {

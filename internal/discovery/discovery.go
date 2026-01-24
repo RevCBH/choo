@@ -77,25 +77,21 @@ func DiscoverUnit(unitDir string) (*Unit, error) {
 		return nil, fmt.Errorf("error reading %s: %w", implPlanPath, err)
 	}
 
-	frontmatter, _, err := ParseFrontmatter(implContent)
+	unitFrontmatter, _, unitSource, err := ParseUnitMetadata(implContent)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing frontmatter in %s: %w", implPlanPath, err)
-	}
-
-	unitFrontmatter, err := ParseUnitFrontmatter(frontmatter)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing unit frontmatter in %s: %w", implPlanPath, err)
+		return nil, fmt.Errorf("error parsing unit metadata in %s: %w", implPlanPath, err)
 	}
 
 	// Create Unit
 	unit := &Unit{
-		ID:        filepath.Base(unitDir),
-		Path:      unitDir,
-		DependsOn: unitFrontmatter.DependsOn,
-		Provider:  unitFrontmatter.Provider,
-		Branch:    unitFrontmatter.OrchBranch,
-		Worktree:  unitFrontmatter.OrchWorktree,
-		PRNumber:  unitFrontmatter.OrchPRNumber,
+		ID:             filepath.Base(unitDir),
+		Path:           unitDir,
+		DependsOn:      unitFrontmatter.DependsOn,
+		Provider:       unitFrontmatter.Provider,
+		MetadataSource: unitSource,
+		Branch:         unitFrontmatter.OrchBranch,
+		Worktree:       unitFrontmatter.OrchWorktree,
+		PRNumber:       unitFrontmatter.OrchPRNumber,
 	}
 
 	// Parse orchestrator status (will be overridden by task inference if not set)
@@ -135,14 +131,9 @@ func DiscoverUnit(unitDir string) (*Unit, error) {
 			return nil, fmt.Errorf("error reading %s: %w", taskPath, err)
 		}
 
-		frontmatter, body, err := ParseFrontmatter(taskContent)
+		taskFrontmatter, body, taskSource, err := ParseTaskMetadata(taskContent)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing frontmatter in %s: %w", taskPath, err)
-		}
-
-		taskFrontmatter, err := ParseTaskFrontmatter(frontmatter)
-		if err != nil {
-			return nil, fmt.Errorf("error parsing task frontmatter in %s: %w", taskPath, err)
+			return nil, fmt.Errorf("error parsing task metadata in %s: %w", taskPath, err)
 		}
 
 		// Parse task status
@@ -155,13 +146,14 @@ func DiscoverUnit(unitDir string) (*Unit, error) {
 		title := extractTitle(body)
 
 		task := &Task{
-			Number:       taskFrontmatter.Task,
-			Status:       status,
-			Backpressure: taskFrontmatter.Backpressure,
-			DependsOn:    taskFrontmatter.DependsOn,
-			FilePath:     taskFile,
-			Title:        title,
-			Content:      string(taskContent),
+			Number:         taskFrontmatter.Task,
+			Status:         status,
+			Backpressure:   taskFrontmatter.Backpressure,
+			DependsOn:      taskFrontmatter.DependsOn,
+			MetadataSource: taskSource,
+			FilePath:       taskFile,
+			Title:          title,
+			Content:        string(taskContent),
 		}
 
 		unit.Tasks = append(unit.Tasks, task)
@@ -259,14 +251,9 @@ func ParseTaskFile(taskPath string) (*Task, error) {
 		return nil, fmt.Errorf("error reading %s: %w", taskPath, err)
 	}
 
-	frontmatter, body, err := ParseFrontmatter(taskContent)
+	taskFrontmatter, body, taskSource, err := ParseTaskMetadata(taskContent)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing frontmatter in %s: %w", taskPath, err)
-	}
-
-	taskFrontmatter, err := ParseTaskFrontmatter(frontmatter)
-	if err != nil {
-		return nil, fmt.Errorf("error parsing task frontmatter in %s: %w", taskPath, err)
+		return nil, fmt.Errorf("error parsing task metadata in %s: %w", taskPath, err)
 	}
 
 	// Parse task status
@@ -279,13 +266,14 @@ func ParseTaskFile(taskPath string) (*Task, error) {
 	title := extractTitle(body)
 
 	task := &Task{
-		Number:       taskFrontmatter.Task,
-		Status:       status,
-		Backpressure: taskFrontmatter.Backpressure,
-		DependsOn:    taskFrontmatter.DependsOn,
-		FilePath:     taskPath,
-		Title:        title,
-		Content:      string(taskContent),
+		Number:         taskFrontmatter.Task,
+		Status:         status,
+		Backpressure:   taskFrontmatter.Backpressure,
+		DependsOn:      taskFrontmatter.DependsOn,
+		MetadataSource: taskSource,
+		FilePath:       taskPath,
+		Title:          title,
+		Content:        string(taskContent),
 	}
 
 	return task, nil

@@ -616,3 +616,19 @@ code_review:
 		t.Error("expected Verbose to default to true")
 	}
 }
+
+func TestValidateConfig_SpecRepairModelMismatch(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.GitHub.Owner = "owner"
+	cfg.GitHub.Repo = "repo"
+	cfg.SpecRepair.Provider = ProviderClaude
+	cfg.SpecRepair.Model = "gpt-4o"
+
+	err := validateConfig(cfg)
+	if err == nil {
+		t.Fatal("expected error for model/provider mismatch")
+	}
+	if !strings.Contains(err.Error(), "spec_repair.model") {
+		t.Fatalf("expected spec_repair.model in error, got: %v", err)
+	}
+}

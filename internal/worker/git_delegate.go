@@ -202,8 +202,16 @@ func (w *Worker) invokeClaudeInDir(ctx context.Context, dir, prompt string) erro
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to create log file: %v\n", err)
 		if !w.config.SuppressOutput {
-			cmd.Stdout = os.Stdout
-			cmd.Stderr = os.Stderr
+			if w.config.RunLogWriter != nil {
+				cmd.Stdout = io.MultiWriter(os.Stdout, w.config.RunLogWriter)
+				cmd.Stderr = io.MultiWriter(os.Stderr, w.config.RunLogWriter)
+			} else {
+				cmd.Stdout = os.Stdout
+				cmd.Stderr = os.Stderr
+			}
+		} else if w.config.RunLogWriter != nil {
+			cmd.Stdout = w.config.RunLogWriter
+			cmd.Stderr = w.config.RunLogWriter
 		}
 	} else {
 		defer logFile.Close()
@@ -213,11 +221,21 @@ func (w *Worker) invokeClaudeInDir(ctx context.Context, dir, prompt string) erro
 		fmt.Fprintf(logFile, "=== Output ===\n")
 
 		if w.config.SuppressOutput {
-			cmd.Stdout = logFile
-			cmd.Stderr = logFile
+			if w.config.RunLogWriter != nil {
+				cmd.Stdout = io.MultiWriter(logFile, w.config.RunLogWriter)
+				cmd.Stderr = io.MultiWriter(logFile, w.config.RunLogWriter)
+			} else {
+				cmd.Stdout = logFile
+				cmd.Stderr = logFile
+			}
 		} else {
-			cmd.Stdout = io.MultiWriter(os.Stdout, logFile)
-			cmd.Stderr = io.MultiWriter(os.Stderr, logFile)
+			if w.config.RunLogWriter != nil {
+				cmd.Stdout = io.MultiWriter(os.Stdout, logFile, w.config.RunLogWriter)
+				cmd.Stderr = io.MultiWriter(os.Stderr, logFile, w.config.RunLogWriter)
+			} else {
+				cmd.Stdout = io.MultiWriter(os.Stdout, logFile)
+				cmd.Stderr = io.MultiWriter(os.Stderr, logFile)
+			}
 		}
 	}
 

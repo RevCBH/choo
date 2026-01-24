@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/RevCBH/choo/internal/discovery"
 )
 
 // WorktreeManager handles creation and removal of git worktrees
@@ -18,11 +20,18 @@ type WorktreeManager struct {
 	// WorktreeBase is the base directory for worktrees (default: .ralph/worktrees/)
 	WorktreeBase string
 
+	// TasksDir is the path to specs/tasks (relative to repo root preferred)
+	TasksDir string
+
 	// SetupCommands are conditional commands to run after worktree creation
 	SetupCommands []ConditionalCommand
 
 	// Claude client for branch name generation (may be nil for testing)
 	Claude interface{} // placeholder for *claude.Client
+
+	// ResetOnCreate removes existing worktrees/branches before creation
+	// Useful for discarding stale worktrees when running fresh.
+	ResetOnCreate bool
 }
 
 // Worktree represents an active git worktree
@@ -61,6 +70,7 @@ func NewWorktreeManager(repoRoot string, claude interface{}) *WorktreeManager {
 	return &WorktreeManager{
 		RepoRoot:      repoRoot,
 		WorktreeBase:  worktreeBase,
+		TasksDir:      filepath.Join("specs", "tasks"),
 		SetupCommands: DefaultSetupCommands(),
 		Claude:        claude,
 	}
@@ -90,12 +100,28 @@ func (m *WorktreeManager) CreateWorktree(ctx context.Context, unitID, targetBran
 		return nil, fmt.Errorf("failed to check for existing worktree: %w", err)
 	}
 	if existing != nil {
-		// Worktree exists, return it for resumption
-		return existing, nil
+		// Worktree exists, return it for resumption unless reset is requested
+		if !m.ResetOnCreate {
+			return existing, nil
+		}
+		if m.isWorktreeResumable(existing.Path, unitID) {
+			return existing, nil
+		}
+		if err := m.RemoveWorktree(ctx, existing); err != nil {
+			return nil, fmt.Errorf("failed to reset existing worktree: %w", err)
+		}
+		_ = deleteLocalBranch(ctx, m.RepoRoot, existing.Branch)
 	}
 
 	// Create worktree path
 	worktreePath := filepath.Join(m.WorktreeBase, unitID)
+	if _, err := os.Stat(worktreePath); err == nil {
+		if !m.ResetOnCreate {
+			return nil, fmt.Errorf("worktree path already exists: %s", worktreePath)
+		}
+		_, _ = gitExec(ctx, m.RepoRoot, "worktree", "remove", worktreePath, "--force")
+		_ = os.RemoveAll(worktreePath)
+	}
 
 	// Ensure base directory exists
 	if err := os.MkdirAll(m.WorktreeBase, 0755); err != nil {
@@ -104,6 +130,9 @@ func (m *WorktreeManager) CreateWorktree(ctx context.Context, unitID, targetBran
 
 	// Create branch name (for now, simple naming; Task #3 will handle proper branch naming)
 	branchName := fmt.Sprintf("ralph/%s", unitID)
+	if m.ResetOnCreate {
+		_ = deleteLocalBranch(ctx, m.RepoRoot, branchName)
+	}
 
 	// Create the worktree
 	_, err = gitExec(ctx, m.RepoRoot, "worktree", "add", "-b", branchName, worktreePath, targetBranch)
@@ -124,6 +153,46 @@ func (m *WorktreeManager) CreateWorktree(ctx context.Context, unitID, targetBran
 		UnitID:    unitID,
 		CreatedAt: time.Now(),
 	}, nil
+}
+
+func deleteLocalBranch(ctx context.Context, repoRoot, branchName string) error {
+	_, err := gitExec(ctx, repoRoot, "branch", "-D", branchName)
+	if err != nil {
+		// Ignore "branch not found" errors
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "unknown") {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func (m *WorktreeManager) isWorktreeResumable(worktreePath, unitID string) bool {
+	tasksDir := m.TasksDir
+	if tasksDir == "" {
+		tasksDir = filepath.Join("specs", "tasks")
+	}
+	if filepath.IsAbs(tasksDir) {
+		rel, err := filepath.Rel(m.RepoRoot, tasksDir)
+		if err == nil && !strings.HasPrefix(rel, "..") {
+			tasksDir = rel
+		} else {
+			return false
+		}
+	}
+
+	unitDir := filepath.Join(worktreePath, tasksDir, unitID)
+	unit, err := discovery.DiscoverUnit(unitDir)
+	if err != nil {
+		return false
+	}
+
+	for _, task := range unit.Tasks {
+		if task.Status == discovery.TaskStatusComplete || task.Status == discovery.TaskStatusInProgress {
+			return true
+		}
+	}
+	return false
 }
 
 // RemoveWorktree removes a worktree and its directory

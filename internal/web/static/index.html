@@ -6,6 +6,7 @@
     <title>Choo Orchestrator</title>
     <link rel="stylesheet" href="style.css">
     <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/elkjs@0.9.1/lib/elk.bundled.js"></script>
 </head>
 <body>
     <div class="container">
@@ -45,6 +46,22 @@
                 </div>
             </div>
 
+            <div id="workspace-panel" class="workspace-card">
+                <h3>Workspace</h3>
+                <div class="workspace-item">
+                    <span class="workspace-label">CWD</span>
+                    <span id="workspace-cwd" class="workspace-value">—</span>
+                </div>
+                <div class="workspace-item">
+                    <span class="workspace-label">Repo</span>
+                    <span id="workspace-repo" class="workspace-value">—</span>
+                </div>
+                <div class="workspace-item">
+                    <span class="workspace-label">Branch</span>
+                    <span id="workspace-branch" class="workspace-value">—</span>
+                </div>
+            </div>
+
             <div id="toast-container"></div>
         </aside>
 
@@ -58,6 +75,7 @@
                 </div>
                 <div class="detail-body">
                     <div id="detail-status" class="detail-status"></div>
+                    <div id="detail-phase" class="detail-phase hidden"></div>
                     <div id="detail-progress" class="detail-progress"></div>
                     <div id="detail-error" class="detail-error hidden"></div>
                     <div id="detail-tasks" class="detail-tasks"></div>

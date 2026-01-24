@@ -1,12 +1,14 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/RevCBH/choo/internal/config"
+	"github.com/RevCBH/choo/internal/git"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -15,6 +17,7 @@ import (
 type CleanupOptions struct {
 	TasksDir   string // Path to specs/tasks/ directory
 	ResetState bool   // Also reset frontmatter status
+	Nuke       bool   // Force removal of in-progress worktrees/branches
 }
 
 // NewCleanupCmd creates the cleanup command
@@ -22,6 +25,7 @@ func NewCleanupCmd(app *App) *cobra.Command {
 	opts := CleanupOptions{
 		TasksDir:   "specs/tasks",
 		ResetState: false,
+		Nuke:       false,
 	}
 
 	cmd := &cobra.Command{
@@ -30,8 +34,9 @@ func NewCleanupCmd(app *App) *cobra.Command {
 		Long: `Cleanup removes all orchestrator worktrees and optionally resets
 frontmatter state to pending.
 
-By default, only removes worktrees from .ralph/worktrees/.
-Use --reset-state to also reset all task and unit statuses to pending.`,
+By default, removes clean orchestrator worktrees and ralph/* branches.
+Use --reset-state to also reset all task and unit statuses to pending.
+Use --nuke to force removal of dirty worktrees and their branches.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Override tasks-dir from positional arg if provided
 			if len(args) > 0 {
@@ -44,14 +49,18 @@ Use --reset-state to also reset all task and unit statuses to pending.`,
 
 	// Add flags
 	cmd.Flags().BoolVar(&opts.ResetState, "reset-state", false, "Reset frontmatter status to pending")
+	cmd.Flags().BoolVar(&opts.Nuke, "nuke", false, "Discard in-progress work (force remove dirty worktrees and branches)")
 
 	return cmd
 }
 
 // Cleanup removes worktrees and optionally resets state
 func (a *App) Cleanup(opts CleanupOptions) error {
+	ctx := context.Background()
 	var errors []error
 	removedWorktrees := []string{}
+	skippedWorktrees := []string{}
+	removedBranches := []string{}
 	var unitCount, taskCount int
 
 	// Load config to get worktree base path
@@ -61,29 +70,39 @@ func (a *App) Cleanup(opts CleanupOptions) error {
 	}
 
 	worktreeBase := ".ralph/worktrees" // fallback default
-	if cfg, err := config.LoadConfig(repoRoot); err == nil {
+	cfg, cfgErr := config.LoadConfig(repoRoot)
+	if cfgErr == nil {
 		worktreeBase = cfg.Worktree.BasePath
+	} else {
+		worktreeBase = filepath.Join(repoRoot, worktreeBase)
 	}
 
-	// Find and remove all orchestrator worktrees
-	if _, err := os.Stat(worktreeBase); err == nil {
-		// Worktree directory exists, list and remove worktrees
-		entries, err := os.ReadDir(worktreeBase)
-		if err != nil {
-			return fmt.Errorf("failed to read worktree directory: %w", err)
-		}
+	manager := git.NewWorktreeManager(repoRoot, nil)
+	manager.WorktreeBase = worktreeBase
+	gitClient := git.NewClient(repoRoot)
 
-		for _, entry := range entries {
-			if entry.IsDir() {
-				worktreePath := filepath.Join(worktreeBase, entry.Name())
-
-				// Attempt to remove worktree
-				if err := os.RemoveAll(worktreePath); err != nil {
-					errors = append(errors, fmt.Errorf("failed to remove worktree %s: %w", worktreePath, err))
-				} else {
-					removedWorktrees = append(removedWorktrees, worktreePath)
+	worktrees, err := manager.ListWorktrees(ctx)
+	if err != nil {
+		errors = append(errors, fmt.Errorf("failed to list worktrees: %w", err))
+	} else {
+		for _, wt := range worktrees {
+			if !opts.Nuke {
+				dirty, err := git.HasUncommittedChanges(ctx, wt.Path)
+				if err != nil {
+					errors = append(errors, fmt.Errorf("failed to check worktree status %s: %w", wt.Path, err))
+					continue
+				}
+				if dirty {
+					skippedWorktrees = append(skippedWorktrees, wt.Path)
+					continue
 				}
 			}
+
+			if err := manager.RemoveWorktree(ctx, wt); err != nil {
+				errors = append(errors, fmt.Errorf("failed to remove worktree %s: %w", wt.Path, err))
+				continue
+			}
+			removedWorktrees = append(removedWorktrees, wt.Path)
 		}
 	}
 
@@ -105,6 +124,51 @@ func (a *App) Cleanup(opts CleanupOptions) error {
 		}
 	} else {
 		fmt.Println("No worktrees found to remove")
+	}
+	if len(skippedWorktrees) > 0 {
+		fmt.Printf("Skipped %d dirty worktrees (use --nuke to force):\n", len(skippedWorktrees))
+		for _, wt := range skippedWorktrees {
+			fmt.Printf("  - %s\n", wt)
+		}
+	}
+
+	branchPrefix := "ralph/"
+	currentBranch, _ := git.GetCurrentBranch(ctx, repoRoot)
+	branches, err := gitClient.ListLocalBranchesWithPrefix(ctx, branchPrefix)
+	if err != nil {
+		errors = append(errors, fmt.Errorf("failed to list branches: %w", err))
+	} else {
+		preserve := map[string]bool{}
+		if currentBranch != "" {
+			preserve[currentBranch] = true
+		}
+		if len(skippedWorktrees) > 0 {
+			for _, wt := range worktrees {
+				for _, skipped := range skippedWorktrees {
+					if wt.Path == skipped && wt.Branch != "" {
+						preserve[wt.Branch] = true
+					}
+				}
+			}
+		}
+
+		for _, branch := range branches {
+			if preserve[branch] {
+				continue
+			}
+			if err := gitClient.DeleteBranch(ctx, branch); err != nil {
+				errors = append(errors, fmt.Errorf("failed to delete branch %s: %w", branch, err))
+				continue
+			}
+			removedBranches = append(removedBranches, branch)
+		}
+	}
+
+	if len(removedBranches) > 0 {
+		fmt.Printf("Deleted %d branches:\n", len(removedBranches))
+		for _, branch := range removedBranches {
+			fmt.Printf("  - %s\n", branch)
+		}
 	}
 
 	if opts.ResetState {

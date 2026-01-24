@@ -16,6 +16,9 @@ type ClaudeProvider struct {
 	// Defaults to "claude" (resolved via PATH).
 	command string
 
+	// model is an optional model override.
+	model string
+
 	// streamJSON enables JSON streaming output for visibility.
 	streamJSON bool
 
@@ -51,6 +54,21 @@ func (p *ClaudeProvider) SetStreaming(enabled bool) {
 	p.streamJSON = enabled
 }
 
+// SetModel sets an optional model override.
+func (p *ClaudeProvider) SetModel(model string) {
+	p.model = model
+}
+
+// Command returns the configured CLI command.
+func (p *ClaudeProvider) Command() string {
+	return p.command
+}
+
+// Model returns the configured model override.
+func (p *ClaudeProvider) Model() string {
+	return p.model
+}
+
 // SetVerbose enables or disables verbose output in streaming mode.
 func (p *ClaudeProvider) SetVerbose(enabled bool) {
 	p.verbose = enabled
@@ -80,8 +98,11 @@ func (p *ClaudeProvider) Invoke(ctx context.Context, prompt string, workdir stri
 func (p *ClaudeProvider) invokeBasic(ctx context.Context, prompt string, workdir string, stdout, stderr io.Writer) error {
 	args := []string{
 		"--dangerously-skip-permissions",
-		"-p", prompt,
 	}
+	if p.model != "" {
+		args = append(args, "--model", p.model)
+	}
+	args = append(args, "-p", prompt)
 
 	cmd := exec.CommandContext(ctx, p.command, args...)
 	cmd.Dir = workdir
@@ -101,8 +122,11 @@ func (p *ClaudeProvider) invokeWithStream(ctx context.Context, prompt string, wo
 		"--dangerously-skip-permissions",
 		"--output-format", "stream-json",
 		"--verbose",
-		"-p", prompt,
 	}
+	if p.model != "" {
+		args = append(args, "--model", p.model)
+	}
+	args = append(args, "-p", prompt)
 
 	cmd := exec.CommandContext(ctx, p.command, args...)
 	cmd.Dir = workdir

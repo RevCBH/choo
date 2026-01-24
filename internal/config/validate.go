@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -103,6 +104,37 @@ func validateConfig(cfg *Config) error {
 		})
 	}
 
+	// SpecRepair provider validation
+	if err := ValidateProviderType(string(cfg.SpecRepair.Provider)); err != nil {
+		errs = append(errs, &ValidationError{
+			Field:   "spec_repair.provider",
+			Value:   cfg.SpecRepair.Provider,
+			Message: err.Error(),
+		})
+	}
+	if cfg.SpecRepair.Timeout != "" {
+		if _, err := time.ParseDuration(cfg.SpecRepair.Timeout); err != nil {
+			errs = append(errs, &ValidationError{
+				Field:   "spec_repair.timeout",
+				Value:   cfg.SpecRepair.Timeout,
+				Message: fmt.Sprintf("invalid duration: %v", err),
+			})
+		}
+	}
+	if cfg.SpecRepair.Model != "" {
+		providerType := cfg.SpecRepair.Provider
+		if providerType == "" {
+			providerType = DefaultProviderType
+		}
+		if err := validateSpecRepairModel(providerType, cfg.SpecRepair.Model); err != nil {
+			errs = append(errs, &ValidationError{
+				Field:   "spec_repair.model",
+				Value:   cfg.SpecRepair.Model,
+				Message: err.Error(),
+			})
+		}
+	}
+
 	// LogLevel must be one of: debug, info, warn, error (case-sensitive)
 	validLogLevels := map[string]bool{
 		"debug": true,
@@ -163,4 +195,38 @@ func validateConfig(cfg *Config) error {
 		return errors.Join(errs...)
 	}
 	return nil
+}
+
+func validateSpecRepairModel(providerType ProviderType, model string) error {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return nil
+	}
+	normalized := strings.ToLower(model)
+
+	switch providerType {
+	case ProviderClaude:
+		if looksLikeOpenAIModel(normalized) {
+			return fmt.Errorf("model does not match provider claude")
+		}
+	case ProviderCodex:
+		if looksLikeClaudeModel(normalized) {
+			return fmt.Errorf("model does not match provider codex")
+		}
+	}
+	return nil
+}
+
+func looksLikeClaudeModel(model string) bool {
+	return strings.HasPrefix(model, "claude") ||
+		strings.Contains(model, "opus") ||
+		strings.Contains(model, "sonnet") ||
+		strings.Contains(model, "haiku")
+}
+
+func looksLikeOpenAIModel(model string) bool {
+	return strings.HasPrefix(model, "gpt-") ||
+		strings.HasPrefix(model, "o1") ||
+		strings.HasPrefix(model, "o3") ||
+		strings.Contains(model, "codex")
 }

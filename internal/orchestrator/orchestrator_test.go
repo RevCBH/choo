@@ -1084,7 +1084,8 @@ func TestBuildGraphData_TransitiveReduction(t *testing.T) {
 			// C depends on both A and B, which are independent
 			// No transitive edges
 			expectedEdges: map[string][]string{
-				"C": {"A", "B"},
+				"A": {"C"},
+				"B": {"C"},
 			},
 		},
 		{
@@ -1097,9 +1098,10 @@ func TestBuildGraphData_TransitiveReduction(t *testing.T) {
 				{ID: "E", DependsOn: []string{"A", "B", "C", "D"}}, // A transitive via C, B transitive via D
 			},
 			expectedEdges: map[string][]string{
-				"C": {"A"},
-				"D": {"B"},
-				"E": {"C", "D"},
+				"A": {"C"},
+				"B": {"D"},
+				"C": {"E"},
+				"D": {"E"},
 			},
 		},
 	}
@@ -1175,14 +1177,14 @@ func TestIsReachable(t *testing.T) {
 		target   string
 		expected bool
 	}{
-		{"B", "A", true},   // Direct dependency
-		{"C", "A", true},   // Transitive: C -> B -> A
-		{"D", "A", true},   // Direct or transitive
-		{"D", "B", true},   // Transitive: D -> C -> B
-		{"A", "B", false},  // Wrong direction
-		{"A", "C", false},  // Wrong direction
-		{"B", "C", false},  // Wrong direction
-		{"A", "A", false},  // Same node (not reachable by traversal)
+		{"B", "A", true},  // Direct dependency
+		{"C", "A", true},  // Transitive: C -> B -> A
+		{"D", "A", true},  // Direct or transitive
+		{"D", "B", true},  // Transitive: D -> C -> B
+		{"A", "B", false}, // Wrong direction
+		{"A", "C", false}, // Wrong direction
+		{"B", "C", false}, // Wrong direction
+		{"A", "A", false}, // Same node (not reachable by traversal)
 	}
 
 	for _, tc := range tests {

@@ -31,6 +31,10 @@ type Styles struct {
 	StatusComplete lipgloss.Style
 	StatusFailed   lipgloss.Style
 	StatusActive   lipgloss.Style
+
+	// Log area styling
+	LogTitle lipgloss.Style
+	LogLine  lipgloss.Style
 }
 
 // DefaultStyles returns the default TUI styles
@@ -57,6 +61,9 @@ func DefaultStyles() Styles {
 		StatusComplete: lipgloss.NewStyle().Foreground(lipgloss.Color("42")),
 		StatusFailed:   lipgloss.NewStyle().Foreground(lipgloss.Color("196")),
 		StatusActive:   lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
+
+		LogTitle: lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Bold(true),
+		LogLine:  lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
 	}
 }
 

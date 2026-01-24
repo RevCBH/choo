@@ -128,9 +128,19 @@ func (w *Worker) invokeProvider(ctx context.Context, prompt TaskPrompt) error {
 		fmt.Fprintf(os.Stderr, "Warning: failed to create log file: %v\n", err)
 		// Fall back to stdout/stderr (unless suppressed)
 		if !w.config.SuppressOutput {
-			runErr = w.provider.Invoke(ctx, prompt.Content, w.worktreePath, os.Stdout, os.Stderr)
+			stdout := io.Writer(os.Stdout)
+			stderr := io.Writer(os.Stderr)
+			if w.config.RunLogWriter != nil {
+				stdout = io.MultiWriter(os.Stdout, w.config.RunLogWriter)
+				stderr = io.MultiWriter(os.Stderr, w.config.RunLogWriter)
+			}
+			runErr = w.provider.Invoke(ctx, prompt.Content, w.worktreePath, stdout, stderr)
 		} else {
-			runErr = w.provider.Invoke(ctx, prompt.Content, w.worktreePath, io.Discard, io.Discard)
+			out := io.Writer(io.Discard)
+			if w.config.RunLogWriter != nil {
+				out = w.config.RunLogWriter
+			}
+			runErr = w.provider.Invoke(ctx, prompt.Content, w.worktreePath, out, out)
 		}
 		return runErr
 	}
@@ -143,11 +153,21 @@ func (w *Worker) invokeProvider(ctx context.Context, prompt TaskPrompt) error {
 	// Configure output writers
 	var stdout, stderr io.Writer
 	if w.config.SuppressOutput {
-		stdout = logFile
-		stderr = logFile
+		if w.config.RunLogWriter != nil {
+			stdout = io.MultiWriter(logFile, w.config.RunLogWriter)
+			stderr = io.MultiWriter(logFile, w.config.RunLogWriter)
+		} else {
+			stdout = logFile
+			stderr = logFile
+		}
 	} else {
-		stdout = io.MultiWriter(os.Stdout, logFile)
-		stderr = io.MultiWriter(os.Stderr, logFile)
+		if w.config.RunLogWriter != nil {
+			stdout = io.MultiWriter(os.Stdout, logFile, w.config.RunLogWriter)
+			stderr = io.MultiWriter(os.Stderr, logFile, w.config.RunLogWriter)
+		} else {
+			stdout = io.MultiWriter(os.Stdout, logFile)
+			stderr = io.MultiWriter(os.Stderr, logFile)
+		}
 		fmt.Fprintf(os.Stderr, "Provider output logging to: %s\n", logFile.Name())
 	}
 
@@ -269,6 +289,7 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 
 		// d. If a task was completed
 		if completedTask != nil {
+			w.debugf("debug: unit %s task %d completed; running backpressure", w.unit.ID, completedTask.Number)
 			// Run backpressure
 			if w.events != nil {
 				evt := events.NewEvent(events.TaskBackpressure, w.unit.ID).WithTask(completedTask.Number).WithPayload(map[string]any{
@@ -277,10 +298,27 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 				w.events.Emit(evt)
 			}
 
+			if w.config.SkipBackpressure {
+				w.debugf("debug: unit %s task %d backpressure skipped", w.unit.ID, completedTask.Number)
+				if w.events != nil {
+					evt := events.NewEvent(events.TaskValidationOK, w.unit.ID).WithTask(completedTask.Number).WithPayload(map[string]any{
+						"skipped": true,
+					})
+					w.events.Emit(evt)
+
+					completedEvt := events.NewEvent(events.TaskCompleted, w.unit.ID).WithTask(completedTask.Number).WithPayload(map[string]any{
+						"title": completedTask.Title,
+					})
+					w.events.Emit(completedEvt)
+				}
+				return completedTask, nil
+			}
+
 			result := RunBackpressure(ctx, completedTask.Backpressure, w.worktreePath, w.config.BackpressureTimeout)
 
 			// If backpressure passes → return completed task
 			if result.Success {
+				w.debugf("debug: unit %s task %d backpressure passed", w.unit.ID, completedTask.Number)
 				if w.events != nil {
 					evt := events.NewEvent(events.TaskValidationOK, w.unit.ID).WithTask(completedTask.Number)
 					w.events.Emit(evt)
@@ -310,6 +348,8 @@ func (w *Worker) executeTaskWithRetry(ctx context.Context, readyTasks []*discove
 				})
 				w.events.Emit(retryEvt)
 			}
+
+			w.debugf("debug: unit %s task %d backpressure failed (exit=%d), retrying", w.unit.ID, completedTask.Number, result.ExitCode)
 
 			// Note: We don't revert status here as the spec doesn't mention it
 			// The retry will just try again

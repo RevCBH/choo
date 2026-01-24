@@ -37,3 +37,4 @@ go.work.sum
 
 # Ralph orchestrator state/logs
 .ralph/
+specs/VALIDATION_REPORT.md

@@ -53,10 +53,11 @@ type GraphNode struct {
 	Tasks          int    `json:"tasks"`
 	Status         string `json:"status,omitempty"`          // Initial status for resume support
 	CompletedTasks int    `json:"completed_tasks,omitempty"` // Completed task count for resume
+	PrimaryParent  string `json:"primary_parent,omitempty"`
 }
 
 // GraphEdge represents a dependency between two units.
-// From depends on To (From -> To means To must complete before From).
+// From is the dependency, To is the dependent (From -> To means From must complete before To).
 type GraphEdge struct {
 	From string `json:"from"`
 	To   string `json:"to"`
@@ -86,12 +87,14 @@ type EdgePayload struct {
 
 // UnitState tracks the status of a single unit during orchestration.
 type UnitState struct {
-	ID          string    `json:"id"`
-	Status      string    `json:"status"` // "pending", "ready", "in_progress", "complete", "failed", "blocked"
-	CurrentTask int       `json:"currentTask"`
-	TotalTasks  int       `json:"totalTasks"`
-	Error       string    `json:"error,omitempty"`
-	StartedAt   time.Time `json:"startedAt,omitempty"`
+	ID             string    `json:"id"`
+	Status         string    `json:"status"` // "pending", "ready", "in_progress", "complete", "failed", "blocked"
+	Phase          string    `json:"phase,omitempty"`
+	CurrentTask    int       `json:"currentTask"`
+	TotalTasks     int       `json:"totalTasks"`
+	CompletedTasks int       `json:"completedTasks,omitempty"`
+	Error          string    `json:"error,omitempty"`
+	StartedAt      time.Time `json:"startedAt,omitempty"`
 }
 
 // StateSnapshot is the response for GET /api/state.
@@ -101,6 +104,9 @@ type StateSnapshot struct {
 	Status      string       `json:"status"` // "waiting", "running", "completed", "failed"
 	StartedAt   *time.Time   `json:"startedAt,omitempty"`
 	Parallelism int          `json:"parallelism,omitempty"`
+	Workdir     string       `json:"workdir,omitempty"`
+	RepoRoot    string       `json:"repoRoot,omitempty"`
+	Branch      string       `json:"branch,omitempty"`
 	Units       []*UnitState `json:"units"`
 	Summary     StateSummary `json:"summary"`
 }

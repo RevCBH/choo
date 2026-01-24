@@ -46,12 +46,13 @@ const (
 
 // Unit lifecycle events
 const (
-	UnitQueued    EventType = "unit.queued"
-	UnitStarted   EventType = "unit.started"
-	UnitCompleted EventType = "unit.completed" // Terminal: tasks done and merged to feature branch
-	UnitMerged    EventType = "unit.merged"    // Emitted when unit is merged to feature branch (same as completed)
-	UnitFailed    EventType = "unit.failed"
-	UnitBlocked   EventType = "unit.blocked"
+	UnitQueued            EventType = "unit.queued"
+	UnitStarted           EventType = "unit.started"
+	UnitCompleted         EventType = "unit.completed" // Terminal: tasks done and merged to feature branch
+	UnitMerged            EventType = "unit.merged"    // Emitted when unit is merged to feature branch (same as completed)
+	UnitFailed            EventType = "unit.failed"
+	UnitBlocked           EventType = "unit.blocked"
+	UnitDependencyMissing EventType = "unit.dependency.missing"
 )
 
 // Task lifecycle events
@@ -136,6 +137,16 @@ const (
 	PRDUpdated       EventType = "prd.updated"
 	PRDBodyChanged   EventType = "prd.body.changed"
 	PRDDriftDetected EventType = "prd.drift.detected"
+)
+
+// Spec validation/normalization events
+const (
+	SpecValidationStarted    EventType = "spec.validation.started"
+	SpecValidationCompleted  EventType = "spec.validation.completed"
+	SpecValidationFailed     EventType = "spec.validation.failed"
+	SpecNormalizationApplied EventType = "spec.normalization.applied"
+	SpecRepairApplied        EventType = "spec.repair.applied"
+	SpecRepairFailed         EventType = "spec.repair.failed"
 )
 
 // NewEvent creates an event with the given type and unit

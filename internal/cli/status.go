@@ -7,10 +7,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/RevCBH/choo/internal/discovery"
 	"github.com/RevCBH/choo/internal/git"
+	"github.com/RevCBH/choo/internal/scheduler"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +20,7 @@ import (
 type StatusOptions struct {
 	TasksDir string // Path to specs/tasks/ directory
 	JSON     bool   // Output as JSON instead of formatted text
+	Graph    bool   // Include dependency graph output
 }
 
 // NewStatusCmd creates the status command
@@ -41,6 +44,7 @@ func NewStatusCmd(app *App) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&opts.JSON, "json", false, "Output as JSON instead of formatted text")
+	cmd.Flags().BoolVar(&opts.Graph, "graph", false, "Include dependency graph output")
 
 	return cmd
 }
@@ -51,6 +55,9 @@ func (a *App) ShowStatus(opts StatusOptions) error {
 	units, err := discovery.Discover(opts.TasksDir)
 	if err != nil {
 		return fmt.Errorf("failed to load discovery: %w", err)
+	}
+	if opts.JSON && opts.Graph {
+		return fmt.Errorf("cannot combine --json with --graph")
 	}
 
 	// Refresh task statuses from worktrees if they exist
@@ -75,6 +82,13 @@ func (a *App) ShowStatus(opts StatusOptions) error {
 	}
 
 	output := formatStatusOutput(unitDisplays, cfg)
+	if opts.Graph {
+		graphOutput, err := formatGraphOutput(units)
+		if err != nil {
+			return err
+		}
+		output = output + "\n" + graphOutput
+	}
 	fmt.Fprint(os.Stdout, output)
 
 	return nil
@@ -111,6 +125,43 @@ func formatStatusOutput(units []UnitDisplay, cfg DisplayConfig) string {
 	result.WriteString(separator + "\n")
 
 	return result.String()
+}
+
+func formatGraphOutput(units []*discovery.Unit) (string, error) {
+	graph, err := scheduler.NewGraph(units)
+	if err != nil {
+		return "", fmt.Errorf("failed to build dependency graph: %w", err)
+	}
+
+	var result strings.Builder
+	result.WriteString("Dependency graph\n")
+
+	levels := graph.GetLevels()
+	for i, level := range levels {
+		result.WriteString(fmt.Sprintf("  Level %d: %s\n", i, strings.Join(level, ", ")))
+	}
+
+	unitIDs := make([]string, 0, len(units))
+	for _, unit := range units {
+		unitIDs = append(unitIDs, unit.ID)
+	}
+	sort.Strings(unitIDs)
+
+	result.WriteString("Edges:\n")
+	edgeCount := 0
+	for _, unitID := range unitIDs {
+		deps := graph.GetDependencies(unitID)
+		sort.Strings(deps)
+		for _, dep := range deps {
+			result.WriteString(fmt.Sprintf("  %s -> %s\n", unitID, dep))
+			edgeCount++
+		}
+	}
+	if edgeCount == 0 {
+		result.WriteString("  (none)\n")
+	}
+
+	return result.String(), nil
 }
 
 // Stats holds statistics for units or tasks

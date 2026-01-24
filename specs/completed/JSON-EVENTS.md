@@ -41,7 +41,7 @@ This design solves the container isolation problem: processes inside containers 
 1. `choo run` must emit events as JSON lines to stdout when running non-interactively (no TTY)
 2. Auto-detect non-TTY environment to enable JSON mode automatically
 3. Support explicit `--json-events` flag to force JSON mode regardless of TTY
-4. Emit all event types: unit lifecycle (started, completed, failed), task lifecycle, orchestrator events
+4. Emit all event types: unit lifecycle (started, completed, failed), unit dependency warnings, task lifecycle, orchestrator events, spec validation/normalization/repair events
 5. Daemon must parse JSON lines from container stdout in real-time
 6. Parsed events must be re-emitted to the host event bus for web UI bridging
 7. Handle malformed JSON lines gracefully (log warning, continue processing)
