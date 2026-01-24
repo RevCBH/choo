@@ -261,20 +261,21 @@ func TestValidateUnitDependencies_Missing(t *testing.T) {
 
 	result := ValidateUnitDependencies(units)
 
-	if result.IsValid() {
-		t.Fatal("expected validation error for missing unit dependency")
+	if !result.IsValid() {
+		t.Fatalf("expected no errors for missing unit dependency, got: %v", result.Errors)
 	}
-
-	// Check that error mentions non-existent unit
+	if !result.HasWarnings() {
+		t.Fatal("expected warning for missing unit dependency")
+	}
 	found := false
-	for _, err := range result.Errors {
-		if strings.Contains(err.Message, "non-existent") && strings.Contains(err.Message, "x") {
+	for _, warn := range result.Warnings {
+		if strings.Contains(warn.Message, "missing unit") && strings.Contains(warn.Message, "x") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected error about non-existent unit x, got: %v", result.Errors)
+		t.Fatalf("expected warning about missing unit x, got: %v", result.Warnings)
 	}
 }
 

@@ -135,7 +135,7 @@ func TestStateHandler_RunningState(t *testing.T) {
 					{"id": "unit2", "level": 1}
 				],
 				"edges": [
-					{"from": "unit2", "to": "unit1"}
+					{"from": "unit1", "to": "unit2"}
 				],
 				"levels": [["unit1"], ["unit2"]]
 			}
@@ -202,7 +202,7 @@ func TestGraphHandler_WithGraph(t *testing.T) {
 					{"id": "unit2", "level": 1}
 				],
 				"edges": [
-					{"from": "unit2", "to": "unit1"}
+					{"from": "unit1", "to": "unit2"}
 				],
 				"levels": [["unit1"], ["unit2"]]
 			}

@@ -36,7 +36,7 @@ func TestStore_HandleOrchStarted(t *testing.T) {
 			{ID: "unit2", Level: 1},
 		},
 		Edges: []GraphEdge{
-			{From: "unit2", To: "unit1"},
+			{From: "unit1", To: "unit2"},
 		},
 		Levels: [][]string{
 			{"unit1"},
@@ -86,6 +86,50 @@ func TestStore_HandleOrchStarted(t *testing.T) {
 		t.Error("expected unit2 to be initialized")
 	} else if unit2.Status != "pending" {
 		t.Errorf("expected unit2 status 'pending', got '%s'", unit2.Status)
+	}
+}
+
+func TestStore_HandleOrchStarted_MergesExistingGraph(t *testing.T) {
+	store := NewStore()
+
+	store.SeedState(&GraphData{
+		Nodes: []GraphNode{
+			{ID: "unit1", Level: 0, Status: "complete", Tasks: 2, CompletedTasks: 2},
+			{ID: "unit2", Level: 1, Status: "pending", Tasks: 1},
+		},
+		Edges: []GraphEdge{
+			{From: "unit1", To: "unit2"},
+		},
+		Levels: [][]string{
+			{"unit1"},
+			{"unit2"},
+		},
+	}, nil)
+
+	incoming := OrchestratorPayload{
+		UnitCount:   1,
+		Parallelism: 2,
+		Graph: &GraphData{
+			Nodes: []GraphNode{
+				{ID: "unit2", Level: 0, Status: "pending", Tasks: 1},
+			},
+			Edges:  []GraphEdge{},
+			Levels: [][]string{{"unit2"}},
+		},
+	}
+
+	payloadJSON, _ := json.Marshal(incoming)
+	store.HandleEvent(&Event{
+		Type:    "orch.started",
+		Time:    time.Now(),
+		Payload: payloadJSON,
+	})
+
+	if store.graph == nil || len(store.graph.Nodes) != 2 {
+		t.Fatalf("expected seeded graph to remain with 2 nodes, got %v", store.graph)
+	}
+	if unit1, ok := store.units["unit1"]; !ok || unit1.Status != "complete" {
+		t.Errorf("expected unit1 to remain complete, got %+v", unit1)
 	}
 }
 

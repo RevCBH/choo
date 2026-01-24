@@ -1,11 +1,58 @@
 package cli
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/RevCBH/choo/internal/git"
 )
+
+type fakeRunner struct {
+	responses map[string][]fakeResponse
+}
+
+type fakeResponse struct {
+	out string
+	err error
+}
+
+func newFakeRunner() *fakeRunner {
+	return &fakeRunner{responses: make(map[string][]fakeResponse)}
+}
+
+func (f *fakeRunner) stub(args string, out string, err error) {
+	f.responses[args] = append(f.responses[args], fakeResponse{out: out, err: err})
+}
+
+func (f *fakeRunner) Exec(_ context.Context, _ string, args ...string) (string, error) {
+	key := strings.Join(args, " ")
+	queue := f.responses[key]
+	if len(queue) == 0 {
+		return "", fmt.Errorf("unexpected git call: %s", key)
+	}
+	resp := queue[0]
+	f.responses[key] = queue[1:]
+	return resp.out, resp.err
+}
+
+func (f *fakeRunner) ExecWithStdin(ctx context.Context, dir string, stdin string, args ...string) (string, error) {
+	return f.Exec(ctx, dir, args...)
+}
+
+func withFakeRunner(t *testing.T) *fakeRunner {
+	t.Helper()
+	prev := git.DefaultRunner()
+	runner := newFakeRunner()
+	git.SetDefaultRunner(runner)
+	t.Cleanup(func() {
+		git.SetDefaultRunner(prev)
+	})
+	return runner
+}
 
 func TestCleanupCmd_DefaultFlags(t *testing.T) {
 	app := New()
@@ -18,6 +65,14 @@ func TestCleanupCmd_DefaultFlags(t *testing.T) {
 	}
 	if resetStateFlag.DefValue != "false" {
 		t.Errorf("Expected default reset-state false, got %s", resetStateFlag.DefValue)
+	}
+
+	nukeFlag := cmd.Flags().Lookup("nuke")
+	if nukeFlag == nil {
+		t.Fatal("nuke flag not found")
+	}
+	if nukeFlag.DefValue != "false" {
+		t.Errorf("Expected default nuke false, got %s", nukeFlag.DefValue)
 	}
 }
 
@@ -43,6 +98,10 @@ func TestCleanupCmd_ResetStateFlag(t *testing.T) {
 
 func TestCleanup_NoWorktrees(t *testing.T) {
 	app := New()
+	runner := withFakeRunner(t)
+	runner.stub("worktree list --porcelain", "", nil)
+	runner.stub("rev-parse --abbrev-ref HEAD", "main\n", nil)
+	runner.stub("for-each-ref --format=%(refname:short) refs/heads/ralph", "", nil)
 
 	// Create temporary directory for test
 	tmpDir := t.TempDir()
@@ -62,6 +121,7 @@ func TestCleanup_NoWorktrees(t *testing.T) {
 
 func TestCleanup_RemovesWorktrees(t *testing.T) {
 	app := New()
+	runner := withFakeRunner(t)
 
 	// Create temporary directory structure
 	tmpDir := t.TempDir()
@@ -74,7 +134,7 @@ func TestCleanup_RemovesWorktrees(t *testing.T) {
 	defer os.Chdir(oldWd)
 
 	// Create worktree directories
-	worktreeBase := ".ralph/worktrees"
+	worktreeBase := filepath.Join(tmpDir, ".ralph", "worktrees")
 	worktree1 := filepath.Join(worktreeBase, "unit-a")
 	worktree2 := filepath.Join(worktreeBase, "unit-b")
 
@@ -98,6 +158,17 @@ func TestCleanup_RemovesWorktrees(t *testing.T) {
 		ResetState: false,
 	}
 
+	worktreeList := fmt.Sprintf("worktree %s\nbranch refs/heads/ralph/unit-a\n\nworktree %s\nbranch refs/heads/ralph/unit-b\n\n", worktree1, worktree2)
+	runner.stub("worktree list --porcelain", worktreeList, nil)
+	runner.stub("status --porcelain", "", nil)
+	runner.stub("status --porcelain", "", nil)
+	runner.stub("worktree remove "+worktree1+" --force", "", nil)
+	runner.stub("worktree remove "+worktree2+" --force", "", nil)
+	runner.stub("for-each-ref --format=%(refname:short) refs/heads/ralph", "ralph/unit-a\nralph/unit-b\n", nil)
+	runner.stub("rev-parse --abbrev-ref HEAD", "main\n", nil)
+	runner.stub("branch -D ralph/unit-a", "", nil)
+	runner.stub("branch -D ralph/unit-b", "", nil)
+
 	err := app.Cleanup(opts)
 	if err != nil {
 		t.Fatalf("Cleanup failed: %v", err)
@@ -114,6 +185,7 @@ func TestCleanup_RemovesWorktrees(t *testing.T) {
 
 func TestCleanup_WithResetState(t *testing.T) {
 	app := New()
+	runner := withFakeRunner(t)
 
 	// Create temporary directory structure
 	tmpDir := t.TempDir()
@@ -151,6 +223,10 @@ depends_on: []
 		TasksDir:   tasksDir,
 		ResetState: true,
 	}
+
+	runner.stub("worktree list --porcelain", "", nil)
+	runner.stub("rev-parse --abbrev-ref HEAD", "main\n", nil)
+	runner.stub("for-each-ref --format=%(refname:short) refs/heads/ralph", "", nil)
 
 	err := app.Cleanup(opts)
 	if err != nil {

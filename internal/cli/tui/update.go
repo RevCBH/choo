@@ -1,6 +1,10 @@
 package tui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"strings"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
 
 // Update implements tea.Model
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -11,6 +15,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.Quitting = true
 			return m, tea.Quit
 		}
+	case tea.WindowSizeMsg:
+		m.Width = msg.Width
+		m.Height = msg.Height
 
 	case TickMsg:
 		// Continue ticking for timer updates
@@ -57,6 +64,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case OrchStartedMsg:
 		m.TotalUnits = msg.TotalUnits
+
+	case LogMsg:
+		line := strings.TrimRight(msg.Line, "\r")
+		if line != "" {
+			m.LogLines = append(m.LogLines, line)
+			if m.LogLimit > 0 && len(m.LogLines) > m.LogLimit {
+				m.LogLines = m.LogLines[len(m.LogLines)-m.LogLimit:]
+			}
+		}
 	}
 
 	return m, nil

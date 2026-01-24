@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"text/tabwriter"
@@ -14,6 +15,13 @@ import (
 // displayEvent renders an event to the terminal with appropriate formatting
 // based on event type. Handles unit events, task events, and system events.
 func displayEvent(e events.Event) {
+	displayEventTo(os.Stdout, e)
+}
+
+func displayEventTo(w io.Writer, e events.Event) {
+	if w == nil {
+		return
+	}
 	// Format timestamp
 	timestamp := formatTime(e.Time)
 
@@ -28,6 +36,13 @@ func displayEvent(e events.Event) {
 		msg = fmt.Sprintf("[%s] Unit failed: %s", timestamp, e.Unit)
 		if e.Error != "" {
 			msg += fmt.Sprintf(" - %s", e.Error)
+		}
+	case events.UnitDependencyMissing:
+		msg = fmt.Sprintf("[%s] Unit warning: %s missing dependencies", timestamp, e.Unit)
+		if payload, ok := e.Payload.(map[string]any); ok {
+			if missing, ok := payload["missing"]; ok {
+				msg += fmt.Sprintf(" %v", missing)
+			}
 		}
 	case events.TaskStarted:
 		taskNum := ""
@@ -64,7 +79,7 @@ func displayEvent(e events.Event) {
 		msg = fmt.Sprintf("[%s] %s: %s", timestamp, e.Type, e.Unit)
 	}
 
-	fmt.Println(msg)
+	fmt.Fprintln(w, msg)
 }
 
 // displayJobs renders a list of jobs in tabular format using tabwriter.

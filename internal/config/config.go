@@ -99,6 +99,33 @@ func (c *CodeReviewConfig) Validate() error {
 	return nil
 }
 
+// SpecRepairConfig controls LLM-based spec repair.
+type SpecRepairConfig struct {
+	// Provider specifies which provider to use: "claude" or "codex".
+	Provider ProviderType `yaml:"provider"`
+
+	// Command overrides the CLI path for the repair provider.
+	Command string `yaml:"command,omitempty"`
+
+	// Model optionally selects a specific model for the repair provider.
+	Model string `yaml:"model,omitempty"`
+
+	// Timeout is the maximum duration for a repair call.
+	Timeout string `yaml:"timeout"`
+}
+
+// TimeoutDuration parses the repair timeout.
+func (c SpecRepairConfig) TimeoutDuration() time.Duration {
+	if c.Timeout == "" {
+		return 0
+	}
+	d, err := time.ParseDuration(c.Timeout)
+	if err != nil {
+		return 0
+	}
+	return d
+}
+
 // Config holds all configuration for the Ralph Orchestrator.
 // It is immutable after creation via LoadConfig().
 type Config struct {
@@ -135,6 +162,9 @@ type Config struct {
 	// CodeReview configures the advisory code review system
 	CodeReview CodeReviewConfig `yaml:"code_review"`
 
+	// SpecRepair configures optional spec repair in preflight
+	SpecRepair SpecRepairConfig `yaml:"spec_repair"`
+
 	// LogLevel controls log verbosity (debug, info, warn, error)
 	LogLevel string `yaml:"log_level"`
 }
@@ -154,6 +184,9 @@ type WorktreeConfig struct {
 	// BasePath is the directory where worktrees are created.
 	// Relative paths are resolved from the repository root.
 	BasePath string `yaml:"base_path"`
+
+	// ResetOnRun removes existing worktrees/branches before creating new ones.
+	ResetOnRun bool `yaml:"reset_on_run"`
 
 	// SetupCommands are executed after worktree creation.
 	SetupCommands []ConditionalCommand `yaml:"setup"`

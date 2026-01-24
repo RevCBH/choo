@@ -55,23 +55,19 @@ func NewGraph(units []*discovery.Unit) (*Graph, error) {
 		g.nodes[unit.ID] = true
 	}
 
-	// Second pass: build edges and check for missing dependencies
+	// Second pass: build edges (ignore missing dependencies)
 	for _, unit := range units {
-		// Initialize edge lists
-		g.edges[unit.ID] = make([]string, len(unit.DependsOn))
-		copy(g.edges[unit.ID], unit.DependsOn)
-
-		// Check for missing dependencies
+		var deps []string
 		for _, dep := range unit.DependsOn {
 			if !g.nodes[dep] {
-				return nil, &MissingDependencyError{
-					Unit:       unit.ID,
-					Dependency: dep,
-				}
+				continue
 			}
-
-			// Build reverse edges
+			deps = append(deps, dep)
 			g.dependents[dep] = append(g.dependents[dep], unit.ID)
+		}
+		g.edges[unit.ID] = deps
+		if len(deps) != len(unit.DependsOn) {
+			unit.DependsOn = deps
 		}
 	}
 

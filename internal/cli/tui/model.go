@@ -29,6 +29,11 @@ type Model struct {
 	CompletedUnits int
 	FailedUnits    int
 	StartTime      time.Time
+	LogLines       []string
+	LogLimit       int
+	ShowLogs       bool
+	Width          int
+	Height         int
 
 	// Control
 	Quitting bool
@@ -43,6 +48,7 @@ func NewModel(totalUnits, parallelism int) *Model {
 		Styles:      DefaultStyles(),
 		ActiveUnits: make(map[string]*UnitState),
 		StartTime:   time.Now(),
+		LogLimit:    500,
 	}
 }
 

@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/RevCBH/choo/internal/discovery"
@@ -42,6 +43,14 @@ func (s *Scheduler) Schedule(units []*discovery.Unit) (*Schedule, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	missing := filterMissingUnitDeps(units)
+	if len(missing) > 0 && s.events != nil {
+		for unitID, deps := range missing {
+			payload := map[string]any{"missing": deps}
+			s.events.Emit(events.NewEvent(events.UnitDependencyMissing, unitID).WithPayload(payload))
+		}
+	}
+
 	// Build dependency graph
 	graph, err := NewGraph(units)
 	if err != nil {
@@ -73,6 +82,35 @@ func (s *Scheduler) Schedule(units []*discovery.Unit) (*Schedule, error) {
 		Levels:           levels,
 		MaxParallelism:   s.maxParallelism,
 	}, nil
+}
+
+func filterMissingUnitDeps(units []*discovery.Unit) map[string][]string {
+	valid := make(map[string]bool, len(units))
+	for _, unit := range units {
+		valid[unit.ID] = true
+	}
+
+	missing := make(map[string][]string)
+	for _, unit := range units {
+		var filtered []string
+		var missingDeps []string
+		for _, dep := range unit.DependsOn {
+			if !valid[dep] {
+				missingDeps = append(missingDeps, dep)
+				continue
+			}
+			filtered = append(filtered, dep)
+		}
+		if len(missingDeps) > 0 {
+			sort.Strings(missingDeps)
+			missing[unit.ID] = missingDeps
+		}
+		if len(filtered) != len(unit.DependsOn) {
+			unit.DependsOn = filtered
+		}
+	}
+
+	return missing
 }
 
 // Transition moves a unit to a new status

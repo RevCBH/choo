@@ -71,24 +71,14 @@ func TestGraph_NewGraph_MissingDependency(t *testing.T) {
 	}
 
 	graph, err := NewGraph(units)
-	if graph != nil {
-		t.Errorf("expected graph to be nil when missing dependency")
+	if err != nil {
+		t.Fatalf("expected no error for missing dependency, got %v", err)
 	}
-
-	if err == nil {
-		t.Fatal("expected error for missing dependency, got nil")
+	if graph == nil {
+		t.Fatal("expected graph to be non-nil")
 	}
-
-	missingErr, ok := err.(*MissingDependencyError)
-	if !ok {
-		t.Fatalf("expected *MissingDependencyError, got %T", err)
-	}
-
-	if missingErr.Unit != "a" {
-		t.Errorf("expected unit to be 'a', got %q", missingErr.Unit)
-	}
-	if missingErr.Dependency != "nonexistent" {
-		t.Errorf("expected dependency to be 'nonexistent', got %q", missingErr.Dependency)
+	if len(graph.edges["a"]) != 0 {
+		t.Errorf("expected missing dependency to be ignored")
 	}
 }
 

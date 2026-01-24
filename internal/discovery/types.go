@@ -15,6 +15,9 @@ type Unit struct {
 	DependsOn []string // other unit IDs this unit depends on
 	Provider  string   // provider override from frontmatter (empty = use default)
 
+	// MetadataSource indicates where unit metadata was parsed from
+	MetadataSource MetadataSource
+
 	// Orchestrator state (from frontmatter, updated at runtime)
 	Status      UnitStatus
 	Branch      string     // orch_branch from frontmatter
@@ -46,6 +49,9 @@ type Task struct {
 	Status       TaskStatus // status field from frontmatter
 	Backpressure string     // backpressure field from frontmatter
 	DependsOn    []int      // depends_on field (task numbers within unit)
+
+	// MetadataSource indicates where task metadata was parsed from
+	MetadataSource MetadataSource
 
 	// Parsed from file
 	FilePath string // relative to unit dir, e.g., "01-nav-types.md"

@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"github.com/RevCBH/choo/internal/github"
 	"github.com/RevCBH/choo/internal/provider"
 	"github.com/RevCBH/choo/internal/scheduler"
+	"github.com/RevCBH/choo/internal/specs"
 	"github.com/RevCBH/choo/internal/worker"
 )
 
@@ -82,6 +84,12 @@ type Config struct {
 	// SuppressOutput disables stdout/stderr tee in workers (TUI mode)
 	SuppressOutput bool
 
+	// Debug enables extra debug logging in workers
+	Debug bool
+
+	// RunLogWriter captures run output for debugging
+	RunLogWriter io.Writer
+
 	// FeatureBranch is the feature branch name when in feature mode
 	FeatureBranch string
 
@@ -112,6 +120,18 @@ type Config struct {
 
 	// CodeReview contains code review configuration from .choo.yaml
 	CodeReview config.CodeReviewConfig
+
+	// NormalizeSpecs controls spec normalization during preflight
+	NormalizeSpecs bool
+
+	// RepairSpecs enables LLM-based spec repair during preflight
+	RepairSpecs bool
+
+	// SpecRepair contains repair configuration from .choo.yaml
+	SpecRepair config.SpecRepairConfig
+
+	// SkipBackpressure skips task backpressure validation checks
+	SkipBackpressure bool
 }
 
 // Dependencies bundles external dependencies for injection
@@ -287,6 +307,19 @@ func filterOutCompleteUnits(units []*discovery.Unit) []*discovery.Unit {
 func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 	startTime := time.Now()
 
+	_, err := specs.Preflight(ctx, specs.PreflightOptions{
+		RepoRoot:     o.cfg.RepoRoot,
+		TasksDir:     o.cfg.TasksDir,
+		Normalize:    o.cfg.NormalizeSpecs,
+		Repair:       o.cfg.RepairSpecs,
+		DryRun:       o.cfg.DryRun,
+		RepairConfig: o.cfg.SpecRepair,
+		Bus:          o.bus,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("spec preflight failed: %w", err)
+	}
+
 	// 1. Discovery phase
 	units, err := discovery.Discover(o.cfg.TasksDir)
 	if err != nil {
@@ -357,8 +390,11 @@ func (o *Orchestrator) Run(ctx context.Context) (*Result, error) {
 		WorktreeBase:        o.cfg.WorktreeBase,
 		NoPR:                o.cfg.NoPR,
 		BackpressureTimeout: 5 * time.Minute,
+		SkipBackpressure:    o.cfg.SkipBackpressure,
 		MaxClaudeRetries:    3,
 		SuppressOutput:      o.cfg.SuppressOutput,
+		Debug:               o.cfg.Debug,
+		RunLogWriter:        o.cfg.RunLogWriter,
 		ClaudeCommand:       o.cfg.ClaudeCommand,
 	}
 
@@ -643,8 +679,8 @@ func buildGraphData(units []*discovery.Unit, levels [][]string) map[string]any {
 			// No transitive edges possible with 0 or 1 dependency
 			for _, dep := range directDeps {
 				edges = append(edges, map[string]any{
-					"from": unit.ID,
-					"to":   dep,
+					"from": dep,
+					"to":   unit.ID,
 				})
 			}
 			continue
@@ -665,8 +701,8 @@ func buildGraphData(units []*discovery.Unit, levels [][]string) map[string]any {
 			}
 			if !isTransitive {
 				edges = append(edges, map[string]any{
-					"from": unit.ID,
-					"to":   dep,
+					"from": dep,
+					"to":   unit.ID,
 				})
 			}
 		}

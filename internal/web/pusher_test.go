@@ -224,10 +224,13 @@ func TestSocketPusher_StartClose(t *testing.T) {
 		p2 := NewSocketPusher(bus2, cfg2)
 
 		err := p2.Start(ctx)
-		if err == nil {
-			t.Error("expected Start to fail with invalid socket path")
-			p2.Close()
+		if err != nil {
+			t.Fatalf("expected Start to succeed even with invalid socket path, got %v", err)
 		}
+		if p2.Connected() {
+			t.Error("expected to be disconnected after Start with invalid socket path")
+		}
+		_ = p2.Close()
 	})
 }
 

@@ -20,6 +20,10 @@ const (
 	DefaultCodeReviewMaxFixIterations = 1
 	DefaultCodeReviewVerbose          = true
 	DefaultCodeReviewCommand          = ""
+
+	DefaultSpecRepairCommand = ""
+	DefaultSpecRepairModel   = ""
+	DefaultSpecRepairTimeout = "30s"
 )
 
 // DefaultProviderType is the default provider when none is specified
@@ -54,6 +58,16 @@ func DefaultCodeReviewConfig() CodeReviewConfig {
 	}
 }
 
+// DefaultSpecRepairConfig returns defaults for spec repair.
+func DefaultSpecRepairConfig() SpecRepairConfig {
+	return SpecRepairConfig{
+		Provider: DefaultProviderType,
+		Command:  DefaultSpecRepairCommand,
+		Model:    DefaultSpecRepairModel,
+		Timeout:  DefaultSpecRepairTimeout,
+	}
+}
+
 // DefaultConfig returns a Config with all default values applied.
 func DefaultConfig() *Config {
 	return &Config{
@@ -64,7 +78,8 @@ func DefaultConfig() *Config {
 			Repo:  "auto",
 		},
 		Worktree: WorktreeConfig{
-			BasePath: DefaultWorktreeBasePath,
+			BasePath:   DefaultWorktreeBasePath,
+			ResetOnRun: false,
 		},
 		Provider: DefaultProviderConfig(),
 		Claude: ClaudeConfig{
@@ -80,6 +95,7 @@ func DefaultConfig() *Config {
 		},
 		Feature:    DefaultFeatureConfig(),
 		CodeReview: DefaultCodeReviewConfig(),
+		SpecRepair: DefaultSpecRepairConfig(),
 		LogLevel:   DefaultLogLevel,
 	}
 }

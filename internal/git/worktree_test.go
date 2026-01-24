@@ -90,3 +90,51 @@ func TestWorktreeManager_List_ParsesOutput(t *testing.T) {
 		t.Errorf("expected unit-a and unit-b in list, got %+v", found)
 	}
 }
+
+func TestWorktreeManager_IsWorktreeResumable(t *testing.T) {
+	repoRoot := t.TempDir()
+	worktreePath := filepath.Join(repoRoot, ".ralph", "worktrees", "unit-1")
+	unitDir := filepath.Join(worktreePath, "specs", "tasks", "unit-1")
+	if err := os.MkdirAll(unitDir, 0755); err != nil {
+		t.Fatalf("failed to create unit dir: %v", err)
+	}
+
+	spec := `---
+task: 1
+status: complete
+backpressure: go test ./...
+---
+`
+	if err := os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(spec), 0644); err != nil {
+		t.Fatalf("failed to write spec: %v", err)
+	}
+
+	manager := NewWorktreeManager(repoRoot, nil)
+	if !manager.isWorktreeResumable(worktreePath, "unit-1") {
+		t.Fatalf("expected worktree to be resumable")
+	}
+}
+
+func TestWorktreeManager_IsWorktreeResumable_PendingOnly(t *testing.T) {
+	repoRoot := t.TempDir()
+	worktreePath := filepath.Join(repoRoot, ".ralph", "worktrees", "unit-2")
+	unitDir := filepath.Join(worktreePath, "specs", "tasks", "unit-2")
+	if err := os.MkdirAll(unitDir, 0755); err != nil {
+		t.Fatalf("failed to create unit dir: %v", err)
+	}
+
+	spec := `---
+task: 1
+status: pending
+backpressure: go test ./...
+---
+`
+	if err := os.WriteFile(filepath.Join(unitDir, "01-task.md"), []byte(spec), 0644); err != nil {
+		t.Fatalf("failed to write spec: %v", err)
+	}
+
+	manager := NewWorktreeManager(repoRoot, nil)
+	if manager.isWorktreeResumable(worktreePath, "unit-2") {
+		t.Fatalf("expected worktree to be non-resumable")
+	}
+}

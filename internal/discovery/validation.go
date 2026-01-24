@@ -16,12 +16,18 @@ type ValidationError struct {
 
 // ValidationResult collects all validation errors
 type ValidationResult struct {
-	Errors []ValidationError
+	Errors   []ValidationError
+	Warnings []ValidationError
 }
 
 // IsValid returns true if no validation errors occurred
 func (r *ValidationResult) IsValid() bool {
 	return len(r.Errors) == 0
+}
+
+// HasWarnings returns true if any warnings were recorded.
+func (r *ValidationResult) HasWarnings() bool {
+	return len(r.Warnings) > 0
 }
 
 // Error returns a formatted string of all validation errors
@@ -68,10 +74,16 @@ func (r *ValidationResult) Add(err ValidationError) {
 	r.Errors = append(r.Errors, err)
 }
 
+// AddWarning appends a warning to the result
+func (r *ValidationResult) AddWarning(warn ValidationError) {
+	r.Warnings = append(r.Warnings, warn)
+}
+
 // Merge combines another ValidationResult into this one
 func (r *ValidationResult) Merge(other *ValidationResult) {
 	if other != nil {
 		r.Errors = append(r.Errors, other.Errors...)
+		r.Warnings = append(r.Warnings, other.Warnings...)
 	}
 }
 
@@ -236,14 +248,13 @@ func ValidateUnitDependencies(units []*Unit) *ValidationResult {
 		validUnits[unit.ID] = true
 	}
 
-	// Validate each unit's dependencies
 	for _, unit := range units {
 		for _, dep := range unit.DependsOn {
 			if !validUnits[dep] {
-				result.Add(ValidationError{
+				result.AddWarning(ValidationError{
 					Unit:    unit.ID,
 					Field:   "depends_on",
-					Message: fmt.Sprintf("depends_on references non-existent unit %q", dep),
+					Message: fmt.Sprintf("depends_on references missing unit %q (ignored)", dep),
 				})
 			}
 		}

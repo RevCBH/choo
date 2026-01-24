@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -143,4 +144,31 @@ func (c *Client) Checkout(ctx context.Context, branchName string) error {
 func (c *Client) DeleteBranch(ctx context.Context, branchName string) error {
 	_, err := gitExec(ctx, c.RepoPath, "branch", "-D", branchName)
 	return err
+}
+
+// ListLocalBranchesWithPrefix lists local branches matching the prefix.
+func (c *Client) ListLocalBranchesWithPrefix(ctx context.Context, prefix string) ([]string, error) {
+	ref := "refs/heads"
+	trimmed := strings.TrimSuffix(strings.TrimSpace(prefix), "/")
+	if trimmed != "" {
+		ref = ref + "/" + trimmed
+	}
+	output, err := gitExec(ctx, c.RepoPath, "for-each-ref", "--format=%(refname:short)", ref)
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	var branches []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		branches = append(branches, line)
+	}
+	sort.Strings(branches)
+	return branches, nil
 }

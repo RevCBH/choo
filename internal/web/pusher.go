@@ -93,11 +93,6 @@ func (p *SocketPusher) SetGraph(graph *scheduler.Graph, parallelism int) {
 // Subscribes to the event bus and runs the push loop in a goroutine
 // Returns error if initial connection fails
 func (p *SocketPusher) Start(ctx context.Context) error {
-	// Attempt initial connection
-	if err := p.connect(); err != nil {
-		return err
-	}
-
 	// Subscribe to event bus
 	p.bus.Subscribe(func(e events.Event) {
 		select {
@@ -115,15 +110,9 @@ func (p *SocketPusher) Start(ctx context.Context) error {
 		p.pushLoop(ctx)
 	}()
 
-	// Send initial graph payload if set
-	if p.graph != nil {
-		wireEvent := WireEvent{
-			Type:    "graph",
-			Time:    time.Now(),
-			Payload: p.graph,
-		}
-		// Ignore error for initial graph push - not critical
-		_ = p.writeWireEvent(wireEvent)
+	// Attempt initial connection (non-fatal if it fails)
+	if err := p.connect(); err == nil {
+		p.sendGraph()
 	}
 
 	return nil
@@ -181,6 +170,7 @@ func (p *SocketPusher) pushLoop(ctx context.Context) {
 						}
 						// Reconnected successfully, reset backoff
 						backoff = p.cfg.ReconnectBackoff
+						p.sendGraph()
 						// Try to write the event again (ignore error, will retry on next event)
 						_ = p.writeEvent(e)
 						break reconnectLoop
@@ -250,4 +240,16 @@ func (p *SocketPusher) writeWireEvent(wireEvent WireEvent) error {
 
 	_, err = conn.Write(data)
 	return err
+}
+
+func (p *SocketPusher) sendGraph() {
+	if p.graph == nil {
+		return
+	}
+	wireEvent := WireEvent{
+		Type:    "graph",
+		Time:    time.Now(),
+		Payload: p.graph,
+	}
+	_ = p.writeWireEvent(wireEvent)
 }

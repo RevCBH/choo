@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,20 +25,20 @@ import (
 
 // Worker executes a single unit in an isolated worktree
 type Worker struct {
-	unit         *discovery.Unit
-	config       WorkerConfig
-	events       *events.Bus
-	git          *git.WorktreeManager
+	unit   *discovery.Unit
+	config WorkerConfig
+	events *events.Bus
+	git    *git.WorktreeManager
 
 	// Phase 1: GitOps added alongside gitRunner
 	// Phase 3: gitRunner removed, only gitOps remains
 	gitOps    git.GitOps // Safe git operations interface
 	gitRunner git.Runner // Deprecated: raw runner for unmigrated code
 
-	github       *github.PRClient
-	provider     provider.Provider
-	escalator    escalate.Escalator
-	mergeMu      *sync.Mutex // Shared mutex for serializing merge operations
+	github    *github.PRClient
+	provider  provider.Provider
+	escalator escalate.Escalator
+	mergeMu   *sync.Mutex // Shared mutex for serializing merge operations
 
 	// Keep raw path for provider invocation (providers need filesystem path)
 	worktreePath string
@@ -65,9 +66,12 @@ type WorkerConfig struct {
 	MaxClaudeRetries    int
 	MaxBaselineRetries  int
 	BackpressureTimeout time.Duration
+	SkipBackpressure    bool
 	BaselineTimeout     time.Duration
 	NoPR                bool
 	SuppressOutput      bool            // When true, don't tee Claude output to stdout (TUI mode)
+	Debug               bool            // Enable extra debug logging
+	RunLogWriter        io.Writer       // Optional run-level log writer
 	ClaudeCommand       string          // Claude CLI command for non-task operations (conflict resolution, etc.)
 	AuditLogger         git.AuditLogger // Optional: log all git operations
 }
@@ -119,11 +123,13 @@ func NewWorker(unit *discovery.Unit, cfg WorkerConfig, deps WorkerDeps) (*Worker
 		gitOps, err = git.NewWorktreeGitOps(worktreePath, cfg.WorktreeBase)
 		if err != nil {
 			// During Phase 1-2, path may not exist yet (created later)
-			// Only fail on validation errors, not path-not-found
-			if !errors.Is(err, git.ErrPathNotFound) && !errors.Is(err, git.ErrNotGitRepo) {
+			// Only fail on validation errors, not path-not-found/non-repo/mismatch
+			if !errors.Is(err, git.ErrPathNotFound) &&
+				!errors.Is(err, git.ErrNotGitRepo) &&
+				!errors.Is(err, git.ErrPathMismatch) {
 				return nil, fmt.Errorf("invalid worktree path %q: %w", worktreePath, err)
 			}
-			// Path doesn't exist yet - that's OK, gitOps will be nil
+			// Path doesn't exist yet or isn't a worktree - that's OK, gitOps will be nil
 			gitOps = nil
 		}
 	}
@@ -189,6 +195,13 @@ func (w *Worker) Run(ctx context.Context) error {
 		}
 		return fmt.Errorf("worktree setup failed: %w", err)
 	}
+	if err := w.InitGitOps(); err != nil {
+		if w.events != nil {
+			evt := events.NewEvent(events.UnitFailed, w.unit.ID).WithError(err)
+			w.events.Emit(evt)
+		}
+		return fmt.Errorf("gitops init failed: %w", err)
+	}
 
 	// Update unit frontmatter: orch_status=in_progress
 	if err := w.updateUnitStatus(discovery.UnitStatusInProgress); err != nil {
@@ -231,6 +244,7 @@ func (w *Worker) Run(ctx context.Context) error {
 
 	// Phase 3: Merge to feature branch (replaces PR workflow)
 	if !w.config.NoPR { // NoPR now means "no merge" for testing
+		w.debugf("debug: unit %s starting merge to %s", w.unit.ID, w.config.TargetBranch)
 		if err := w.mergeToFeatureBranch(ctx); err != nil {
 			if w.events != nil {
 				evt := events.NewEvent(events.UnitFailed, w.unit.ID).WithError(err)
@@ -238,6 +252,7 @@ func (w *Worker) Run(ctx context.Context) error {
 			}
 			return fmt.Errorf("merge to feature branch failed: %w", err)
 		}
+		w.debugf("debug: unit %s merge to %s completed", w.unit.ID, w.config.TargetBranch)
 	}
 
 	// Phase 4: Update unit status and emit UnitCompleted event
@@ -246,6 +261,7 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 
 	if w.events != nil {
+		w.debugf("debug: unit %s marked complete; emitting UnitCompleted", w.unit.ID)
 		evt := events.NewEvent(events.UnitCompleted, w.unit.ID)
 		w.events.Emit(evt)
 	}
@@ -265,6 +281,19 @@ func (w *Worker) generateBranchName() string {
 	return fmt.Sprintf("ralph/%s-%s", w.unit.ID, hash[:6])
 }
 
+func (w *Worker) debugf(format string, args ...any) {
+	if !w.config.Debug {
+		return
+	}
+	msg := fmt.Sprintf(format, args...)
+	if w.config.RunLogWriter != nil {
+		fmt.Fprintln(w.config.RunLogWriter, msg)
+	}
+	if !w.config.SuppressOutput || w.config.RunLogWriter == nil {
+		fmt.Fprintln(os.Stderr, msg)
+	}
+}
+
 // setupWorktree creates the isolated worktree for this worker, or reuses an existing one
 func (w *Worker) setupWorktree(ctx context.Context) error {
 	// Create (or get existing) worktree via git.WorktreeManager
@@ -282,8 +311,9 @@ func (w *Worker) setupWorktree(ctx context.Context) error {
 		return fmt.Errorf("failed to get current branch: %w", err)
 	}
 
-	// If the current branch is a worker branch (ralph/<unit>-<hash>), reuse it
-	if strings.HasPrefix(currentBranch, fmt.Sprintf("ralph/%s-", w.unit.ID)) {
+	// If the current branch is a worker branch, reuse it
+	if currentBranch == fmt.Sprintf("ralph/%s", w.unit.ID) ||
+		strings.HasPrefix(currentBranch, fmt.Sprintf("ralph/%s-", w.unit.ID)) {
 		w.branch = currentBranch
 		fmt.Fprintf(os.Stderr, "Resuming existing worktree on branch %s\n", w.branch)
 
@@ -294,10 +324,12 @@ func (w *Worker) setupWorktree(ctx context.Context) error {
 		return nil
 	}
 
-	// Generate a new branch name and checkout
-	w.branch = w.generateBranchName()
-	if _, err := w.runner().Exec(ctx, w.worktreePath, "checkout", "-b", w.branch); err != nil {
-		return fmt.Errorf("failed to checkout branch %s: %w", w.branch, err)
+	// Fall back to the standard unit branch if current branch isn't expected
+	w.branch = fmt.Sprintf("ralph/%s", w.unit.ID)
+	if _, err := w.runner().Exec(ctx, w.worktreePath, "checkout", w.branch); err != nil {
+		if _, err := w.runner().Exec(ctx, w.worktreePath, "checkout", "-b", w.branch); err != nil {
+			return fmt.Errorf("failed to checkout branch %s: %w", w.branch, err)
+		}
 	}
 
 	return nil
@@ -399,37 +431,45 @@ func (w *Worker) mergeToFeatureBranch(ctx context.Context) error {
 	// 1. Determine if we're working with a remote or local-only target branch
 	// Check if the remote tracking branch exists locally
 	targetRef, useRemote := w.getTargetRef(ctx)
+	w.debugf("debug: unit %s merge target ref=%s (remote=%v)", w.unit.ID, targetRef, useRemote)
 
 	// 2. Run code review (advisory - doesn't block merge)
+	w.debugf("debug: unit %s running code review before merge", w.unit.ID)
 	w.runCodeReview(ctx)
 
 	// 3-6 are serialized via mergeMu to prevent concurrent merge conflicts
 	// Acquire merge lock - only one worker can merge at a time
 	if w.mergeMu != nil {
+		w.debugf("debug: unit %s waiting for merge lock", w.unit.ID)
 		w.mergeMu.Lock()
+		w.debugf("debug: unit %s acquired merge lock", w.unit.ID)
 		defer w.mergeMu.Unlock()
 	}
 
 	// 3. Fetch latest feature branch if working with remote
 	if useRemote {
+		w.debugf("debug: unit %s fetching %s", w.unit.ID, w.config.TargetBranch)
 		if _, err := w.runner().Exec(ctx, w.worktreePath, "fetch", "origin", w.config.TargetBranch); err != nil {
 			return fmt.Errorf("failed to fetch target branch: %w", err)
 		}
 	}
 
 	// 4. Rebase unit branch onto feature branch with conflict resolution
+	w.debugf("debug: unit %s rebasing onto %s", w.unit.ID, targetRef)
 	hasConflicts, err := git.Rebase(ctx, w.worktreePath, targetRef)
 	if err != nil {
 		return fmt.Errorf("rebase failed: %w", err)
 	}
 
 	if hasConflicts {
+		w.debugf("debug: unit %s rebase had conflicts; attempting resolution", w.unit.ID)
 		// Attempt to resolve conflicts using Claude
 		if err := w.resolveConflictsWithClaude(ctx); err != nil {
 			// Clean up - abort the rebase
 			_ = git.AbortRebase(ctx, w.worktreePath)
 			return fmt.Errorf("failed to resolve merge conflicts: %w", err)
 		}
+		w.debugf("debug: unit %s rebase conflicts resolved", w.unit.ID)
 	}
 
 	// 4. Merge unit branch into target branch in the RepoRoot

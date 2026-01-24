@@ -185,6 +185,50 @@ backpressure: go test
 	}
 }
 
+func TestDiscover_TaskStatusDefaultsToPending(t *testing.T) {
+	tmpDir := t.TempDir()
+	tasksDir := filepath.Join(tmpDir, "specs", "tasks")
+	unitDir := filepath.Join(tasksDir, "test-unit")
+	if err := os.MkdirAll(unitDir, 0755); err != nil {
+		t.Fatalf("failed to create unit dir: %v", err)
+	}
+
+	implPlan := `---
+unit: test-unit
+---
+
+# Test Unit
+`
+	if err := os.WriteFile(filepath.Join(unitDir, "IMPLEMENTATION_PLAN.md"), []byte(implPlan), 0644); err != nil {
+		t.Fatalf("failed to write IMPLEMENTATION_PLAN.md: %v", err)
+	}
+
+	task01 := `---
+task: 1
+backpressure: go test ./...
+---
+
+# Test Task
+`
+	if err := os.WriteFile(filepath.Join(unitDir, "01-test.md"), []byte(task01), 0644); err != nil {
+		t.Fatalf("failed to write task: %v", err)
+	}
+
+	units, err := Discover(tasksDir)
+	if err != nil {
+		t.Fatalf("Discover failed: %v", err)
+	}
+	if len(units) != 1 {
+		t.Fatalf("expected 1 unit, got %d", len(units))
+	}
+	if len(units[0].Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(units[0].Tasks))
+	}
+	if units[0].Tasks[0].Status != TaskStatusPending {
+		t.Fatalf("expected pending status, got %q", units[0].Tasks[0].Status)
+	}
+}
+
 func TestDiscover_MultipleUnits(t *testing.T) {
 	tasksDir := setupTestDir(t)
 

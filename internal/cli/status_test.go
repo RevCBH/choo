@@ -53,6 +53,20 @@ func TestStatusCmd_JSONFlag(t *testing.T) {
 	}
 }
 
+func TestStatusCmd_GraphFlag(t *testing.T) {
+	app := New()
+	cmd := NewStatusCmd(app)
+
+	graphFlag := cmd.Flags().Lookup("graph")
+	if graphFlag == nil {
+		t.Fatal("Expected --graph flag to be defined")
+	}
+
+	if graphFlag.DefValue != "false" {
+		t.Errorf("Expected --graph flag default to be 'false', got %q", graphFlag.DefValue)
+	}
+}
+
 func TestShowStatus_NoUnits(t *testing.T) {
 	app := New()
 
